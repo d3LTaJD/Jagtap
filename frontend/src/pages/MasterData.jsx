@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Plus, X, Pencil, Trash2, Loader2, Save, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Database, Plus, X, Pencil, Trash2, Loader2, Save, ChevronRight, GripVertical, CheckCircle2, AlertTriangle } from 'lucide-react';
 import api from '../api/client';
 
 const emptyCategory = { name: '', description: '', items: [] };
