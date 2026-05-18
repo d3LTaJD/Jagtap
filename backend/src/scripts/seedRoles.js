@@ -146,7 +146,7 @@ const ROLES = [
 
 const seed = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/petro-valve');
+    await mongoose.connect(process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/petro-valve');
     console.log('MongoDB connected');
 
     let created = 0, skipped = 0;
