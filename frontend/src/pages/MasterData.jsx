@@ -154,11 +154,7 @@ const MasterData = () => {
                   </div>
                   {cat.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{cat.description}</p>}
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {(cat.assignedTo || []).map(mod => (
-                    <span key={mod} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${MODULE_COLORS[mod] || 'bg-slate-100 text-slate-600'}`}>{mod}</span>
-                  ))}
-                </div>
+
                 <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setShowLinkModal(cat)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Link to Field"><Link2 className="w-4 h-4" /></button>
                   <button onClick={() => openEdit(cat)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"><Pencil className="w-4 h-4" /></button>
@@ -229,18 +225,7 @@ const MasterData = () => {
                 </div>
               </div>
 
-              {/* Module Assignment */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Assign to Modules</label>
-                <div className="flex flex-wrap gap-2">
-                  {MODULES.map(mod => (
-                    <button key={mod} type="button" onClick={() => toggleModule(mod)}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-all ${form.assignedTo.includes(mod) ? 'bg-brand-600 text-white border-brand-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-brand-300'}`}>
-                      {mod}
-                    </button>
-                  ))}
-                </div>
-              </div>
+
 
               {/* Items */}
               <div>
