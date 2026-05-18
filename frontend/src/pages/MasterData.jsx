@@ -3,10 +3,7 @@ import { Database, Plus, X, Pencil, Trash2, Loader2, Save, Link2, Unlink, Chevro
 import api from '../api/client';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 
-const MODULES = ['Enquiry', 'Quotation', 'QAP', 'Product', 'Customer', 'Task'];
-const MODULE_COLORS = { Enquiry: 'bg-blue-100 text-blue-700', Quotation: 'bg-emerald-100 text-emerald-700', QAP: 'bg-violet-100 text-violet-700', Product: 'bg-orange-100 text-orange-700', Customer: 'bg-pink-100 text-pink-700', Task: 'bg-amber-100 text-amber-700' };
-
-const emptyCategory = { name: '', description: '', assignedTo: [], items: [] };
+const emptyCategory = { name: '', description: '', items: [] };
 
 const MasterData = () => {
   const [categories, setCategories] = useState([]);
@@ -42,7 +39,7 @@ const MasterData = () => {
 
   const openEdit = (cat) => {
     setEditing(cat);
-    setForm({ name: cat.name, description: cat.description || '', assignedTo: [...(cat.assignedTo || [])], items: [...(cat.items || [])] });
+    setForm({ name: cat.name, description: cat.description || '', items: [...(cat.items || [])] });
     setShowModal(true);
   };
 
@@ -64,10 +61,6 @@ const MasterData = () => {
 
   const toggleItemActive = (idx) => {
     setForm(f => ({ ...f, items: f.items.map((item, i) => i === idx ? { ...item, isActive: !item.isActive } : item) }));
-  };
-
-  const toggleModule = (mod) => {
-    setForm(f => ({ ...f, assignedTo: f.assignedTo.includes(mod) ? f.assignedTo.filter(m => m !== mod) : [...f.assignedTo, mod] }));
   };
 
   const handleSubmit = async (e) => {

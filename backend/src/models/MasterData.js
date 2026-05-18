@@ -16,12 +16,6 @@ const masterDataSchema = new mongoose.Schema({
   description: { type: String, default: '' },
   icon: { type: String, default: '' },                    // optional icon name
 
-  // Which modules can use this master data as dropdown source
-  assignedTo: [{
-    type: String,
-    enum: ['Enquiry', 'Quotation', 'QAP', 'Product', 'Customer', 'Task']
-  }],
-
   // The actual lookup items
   items: [masterDataItemSchema],
 
@@ -42,7 +36,5 @@ masterDataSchema.pre('validate', function(next) {
   }
   next();
 });
-
-masterDataSchema.index({ assignedTo: 1 });
 
 module.exports = mongoose.model('MasterData', masterDataSchema);

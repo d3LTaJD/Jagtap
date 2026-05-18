@@ -6,9 +6,7 @@ const { logActivity } = require('../utils/logger');
 // @route   GET /api/master-data
 exports.getAllMasterData = async (req, res) => {
   try {
-    const { assignedTo } = req.query;
     const filter = { isActive: true };
-    if (assignedTo) filter.assignedTo = assignedTo;
 
     const categories = await MasterData.find(filter)
       .populate('linkedFields', 'fieldLabel fieldName formContext')
@@ -63,13 +61,12 @@ exports.getMasterDataBySlug = async (req, res) => {
 // @route   POST /api/master-data
 exports.createMasterData = async (req, res) => {
   try {
-    const { name, description, icon, assignedTo, items } = req.body;
+    const { name, description, icon, items } = req.body;
 
     const category = await MasterData.create({
       name,
       description,
       icon,
-      assignedTo: assignedTo || [],
       items: (items || []).map((item, i) => ({
         label: item.label,
         value: item.value || item.label.toLowerCase().replace(/\s+/g, '_'),
