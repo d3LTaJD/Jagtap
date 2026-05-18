@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Plus, X, Pencil, Trash2, Loader2, Save, Link2, Unlink, ChevronRight, GripVertical, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Database, Plus, X, Pencil, Trash2, Loader2, Save, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
 import api from '../api/client';
-import AutocompleteSelect from '../components/AutocompleteSelect';
 
 const emptyCategory = { name: '', description: '', items: [] };
 
@@ -16,7 +15,6 @@ const MasterData = () => {
   const [form, setForm] = useState({ ...emptyCategory });
   const [itemInput, setItemInput] = useState({ value: '', label: '' });
   const [expanded, setExpanded] = useState(null);
-  const [showLinkModal, setShowLinkModal] = useState(null);
 
   const flash = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
@@ -87,21 +85,7 @@ const MasterData = () => {
     catch { flash('Delete failed', 'error'); }
   };
 
-  const handleLinkField = async (catId, fieldId) => {
-    try { await api.post(`/master-data/${catId}/link-field`, { fieldId }); flash('Field linked & synced!'); fetchAll(); setShowLinkModal(null); }
-    catch (e) { flash('Link failed', 'error'); }
-  };
 
-  const handleUnlinkField = async (catId, fieldId) => {
-    try { await api.delete(`/master-data/${catId}/link-field/${fieldId}`); flash('Field unlinked'); fetchAll(); }
-    catch { flash('Unlink failed', 'error'); }
-  };
-
-  // Get dropdown-type fields not already linked to this category
-  const getAvailableFields = (cat) => {
-    const linkedIds = (cat.linkedFields || []).map(f => f._id);
-    return fields.filter(f => ['Dropdown (Single)', 'Dropdown (Multi)', 'Radio Button'].includes(f.fieldType) && !linkedIds.includes(f._id));
-  };
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto animate-in fade-in duration-500">
@@ -149,7 +133,6 @@ const MasterData = () => {
                 </div>
 
                 <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => setShowLinkModal(cat)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Link to Field"><Link2 className="w-4 h-4" /></button>
                   <button onClick={() => openEdit(cat)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"><Pencil className="w-4 h-4" /></button>
                   <button onClick={() => handleDelete(cat)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
                 </div>
@@ -158,18 +141,6 @@ const MasterData = () => {
               {/* Expanded Items */}
               {expanded === cat._id && (
                 <div className="border-t border-slate-100 bg-slate-50/50">
-                  {/* Linked Fields */}
-                  {cat.linkedFields?.length > 0 && (
-                    <div className="px-6 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">Linked Fields:</span>
-                      {cat.linkedFields.map(f => (
-                        <span key={f._id} className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-                          <Link2 className="w-3 h-3" /> {f.fieldLabel} <span className="text-blue-400 font-medium">({f.formContext})</span>
-                          <button onClick={() => handleUnlinkField(cat._id, f._id)} className="text-blue-400 hover:text-red-500 ml-1"><X className="w-3 h-3" /></button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
                   {/* Items Table */}
                   <div className="px-6 py-2">
                     <div className="grid grid-cols-12 gap-2 py-2 border-b border-slate-200">
@@ -258,32 +229,6 @@ const MasterData = () => {
         </div>
       )}
 
-      {/* Link Field Modal */}
-      {showLinkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-              <h2 className="text-base font-bold text-slate-900">Link Field to "{showLinkModal.name}"</h2>
-              <button onClick={() => setShowLinkModal(null)} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-6 space-y-3 max-h-80 overflow-y-auto">
-              {getAvailableFields(showLinkModal).length === 0 ? (
-                <p className="text-sm text-slate-500 text-center py-6">No dropdown fields available to link. Create dropdown fields in Field Builder first.</p>
-              ) : getAvailableFields(showLinkModal).map(f => (
-                <div key={f._id} className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-50">
-                  <div>
-                    <p className="text-sm font-bold text-slate-800">{f.fieldLabel}</p>
-                    <p className="text-[10px] text-slate-400">{f.formContext} — {f.fieldType}</p>
-                  </div>
-                  <button onClick={() => handleLinkField(showLinkModal._id, f._id)} className="text-xs font-bold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-lg hover:bg-brand-100 flex items-center gap-1">
-                    <Link2 className="w-3 h-3" /> Link
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
