@@ -27,7 +27,7 @@ exports.sendEmail = async ({ userId, subject, text }) => {
     }
 
     const payload = {
-      sender: { name: "Jagtap Workflow System", email: process.env.EMAIL_USER || "datawhiz.ai@gmail.com" },
+      sender: { name: "Petro Valve Workflow System", email: process.env.EMAIL_USER || "datawhiz.ai@gmail.com" },
       to: [{ email: u.email }],
       subject: subject,
       textContent: text

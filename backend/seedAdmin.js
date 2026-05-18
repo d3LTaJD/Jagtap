@@ -14,7 +14,7 @@ const seedAdmin = async () => {
     const adminData = {
       name: 'Super Admin',
       mobile_number: '9876543210',
-      email: 'admin@jagtap.com',
+      email: 'admin@petrovalve.com',
       password: 'adminpassword123',
       role: 'SUPER_ADMIN',
       department: 'Admin',

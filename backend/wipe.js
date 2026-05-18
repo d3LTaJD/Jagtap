@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const User = require('./src/models/User');
 require('dotenv').config();
 
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/jagtap-workflow').then(async () => {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/petro-valve-workflow').then(async () => {
   try {
     await mongoose.connection.db.collection('users').deleteMany({});
     await mongoose.connection.db.collection('tokens').deleteMany({});

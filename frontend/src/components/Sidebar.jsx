@@ -41,7 +41,7 @@ const Sidebar = ({ onClose }) => {
           <div className="p-1.5 rounded-lg bg-gradient-to-br from-brand-500 to-violet-600 shadow-sm shadow-brand-500/20">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
-          <span className="text-slate-900">Jagtap <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-500 to-violet-500">AI</span></span>
+          <span className="text-slate-900">Petro Valve <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-500 to-violet-500">AI</span></span>
         </NavLink>
         <button onClick={onClose} className="p-1 -mr-2 text-slate-400 hover:text-slate-600 rounded-md">
           <X className="w-5 h-5" />

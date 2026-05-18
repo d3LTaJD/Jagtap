@@ -37,7 +37,7 @@ exports.sendEmail = async (options) => {
     const transporter = await createTransport();
     
     const mailOptions = {
-      from: process.env.EMAIL_FROM || '"Jagtap Workflow System" <noreply@jagtapengineering.com>',
+      from: process.env.EMAIL_FROM || '"Petro Valve Workflow System" <noreply@petrovalve.com>',
       to: options.to,
       subject: options.subject,
       text: options.text,

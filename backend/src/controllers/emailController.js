@@ -17,7 +17,7 @@ exports.sendCustomEmail = async (req, res, next) => {
       html: `<div style="font-family: sans-serif; line-height: 1.5; color: #333;">
               <p>${(bodyText || '').replace(/\\n/g, '<br>')}</p>
               <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;" />
-              <p style="font-size: 11px; color: #888;">This is an automated message dispatched from the Jagtap Workflow Platform.</p>
+              <p style="font-size: 11px; color: #888;">This is an automated message dispatched from the Petro Valve Workflow Platform.</p>
              </div>`,
       attachments: []
     };

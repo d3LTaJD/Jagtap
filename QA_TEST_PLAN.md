@@ -1,8 +1,8 @@
-# 🧪 QA Test Plan — Jagtap Workflow Automation
+# 🧪 QA Test Plan — Petro Valve Workflow Automation
 > **Version**: 1.0  
 > **Date**: 2026-05-13  
 > **Prepared For**: QA Tester  
-> **Application**: Jagtap Workflow Automation Platform (Phase 1)
+> **Application**: Petro Valve Workflow Automation Platform (Phase 1)
 
 ---
 
@@ -19,7 +19,7 @@
 
 | Role | Email | Password | Access Level |
 |---|---|---|---|
-| Super Admin (SA) | `admin@jagtap.com` | `adminpassword123` | Full system access |
+| Super Admin (SA) | `admin@petrovalve.com` | `adminpassword123` | Full system access |
 
 > **Note**: After logging in as Super Admin, create additional test users (Director, Sales, QC, etc.) via Admin → Users page to test RBAC.
 
@@ -30,7 +30,7 @@
 ### TC-1.1: Login with valid credentials
 - **Steps**:
   1. Navigate to `/login`
-  2. Enter email: `admin@jagtap.com`
+  2. Enter email: `admin@petrovalve.com`
   3. Enter password: `adminpassword123`
   4. Click "Sign In"
 - **Expected**: Redirect to `/app/dashboard`. Username visible in sidebar/header.
@@ -39,7 +39,7 @@
 ### TC-1.2: Login with invalid password
 - **Steps**:
   1. Navigate to `/login`
-  2. Enter email: `admin@jagtap.com`
+  2. Enter email: `admin@petrovalve.com`
   3. Enter password: `WrongPassword`
   4. Click "Sign In"
 - **Expected**: Error message "Invalid credentials" displayed. No redirect.

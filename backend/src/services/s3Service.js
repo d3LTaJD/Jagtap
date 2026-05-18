@@ -12,7 +12,7 @@ const s3Client = new S3Client({
   }
 });
 
-const BUCKET_NAME = process.env.AWS_S3_BUCKET || 'jagtap-erp-files';
+const BUCKET_NAME = process.env.AWS_S3_BUCKET || 'petro-valve-erp-files';
 
 exports.uploadFileToS3 = async (fileBuffer, originalName, mimeType) => {
   // Generate a unique S3 key protecting against overwrites

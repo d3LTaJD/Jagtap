@@ -8,8 +8,8 @@ We have included a `render.yaml` file in the root directory. This makes deployin
 1. Create a [Render](https://render.com) account and connect your GitHub/GitLab.
 2. In the Render Dashboard, click **New** -> **Blueprint**.
 3. Select this repository.
-4. Render will automatically detect both the `jagtap-frontend` (Static Site) and `jagtap-backend` (Docker Web Service).
-5. **Important**: Go to the **Environment** tab of the `jagtap-backend` service in the Render dashboard and fill in the secure environment variables that couldn't be synced automatically:
+4. Render will automatically detect both the `petro-valve-frontend` (Static Site) and `petro-valve-backend` (Docker Web Service).
+5. **Important**: Go to the **Environment** tab of the `petro-valve-backend` service in the Render dashboard and fill in the secure environment variables that couldn't be synced automatically:
    - `MONGODB_URI`: (Your MongoDB connection string)
    - `EMAIL_USER` & `EMAIL_PASS`: (For SMTP email functionality)
    - `AWS_*`: (For AWS S3 file storage)

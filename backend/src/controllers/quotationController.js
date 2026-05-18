@@ -155,7 +155,7 @@ exports.downloadPDF = async (req, res, next) => {
         </head>
         <body>
           <div class="header">
-            <h1>JAGTAP ENGINEERING WORKS</h1>
+            <h1>PETRO VALVE</h1>
             <p>Official Commercial Quotation</p>
           </div>
           <div class="details">

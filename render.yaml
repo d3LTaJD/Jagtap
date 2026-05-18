@@ -1,7 +1,7 @@
 services:
   # Backend Node.js / Puppeteer API
   - type: web
-    name: jagtap-backend
+    name: petro-valve-backend
     env: docker
     region: singapore
     plan: free # Note: Free tier has 512MB RAM. Puppeteer might run out of memory occasionally, but usually fine for simple PDFs.
@@ -30,7 +30,7 @@ services:
 
   # Frontend Vite React App
   - type: web
-    name: jagtap-frontend
+    name: petro-valve-frontend
     env: static
     rootDir: frontend
     buildCommand: npm install && npm run build
@@ -43,6 +43,6 @@ services:
       - key: VITE_API_URL
         fromService:
           type: web
-          name: jagtap-backend
+          name: petro-valve-backend
           property: host
           value: https://${host}/api

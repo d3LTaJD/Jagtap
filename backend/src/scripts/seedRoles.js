@@ -1,5 +1,5 @@
 /**
- * Seed script: Creates the 9 default roles defined in Jagtap Phase1 SOW §3.2
+ * Seed script: Creates the 9 default roles defined in Petro Valve Phase1 SOW §3.2
  * Run once: node src/scripts/seedRoles.js
  */
 require('dotenv').config();
@@ -146,7 +146,7 @@ const ROLES = [
 
 const seed = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/jagtap');
+    await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/petro-valve');
     console.log('MongoDB connected');
 
     let created = 0, skipped = 0;

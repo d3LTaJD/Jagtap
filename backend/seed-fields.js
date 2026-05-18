@@ -169,7 +169,7 @@ const seedData = [
   }
 ];
 
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/jagtap-workflow')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/petro-valve-workflow')
   .then(async () => {
     console.log('Connected to MongoDB. Identifying ASME section dynamic fields...');
     for (const data of seedData) {

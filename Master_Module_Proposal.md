@@ -1,7 +1,7 @@
 # PETRO VALVES PVT. LTD.
 ## Dynamic Master Module — Feature Proposal
 
-**Prepared by:** Jagtap Engineering (Development Team)  
+**Prepared by:** Petro Valve (Development Team)  
 **Date:** 18th May 2026  
 **Version:** 1.0  
 **Status:** Awaiting Client Approval  
@@ -10,7 +10,7 @@
 
 ## 1. Objective
 
-Convert all static/hardcoded field titles and their dropdown values (as defined in the **CODE SHEETS**) into a fully dynamic, admin-configurable **Master Module** within the Jagtap Workflow Platform.
+Convert all static/hardcoded field titles and their dropdown values (as defined in the **CODE SHEETS**) into a fully dynamic, admin-configurable **Master Module** within the Petro Valve Workflow Platform.
 
 This ensures that any future additions, modifications, or deletions to product fields and their values can be done **directly from the application** by authorized users — without requiring any code changes.
 
@@ -136,5 +136,5 @@ Please review the above proposal and confirm:
 
 ---
 
-*Document prepared by Jagtap Engineering Development Team*  
+*Document prepared by Petro Valve Development Team*  
 *For queries, contact the project team directly.*

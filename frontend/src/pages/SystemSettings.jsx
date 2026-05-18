@@ -184,7 +184,7 @@ const SystemSettings = () => {
                     <input 
                       type="text" value={settings.companyName} 
                       onChange={e => setSettings({...settings, companyName: e.target.value})}
-                      placeholder="e.g. Jagtap Engineering Works"
+                      placeholder="e.g. Petro Valve"
                       className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" 
                     />
                   </div>

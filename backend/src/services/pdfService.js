@@ -31,11 +31,11 @@ exports.generateQuotationPdf = async (quotation) => {
     </head>
     <body>
       <div class="header">
-        <div class="logo">JAGTAP ENGINEERING WORKS</div>
+        <div class="logo">PETRO VALVE</div>
         <div class="company-details">
           123 Industrial Estate, Phase II<br>
           Mumbai, Maharashtra 400001<br>
-          sales@jagtapengineering.com | +91 98765 43210
+          sales@petrovalve.com | +91 98765 43210
         </div>
       </div>
 
@@ -113,7 +113,7 @@ exports.generateQuotationPdf = async (quotation) => {
 
       <div class="footer">
         This is a system generated document. No physical signature is required.<br>
-        Jagtap Workflow Automation System | Document Ref: ${quotation.quotationId}
+        Petro Valve Workflow Automation System | Document Ref: ${quotation.quotationId}
       </div>
     </body>
     </html>

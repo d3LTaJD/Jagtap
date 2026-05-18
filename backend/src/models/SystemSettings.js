@@ -5,7 +5,7 @@ const systemSettingsSchema = new mongoose.Schema({
   _singleton: { type: String, default: 'global', unique: true },
 
   // ─── 4.2 Company Information ──────────────────────────────────
-  companyName:       { type: String, default: 'Jagtap Engineering Works' },
+  companyName:       { type: String, default: 'Petro Valve' },
   companyLogo:       { type: String, default: '' },       // URL or base64
   gstin:             { type: String, default: '' },
   pan:               { type: String, default: '' },
@@ -16,7 +16,7 @@ const systemSettingsSchema = new mongoose.Schema({
   smtpPort:          { type: Number, default: 587 },
   smtpUser:          { type: String, default: '' },
   smtpPass:          { type: String, default: '' },       // will be left blank
-  smtpFromName:      { type: String, default: 'Jagtap Engineering' },
+  smtpFromName:      { type: String, default: 'Petro Valve Notifications' },
   whatsappApiKey:    { type: String, default: '' },       // Twilio/Gupshup — blank for now
   firebaseConfig:    { type: String, default: '' },       // FCM server key — blank for now
 
