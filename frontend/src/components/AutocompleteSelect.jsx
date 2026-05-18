@@ -82,11 +82,25 @@ const AutocompleteSelect = ({
   const updatePosition = useCallback(() => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      setDropdownPos({
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
-      });
+      const dropdownHeight = 264; // Search input (40px) + options list max-height (224px)
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+
+      if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+        // Open upwards
+        setDropdownPos({
+          bottom: (window.innerHeight - rect.top) + 4,
+          left: rect.left,
+          width: rect.width,
+        });
+      } else {
+        // Open downwards
+        setDropdownPos({
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+        });
+      }
     }
   }, []);
 
@@ -105,13 +119,15 @@ const AutocompleteSelect = ({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Update position on resize when open (avoid scroll listener to prevent feedback loops)
+  // Update position on resize/scroll when open (using capture phase for nested scroll containers)
   useEffect(() => {
     if (!isOpen) return;
     updatePosition();
     window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true); // Capture phase captures scroll on any scrollable parent (like the modal)
     return () => {
       window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
     };
   }, [isOpen, updatePosition]);
 
@@ -309,7 +325,8 @@ const AutocompleteSelect = ({
         <div
           style={{
             position: 'fixed',
-            top: dropdownPos.top,
+            top: dropdownPos.top !== undefined ? dropdownPos.top : 'auto',
+            bottom: dropdownPos.bottom !== undefined ? dropdownPos.bottom : 'auto',
             left: dropdownPos.left,
             width: dropdownPos.width,
             zIndex: 9999,

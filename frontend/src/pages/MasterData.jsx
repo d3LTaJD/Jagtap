@@ -17,7 +17,7 @@ const MasterData = () => {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...emptyCategory });
-  const [itemInput, setItemInput] = useState({ label: '', description: '' });
+  const [itemInput, setItemInput] = useState({ value: '', label: '' });
   const [expanded, setExpanded] = useState(null);
   const [showLinkModal, setShowLinkModal] = useState(null);
 
@@ -47,10 +47,17 @@ const MasterData = () => {
   };
 
   const addItem = () => {
-    if (!itemInput.label.trim()) return;
-    const value = itemInput.label.trim().toLowerCase().replace(/\s+/g, '_');
-    setForm(f => ({ ...f, items: [...f.items, { label: itemInput.label.trim(), value, description: itemInput.description, sortOrder: f.items.length, isActive: true }] }));
-    setItemInput({ label: '', description: '' });
+    if (!itemInput.label.trim() || !itemInput.value.trim()) {
+      flash('Both Code and Name are required', 'error');
+      return;
+    }
+    const codeExists = form.items.some(i => i.value.toLowerCase() === itemInput.value.trim().toLowerCase());
+    if (codeExists) {
+      flash('This Code already exists in this category', 'error');
+      return;
+    }
+    setForm(f => ({ ...f, items: [...f.items, { label: itemInput.label.trim(), value: itemInput.value.trim().toUpperCase(), description: '', sortOrder: f.items.length, isActive: true }] }));
+    setItemInput({ value: '', label: '' });
   };
 
   const removeItem = (idx) => setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
@@ -177,19 +184,18 @@ const MasterData = () => {
                   {/* Items Table */}
                   <div className="px-6 py-2">
                     <div className="grid grid-cols-12 gap-2 py-2 border-b border-slate-200">
-                      <div className="col-span-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Label / Value</div>
-                      <div className="col-span-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Description</div>
+                      <div className="col-span-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Code</div>
+                      <div className="col-span-7 text-[10px] font-black text-slate-400 uppercase tracking-widest">Name</div>
                       <div className="col-span-2 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Status</div>
                     </div>
                     {(cat.items || []).length === 0 ? (
                       <p className="text-sm text-slate-400 text-center py-6">No items yet. Edit this category to add items.</p>
                     ) : (cat.items || []).map((item, idx) => (
                       <div key={item._id || idx} className={`grid grid-cols-12 gap-2 py-2.5 border-b border-slate-50 ${!item.isActive ? 'opacity-40' : ''}`}>
-                        <div className="col-span-5">
-                          <p className="text-sm font-bold text-slate-800">{item.label}</p>
-                          <p className="text-[10px] font-mono text-slate-400">{item.value}</p>
+                        <div className="col-span-3 self-center">
+                          <p className="text-sm font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded inline-block">{item.value}</p>
                         </div>
-                        <div className="col-span-5 text-xs text-slate-500 self-center">{item.description || '—'}</div>
+                        <div className="col-span-7 text-sm font-bold text-slate-800 self-center">{item.label}</div>
                         <div className="col-span-2 text-right self-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-500'}`}>{item.isActive ? 'Active' : 'Inactive'}</span>
                         </div>
@@ -215,7 +221,7 @@ const MasterData = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Category Name *</label>
-                  <input type="text" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Material Types" className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                  <input type="text" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. VALVE TYPE" className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
                 </div>
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Description</label>
@@ -238,23 +244,25 @@ const MasterData = () => {
 
               {/* Items */}
               <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Items ({form.items.length})</label>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Entries ({form.items.length})</label>
                 <div className="flex gap-2 mb-3">
-                  <input type="text" value={itemInput.label} onChange={e => setItemInput({ ...itemInput, label: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem(); } }} placeholder="Item label (e.g. SA-516 Gr. 70)" className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-500/20" />
-                  <input type="text" value={itemInput.description} onChange={e => setItemInput({ ...itemInput, description: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem(); } }} placeholder="Description (optional)" className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-500/20" />
-                  <button type="button" onClick={addItem} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-bold hover:bg-brand-700">Add</button>
+                  <input type="text" value={itemInput.value} onChange={e => setItemInput({ ...itemInput, value: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem(); } }} placeholder="Code (e.g. BV)" className="w-1/3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-500/20 font-mono" />
+                  <input type="text" value={itemInput.label} onChange={e => setItemInput({ ...itemInput, label: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem(); } }} placeholder="Name (e.g. Ball Valve)" className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-500/20" />
+                  <button type="button" onClick={addItem} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-bold hover:bg-brand-700 shadow-sm shrink-0">Add</button>
                 </div>
                 {form.items.length > 0 && (
                   <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
                     {form.items.map((item, idx) => (
                       <div key={idx} className={`flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 ${!item.isActive ? 'opacity-40 bg-slate-50' : ''}`}>
-                        <GripVertical className="w-3.5 h-3.5 text-slate-300" />
+                        <GripVertical className="w-3.5 h-3.5 text-slate-300 cursor-move" />
+                        <div className="w-24 shrink-0">
+                          <p className="text-sm font-bold font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-center truncate">{item.value}</p>
+                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-slate-800 truncate">{item.label}</p>
-                          {item.description && <p className="text-[10px] text-slate-400 truncate">{item.description}</p>}
                         </div>
-                        <button type="button" onClick={() => toggleItemActive(idx)} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>{item.isActive ? 'Active' : 'Inactive'}</button>
-                        <button type="button" onClick={() => removeItem(idx)} className="p-1 text-slate-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
+                        <button type="button" onClick={() => toggleItemActive(idx)} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'} w-16 text-center`}>{item.isActive ? 'Active' : 'Inactive'}</button>
+                        <button type="button" onClick={() => removeItem(idx)} className="p-1 text-slate-400 hover:text-red-500 ml-1"><X className="w-3.5 h-3.5" /></button>
                       </div>
                     ))}
                   </div>

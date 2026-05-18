@@ -123,8 +123,22 @@ const fields = [
     fieldType: 'GPS Location',
     groupLabel: 'Inspection Log',
     displayOrder: 101
-  }
+  },
+  // --- MASTER DATA DRIVEN FIELDS (Product Context) ---
+  { formContext: 'Product', fieldName: 'valveType', fieldLabel: 'VALVE TYPE', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 1 },
+  { formContext: 'Product', fieldName: 'designType', fieldLabel: 'DESIGN TYPE', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 2 },
+  { formContext: 'Product', fieldName: 'bore', fieldLabel: 'BORE', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 3 },
+  { formContext: 'Product', fieldName: 'endConnection', fieldLabel: 'END CONNECTION', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 4 },
+  { formContext: 'Product', fieldName: 'class', fieldLabel: 'CLASS', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 5 },
+  { formContext: 'Product', fieldName: 'operating', fieldLabel: 'OPERATING', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 6 },
+  { formContext: 'Product', fieldName: 'ballType', fieldLabel: 'BALL TYPE', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 7 },
+  { formContext: 'Product', fieldName: 'size', fieldLabel: 'SIZE', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 8 },
+  { formContext: 'Product', fieldName: 'operation', fieldLabel: 'OPERATION', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 9 },
+  { formContext: 'Product', fieldName: 'partsBom', fieldLabel: 'PARTS / BOM', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 10 },
+  { formContext: 'Product', fieldName: 'moc', fieldLabel: 'MOC (Material of Construction)', fieldType: 'Dropdown (Single)', groupLabel: 'Master Specs', displayOrder: 11 },
 ];
+
+const MasterData = require('../src/models/MasterData');
 
 const seed = async () => {
   try {
@@ -132,12 +146,30 @@ const seed = async () => {
     console.log('Connected to MongoDB.');
 
     for (const field of fields) {
-      await FieldDefinition.findOneAndUpdate(
+      // 1. Create/Update the FieldDefinition
+      const savedField = await FieldDefinition.findOneAndUpdate(
         { formContext: field.formContext, fieldName: field.fieldName },
         field,
         { upsert: true, new: true }
       );
-      console.log(`✓ Seeded/Updated: ${field.fieldLabel} (${field.formContext})`);
+      console.log(`✓ Seeded Field: ${field.fieldLabel} (${field.formContext})`);
+
+      // 2. If it's one of our Master Data driven fields, Link it and Sync Options
+      if (field.groupLabel === 'Master Specs') {
+        const masterCat = await MasterData.findOne({ name: field.fieldLabel });
+        if (masterCat) {
+          // Sync options: "Code - Name" format
+          const activeOptions = masterCat.items.filter(i => i.isActive).map(i => `${i.value} - ${i.label}`);
+          await FieldDefinition.findByIdAndUpdate(savedField._id, { $set: { options: activeOptions } });
+          
+          // Link master category to field
+          if (!masterCat.linkedFields.includes(savedField._id)) {
+            masterCat.linkedFields.push(savedField._id);
+            await masterCat.save();
+          }
+          console.log(`  ↳ Linked to Master Data: ${field.fieldLabel} with ${activeOptions.length} options.`);
+        }
+      }
     }
 
     console.log('Seeding complete.');

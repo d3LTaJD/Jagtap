@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, Loader2, Edit3, Trash2, X, AlertCircle } from 'lucide-react';
 import api from '../api/client';
 import AutocompleteSelect from '../components/AutocompleteSelect';
+import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import { useAbility } from '../context/AbilityContext';
 
 const Products = () => {
@@ -16,7 +17,7 @@ const Products = () => {
   const [error, setError] = useState('');
 
   const [formData, setFormData] = useState({
-    name: '', code: '', category: '', type: '', description: '', unit: 'NOS', basePrice: 0, status: 'Active'
+    name: '', code: '', category: '', type: '', description: '', unit: 'NOS', basePrice: 0, status: 'Active', dynamicFields: {}
   });
 
   const fetchProducts = async () => {
@@ -49,11 +50,12 @@ const Products = () => {
         description: product.description || '',
         unit: product.unit || 'NOS',
         basePrice: product.basePrice || 0,
-        status: product.status || 'Active'
+        status: product.status || 'Active',
+        dynamicFields: product.dynamicFields || {}
       });
     } else {
       setEditingProduct(null);
-      setFormData({ name: '', code: '', category: '', type: '', description: '', unit: 'NOS', basePrice: 0, status: 'Active' });
+      setFormData({ name: '', code: '', category: '', type: '', description: '', unit: 'NOS', basePrice: 0, status: 'Active', dynamicFields: {} });
     }
     setShowModal(true);
   };
@@ -133,7 +135,22 @@ const Products = () => {
                 {products.map((p) => (
                   <tr key={p._id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4 font-mono text-xs text-slate-500">{p.code || '-'}</td>
-                    <td className="px-6 py-4 font-bold text-slate-900">{p.name}</td>
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-slate-900">{p.name}</div>
+                      {p.dynamicFields && Object.keys(p.dynamicFields).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1 max-w-lg">
+                          {Object.entries(p.dynamicFields).map(([k, v]) => {
+                            if (!v) return null;
+                            const formattedKey = k.replace(/([A-Z])/g, ' $1').toUpperCase();
+                            return (
+                              <span key={k} className="text-[10px] bg-slate-100 border border-slate-200/60 text-slate-600 px-2 py-0.5 rounded-lg font-bold">
+                                {formattedKey}: <span className="font-black text-brand-600">{v}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-6 py-4 text-slate-600 text-xs">{p.category || '-'}</td>
                     <td className="px-6 py-4 font-semibold text-slate-700">₹{p.basePrice?.toLocaleString() || '0'} <span className="text-[10px] text-slate-400">/ {p.unit}</span></td>
                     <td className="px-6 py-4">
@@ -168,7 +185,7 @@ const Products = () => {
               <button onClick={() => setShowModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {error && <div className="p-3 bg-red-50 text-red-600 rounded-xl text-sm font-medium flex items-center"><AlertCircle className="w-4 h-4 mr-2" />{error}</div>}
               
               <div className="grid grid-cols-2 gap-4">
@@ -214,6 +231,26 @@ const Products = () => {
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Description</label>
                 <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 min-h-[80px] outline-none resize-none" />
+              </div>
+
+              <hr className="border-slate-100" />
+
+              {/* Dynamic Specifications Area */}
+              <div>
+                <h3 className="text-xs font-black text-brand-600 uppercase tracking-widest mb-3">Specifications / Master Specs</h3>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <DynamicFormRenderer
+                    formContext="Product"
+                    values={formData.dynamicFields || {}}
+                    onChange={(fieldName, value) => {
+                      setFormData(prev => ({
+                        ...prev,
+                        dynamicFields: { ...prev.dynamicFields, [fieldName]: value }
+                      }));
+                    }}
+                    currentUserRole={JSON.parse(localStorage.getItem('user') || '{}').role}
+                  />
+                </div>
               </div>
             </div>
 

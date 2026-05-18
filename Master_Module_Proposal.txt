@@ -1,0 +1,319 @@
+PETRO VALVES PVT. LTD.
+DYNAMIC MASTER MODULE - FEATURE PROPOSAL
+(Based on CODE SHEET R00 - 15.05.2026)
+
+Prepared by: Jagtap Engineering (Development Team)
+Date: 18th May 2026
+Status: Awaiting Client Approval
+
+==================================================
+1. OBJECTIVE
+==================================================
+Make all Code Sheet column titles and their values dynamic.
+Admin can add, edit, or delete any entry directly from the software.
+No code changes needed in the future.
+
+Each entry under every title has 3 fields:
+  CODE   = Short code (e.g. BV, GD, FL)
+  NAME   = Full name (e.g. Ball Valve, Globe Valve)
+  STATUS = Active / Inactive
+
+
+==================================================
+2. MASTER TITLES AND THEIR VALUES
+==================================================
+
+--------------------------------------------------
+TITLE 1: VALVE TYPE
+--------------------------------------------------
+  CODE    NAME
+  BV      Ball Valve
+  GD      Globe Valve
+  GV      Gate Valve
+  GC      Conduit Gate Valve
+  SC      Check Valves
+  TW      3Way SQ
+  TW      3Way D
+  TW      4Way Valve
+  FB      Flush Bottom
+  BF      Butterfly
+  KG      Knife Gate
+  TB      2Way Bottom LL Port
+  FV      Lug Valve
+  61      O&AY Type
+  61      Swing Type
+  62      Lift Type
+  71      Center Disc
+
+--------------------------------------------------
+TITLE 2: DESIGN TYPE
+--------------------------------------------------
+  CODE    NAME
+  01      1 P/C Long
+  02      2P/C Long
+  03      3P/C
+  04      3P/C Welded
+  05      3P/C Weldolet
+  11      1P/C Short
+  12      2P/C Short
+  13      3P/C Short
+  31      2Way L
+  32      2Way T
+  31      3Way BL
+  32      3Way BT
+  41      4Way LL
+  61      O&AY Type
+  61      Swing Type
+  62      Lift Type
+  71      Center Disc
+
+--------------------------------------------------
+TITLE 3: BORE
+--------------------------------------------------
+  CODE    NAME
+  F       Full Bore
+  R       Reduced Bore
+  X       Not Applicable
+
+--------------------------------------------------
+TITLE 4: END CONNECTION
+--------------------------------------------------
+  CODE    NAME
+  FL      Flange End
+  DW      Butt Weld
+  SP      SW With PUP
+  UP      DW With PUP
+  FP      FLX BW
+  FP      FLXRW With PUP
+  SW      Socket Weld
+  SA      SW With Nipple
+  SP      SW With PUP/FXSW
+  ST      SWATH NPT(F)
+  SM      SWATH NPT(M)
+  TN      T-Threaded NPT(F)
+  TM      T-Threaded NPT(M)
+  TC      T-Threaded DSP(F)
+  TP      T-Threaded BSP(F)
+  TS      T-NPT-FXSW With Nipple
+  TQ      T-NPT/NPTXSW With Nipple
+  WT      Water Type
+
+--------------------------------------------------
+TITLE 5: CLASS
+--------------------------------------------------
+  CODE    NAME
+  01      150
+  02      300
+  03      400
+  04      600
+  05      800
+  06      900
+  07      1500
+  08      2500
+
+--------------------------------------------------
+TITLE 6: OPERATING
+--------------------------------------------------
+  CODE    NAME
+  H       Handle / Handwheel
+  G       Gear Box
+  P       PNU ACT
+  M       MOV ACT
+  Q       Goova
+  Q       Gas Power
+  E       ELE ACT
+  R       EHOV
+  S       HOV
+  A       EXT Handle
+  B       EXT Gear
+  C       EXT PNE
+  D       EXT Goova
+  F       EXT Gas / Power ACT
+  #       EXT ELE ACT
+  J       EXT EHOV
+  K       EXT HOV
+
+--------------------------------------------------
+TITLE 7: BALL TYPE
+--------------------------------------------------
+  CODE    NAME
+  FH      Floating Hollow
+  FS      FLOT Solid
+  FI      TRU Hollow
+  FS      TRU Solid
+  FX      Floating
+  TX      Trunnion
+  GB      Globe
+  FL      FLAX Solid
+  KW      Knife Wage
+
+--------------------------------------------------
+TITLE 8: SIZE
+--------------------------------------------------
+  CODE    NAME
+  006     1/4"
+  010     3/8"
+  012     1/2"
+  019     3/4"
+  025     1"
+  032     1-1/4"
+  038     1-1/2"
+  050     2"
+  065     2-1/2"
+  075     3"
+  100     4"
+  125     5"
+  150     6"
+  200     8"
+  250     10"
+  300     12"
+  350     14"
+  400     16"
+  450     18"
+  500     20"
+  600     24"
+  650     26"
+  700     28"
+  750     30"
+  800     32"
+  900     36"
+  1000    42"
+
+--------------------------------------------------
+TITLE 9: OPERATION
+--------------------------------------------------
+  CODE    NAME
+  A       Assembly
+  M       Machining
+  C       Casting
+  P       Pattern
+  D       Die
+  S       Spar
+  F       Forge
+  R       Pre Machining
+
+--------------------------------------------------
+TITLE 10: PARTS / BOM
+--------------------------------------------------
+  CODE    NAME
+  001     Body
+  002     Side P/C
+  003     Waste
+  004     Bonnet / Cover
+  005     Trunion / Yoke
+  006     Seat Ring
+  007     Stem
+  008     Body Gasket
+  009     Gland Packing
+  010     Stem Ring
+  011     Gland Bush
+  012     Gland Nut / Disc
+  013     Seat Holder
+  014     Seal / Clamping Ring
+  015     Spring Holder
+  016     Compression Spring
+  017     Antistatic Spring
+  018     Handle
+  019     Handle Nut
+  020     Lock Plate
+  021     Stop / Hinge Pin
+  022     Body Stud
+  023     Body Nut
+  024     Hex Bolt
+  025     Seat O-Ring
+  026     Stem O-Ring
+  027     Gasket / Trunnion O-Ring
+  028     Sleeve
+  029     Washer
+  030     Lock Device
+  031     Gland Follower
+  032     Chain Conn Valve
+  033     Vent Conn
+  034     Stem Seal
+  035     Ext Seat Seal / Sealant Pipe
+  036     Bracket
+  037     Lifting Lugs
+  038     Valve Support Foot
+  039     Hinge Lever
+  040     Bonnet
+  041     Back Seat Bush
+  042     Yoke Bush
+  043     Connecting
+  044     Plug
+  045     Name Plate
+  046     Rivet
+  047     (Reserved)
+  051     Middle Valve
+  052     Int NRV
+  053     NRV Switch
+  054     Bonnet Stud
+  100     Other Assembly
+
+--------------------------------------------------
+TITLE 11: MOC (Material of Construction)
+--------------------------------------------------
+  CODE    NAME
+  01      ASTM A216 Gr WCB
+  02      ASTM A216 Gr WCC
+  03      ASTM A 352 Gr LCC
+  04      ASTM A 352 Gr LCB
+  05      ASTM A 352 Gr CF8
+  06      ASTM A182
+  07      ASTM A182 Gr F304
+  08      ASTM A182 Gr F6A
+  09      ASTM A351 Gr CF8
+  010     ASTM A 351 Gr CF3
+  011     ASTM A182
+  012     ASTM A182
+  013     ASTM A 479
+  014     ASTM A 479
+  015     ASTM A 479
+  016     ASTM A 479
+  017     ASTM A182 Gr F304
+  018     ASTM A182
+  019     ASTM A182
+  021     ASTM A479
+  025     SS410
+  026     SS440
+  027     CI
+  028     SG Iron
+  029     PTFE
+  030     RPTFE
+  031     CFT
+  033     VTON
+  034     VILON-S
+  035     NCS
+  036     PEEK
+  037     GRAFOIL
+  038     SS304+SPW
+  039     SS316+SPW GRAFOIL
+  040     SS304+STR
+  041     SS316+STR
+  042     SS410+STR
+  043     ASTM A216
+  044     ASTM A216
+  045     ASTM A216
+  046     ASTM A216
+
+
+==================================================
+3. WHAT ADMIN CAN DO FROM THE SOFTWARE
+==================================================
+* View all 11 titles and their entries
+* Add a new title (e.g. "COATING TYPE" in future)
+* Add new entries (Code + Name) under any title
+* Edit any existing Code or Name
+* Set Status to Active or Inactive
+* Inactive entries will NOT appear in dropdown forms
+
+
+==================================================
+4. PLEASE CONFIRM
+==================================================
+1. Are all 11 titles listed correctly?
+2. Are the Codes and Names under each title accurate?
+3. Is the 3-field structure (Code, Name, Status) correct?
+4. Are there any additional titles or values to include?
+5. Any corrections needed?
+
+Please reply with your approval or feedback.
