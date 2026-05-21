@@ -32,13 +32,24 @@ taskSchema.pre('save', async function(next) {
     const now = new Date();
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const count = await mongoose.model('Task').countDocuments({
-      createdAt: {
-        $gte: new Date(yyyy, now.getMonth(), 1),
-        $lt: new Date(yyyy, now.getMonth() + 1, 1)
+    const prefix = `TASK-${yyyy}-${mm}-`;
+    try {
+      const { getNextSequenceValue } = require('../utils/counter');
+      let seq = await getNextSequenceValue(prefix);
+      let taskId = `${prefix}${String(seq).padStart(4, '0')}`;
+      
+      // Self-healing check: loop to bypass any legacy/colliding task IDs
+      let exists = await mongoose.model('Task').findOne({ taskId });
+      while (exists) {
+        seq = await getNextSequenceValue(prefix);
+        taskId = `${prefix}${String(seq).padStart(4, '0')}`;
+        exists = await mongoose.model('Task').findOne({ taskId });
       }
-    });
-    this.taskId = `TASK-${yyyy}-${mm}-${String(count + 1).padStart(4, '0')}`;
+      
+      this.taskId = taskId;
+    } catch (err) {
+      return next(err);
+    }
   }
   next();
 });

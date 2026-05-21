@@ -3,6 +3,7 @@ const Enquiry = require('../models/Enquiry');
 const puppeteer = require('puppeteer');
 const { createNotification, notifyRoles, sendEmail } = require('../services/notificationService');
 const { logActivity } = require('../utils/logger');
+const { getNextSequenceValue } = require('../utils/counter');
 
 exports.createQuotation = async (req, res, next) => {
   try {
@@ -10,7 +11,9 @@ exports.createQuotation = async (req, res, next) => {
     
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
-    req.body.quotationId = `QT-${year}-${month}-${Math.floor(Math.random() * 10000)}`;
+    const prefix = `QT-${year}-${month}-`;
+    const seq = await getNextSequenceValue(prefix);
+    req.body.quotationId = `${prefix}${String(seq).padStart(4, '0')}`;
 
     const quotation = await Quotation.create(req.body);
     
@@ -65,15 +68,7 @@ exports.getQuotation = async (req, res, next) => {
   }
 };
 
-exports.deleteQuotation = async (req, res, next) => {
-  try {
-    const quotation = await Quotation.findByIdAndDelete(req.params.id);
-    if (!quotation) return res.status(404).json({ status: 'error', message: 'Not found' });
-    res.status(204).json({ status: 'success', data: null });
-  } catch (err) {
-    next(err);
-  }
-};
+
 
 exports.updateQuotationStatus = async (req, res, next) => {
   try {

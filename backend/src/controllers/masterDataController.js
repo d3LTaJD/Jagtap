@@ -135,7 +135,7 @@ exports.updateMasterData = async (req, res) => {
 
     // If items changed and there are linked fields, sync field options
     if (updates.items && category.linkedFields?.length > 0) {
-      const activeOptions = category.items.filter(i => i.isActive).map(i => `${i.value} - ${i.label}`);
+      const activeOptions = category.items.filter(i => i.isActive).map(i => ({ value: i.value, label: i.label }));
       await FieldDefinition.updateMany(
         { _id: { $in: category.linkedFields } },
         { $set: { options: activeOptions } }
@@ -168,7 +168,7 @@ exports.linkField = async (req, res) => {
     }
 
     // Sync options to the field
-    const activeOptions = category.items.filter(i => i.isActive).map(i => `${i.value} - ${i.label}`);
+    const activeOptions = category.items.filter(i => i.isActive).map(i => ({ value: i.value, label: i.label }));
     await FieldDefinition.findByIdAndUpdate(fieldId, { $set: { options: activeOptions } });
 
     const updated = await MasterData.findById(req.params.id)

@@ -2,6 +2,7 @@ const Qap = require('../models/Qap');
 const Quotation = require('../models/Quotation');
 const { notifyRoles, sendEmail } = require('../services/notificationService');
 const ActivityLog = require('../models/ActivityLog');
+const { getNextSequenceValue } = require('../utils/counter');
 
 exports.generateQapFromQuotation = async (req, res, next) => {
   try {
@@ -28,9 +29,11 @@ exports.generateQapFromQuotation = async (req, res, next) => {
 
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
+    const prefix = `QAP-${year}-${month}-`;
+    const seq = await getNextSequenceValue(prefix);
     
     const qapData = {
-      qapId: `QAP-${year}-${month}-${Math.floor(Math.random() * 10000)}`,
+      qapId: `${prefix}${String(seq).padStart(4, '0')}`,
       quotation: quotation._id,
       customer: quotation.customer,
       preparedBy: req.user._id,

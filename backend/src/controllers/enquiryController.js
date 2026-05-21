@@ -3,6 +3,7 @@ const Customer = require('../models/Customer');
 const Task = require('../models/Task');
 const { createNotification, notifyRoles } = require('../services/notificationService');
 const { logActivity } = require('../utils/logger');
+const { getNextSequenceValue } = require('../utils/counter');
 
 exports.createEnquiry = async (req, res, next) => {
   try {
@@ -22,16 +23,11 @@ exports.createEnquiry = async (req, res, next) => {
     enquiryData.createdBy = req.user._id;
     enquiryData.assignedTo = enquiryData.assignedTo || req.user._id;
     
-    // Generate sequential ENQ-YYYY-MM-NNNN ID
+    // Generate sequential ENQ-YYYY-MM-NNNN ID atomically
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
     const prefix = `ENQ-${year}-${month}-`;
-    const lastEnquiry = await Enquiry.findOne({ enquiryId: { $regex: `^${prefix}` } }).sort({ enquiryId: -1 });
-    let seq = 1;
-    if (lastEnquiry) {
-      const lastSeq = parseInt(lastEnquiry.enquiryId.split('-').pop(), 10);
-      if (!isNaN(lastSeq)) seq = lastSeq + 1;
-    }
+    const seq = await getNextSequenceValue(prefix);
     enquiryData.enquiryId = `${prefix}${String(seq).padStart(4, '0')}`;
 
     const enquiry = await Enquiry.create(enquiryData);

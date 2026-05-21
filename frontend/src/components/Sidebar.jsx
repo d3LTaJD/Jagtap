@@ -17,6 +17,7 @@ const Sidebar = ({ onClose }) => {
     { label: 'Enquiries', icon: Users, path: '/app/enquiries', show: ability.can('view', 'Enquiry') },
     { label: 'Quotations', icon: FileText, path: '/app/quotations', show: ability.can('view', 'Quotation') },
     { label: 'Quality Assurance', icon: CheckSquare, path: '/app/qaps', show: ability.can('view', 'QAP') },
+    { label: 'Follow-Up Board', icon: ClipboardList, path: '/app/follow-ups', show: true },
   ];
 
   if (ability.can('view', 'Admin')) {

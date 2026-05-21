@@ -18,7 +18,7 @@ const fieldDefinitionSchema = new mongoose.Schema({
   },
   placeholder: { type: String }, // Hint text inside input
   isRequired: { type: Boolean, default: false },
-  options: [{ type: String }],   // For Dropdown / Radio choices
+  options: [mongoose.Schema.Types.Mixed],   // For Dropdown / Radio choices
   validationRules: {
     min: Number,
     max: Number,

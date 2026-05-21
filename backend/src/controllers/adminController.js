@@ -3,6 +3,7 @@ const Token = require('../models/Token');
 const otpUtils = require('../utils/otp');
 const ActivityLog = require('../models/ActivityLog');
 const { logActivity } = require('../utils/logger');
+const { getNextSequenceValue } = require('../utils/counter');
 
 // @desc    Create new user (Admin only)
 // @route   POST /api/admin/users
@@ -19,9 +20,9 @@ exports.createUser = async (req, res, next) => {
       return res.status(400).json({ status: 'error', message: 'User with this mobile number already exists' });
     }
 
-    // Auto-generate USR-NNNN
-    const userCount = (await User.countDocuments()) + 1;
-    const userId = `USR-${String(userCount).padStart(4, '0')}`;
+    // Auto-generate USR-NNNN atomically
+    const seq = await getNextSequenceValue('user');
+    const userId = `USR-${String(seq).padStart(4, '0')}`;
 
     const user = await User.create({
       userId, name, displayName, mobile_number, email, role,

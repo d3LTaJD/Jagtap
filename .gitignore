@@ -28,3 +28,5 @@ logs/
 
 # Scratch files
 backend/scratch_*.js
+backend/scratch_*.txt
+backend/scratch/

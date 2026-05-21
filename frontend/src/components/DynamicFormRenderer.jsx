@@ -99,9 +99,25 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
           </div>
         );
       }
+      
+      const getDisplayValue = () => {
+        const normalized = (field.options || []).map(o => typeof o === 'string' ? { value: o, label: o } : o);
+        const findLabel = (v) => {
+          const matched = normalized.find(o => o.value === v);
+          return matched ? matched.label : v;
+        };
+        if (Array.isArray(val)) {
+          return val.map(findLabel).join(', ');
+        }
+        if (val !== undefined && val !== null && val !== '') {
+          return findLabel(val);
+        }
+        return <span className="text-slate-400 italic">—</span>;
+      };
+
       return (
         <div className="px-3.5 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-sm text-slate-700 min-h-[40px] flex items-center">
-          {Array.isArray(val) ? val.join(', ') : (val || <span className="text-slate-400 italic">—</span>)}
+          {getDisplayValue()}
         </div>
       );
     }
@@ -157,7 +173,7 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
       case 'Dropdown (Single)':
         return (
           <AutocompleteSelect
-            options={field.options || []}
+            options={(field.options || []).map(o => typeof o === 'string' ? { value: o, label: o } : o)}
             value={val}
             onChange={(v) => handle(field.fieldName, v)}
             placeholder={field.placeholder || 'Select...'}
@@ -169,21 +185,21 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
       case 'Dropdown (Multi)':
         return (
           <div className="space-y-2">
-            {field.options.map(opt => {
+            {(field.options || []).map(o => typeof o === 'string' ? { value: o, label: o } : o).map(opt => {
               const selected = Array.isArray(val) ? val : [];
-              const checked = selected.includes(opt);
+              const checked = selected.includes(opt.value);
               return (
-                <label key={opt} className="flex items-center gap-2.5 cursor-pointer group">
+                <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
                   <input
                     type="checkbox"
                     checked={checked}
                     onChange={() => {
-                      const next = checked ? selected.filter(v => v !== opt) : [...selected, opt];
+                      const next = checked ? selected.filter(v => v !== opt.value) : [...selected, opt.value];
                       handle(field.fieldName, next);
                     }}
                     className="w-4 h-4 rounded text-brand-600 border-slate-300 focus:ring-brand-500"
                   />
-                  <span className="text-sm text-slate-700 group-hover:text-slate-900">{opt}</span>
+                  <span className="text-sm text-slate-700 group-hover:text-slate-900">{opt.label}</span>
                 </label>
               );
             })}
@@ -228,17 +244,17 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
       case 'Radio Button':
         return (
           <div className="flex flex-wrap gap-3">
-            {field.options.map(opt => (
-              <label key={opt} className="flex items-center gap-2 cursor-pointer">
+            {(field.options || []).map(o => typeof o === 'string' ? { value: o, label: o } : o).map(opt => (
+              <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name={field.fieldName}
-                  value={opt}
-                  checked={val === opt}
-                  onChange={() => handle(field.fieldName, opt)}
+                  value={opt.value}
+                  checked={val === opt.value}
+                  onChange={() => handle(field.fieldName, opt.value)}
                   className="w-4 h-4 text-brand-600 border-slate-300 focus:ring-brand-500"
                 />
-                <span className="text-sm text-slate-700">{opt}</span>
+                <span className="text-sm text-slate-700">{opt.label}</span>
               </label>
             ))}
           </div>

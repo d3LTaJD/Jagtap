@@ -12,6 +12,7 @@ import Quotations from './pages/Quotations';
 import QuotationDetail from './pages/QuotationDetail';
 import Qaps from './pages/Qaps';
 import QapDetail from './pages/QapDetail';
+import FollowUpBoard from './pages/FollowUpBoard';
 
 import ProfileSettings from './pages/ProfileSettings';
 import FieldBuilder from './pages/FieldBuilder';
@@ -51,6 +52,7 @@ function App() {
           <Route path="quotations/:id" element={<QuotationDetail />} />
           <Route path="qaps" element={<Qaps />} />
           <Route path="qaps/:id" element={<QapDetail />} />
+          <Route path="follow-ups" element={<FollowUpBoard />} />
           <Route path="admin" element={<AdminUsers />} />
           <Route path="profile" element={<ProfileSettings />} />
           <Route path="field-builder" element={<FieldBuilder />} />
