@@ -1,9 +1,64 @@
 const Enquiry = require('../models/Enquiry');
 const Customer = require('../models/Customer');
 const Task = require('../models/Task');
+const FieldDefinition = require('../models/FieldDefinition');
 const { createNotification, notifyRoles } = require('../services/notificationService');
 const { logActivity } = require('../utils/logger');
 const { getNextSequenceValue } = require('../utils/counter');
+
+async function checkEnquiryCompletion(enquiry) {
+  try {
+    const fields = await FieldDefinition.find({
+      formContext: 'Enquiry',
+      isDeleted: false,
+      isActive: true
+    });
+
+    const relevantFields = fields.filter(f => {
+      if (!f.productCategory) return true;
+      return f.productCategory === enquiry.productCategory;
+    });
+
+    let allRequiredFilled = true;
+    const missingFields = [];
+
+    for (const field of relevantFields) {
+      let isFieldActive = true;
+      if (field.conditionalLogic && field.conditionalLogic.dependsOnField) {
+        const parentFieldName = field.conditionalLogic.dependsOnField;
+        const expectedValue = field.conditionalLogic.requiredValue;
+
+        const actualValue = enquiry.dynamicFields?.[parentFieldName] !== undefined
+          ? enquiry.dynamicFields[parentFieldName]
+          : enquiry[parentFieldName];
+
+        if (String(actualValue) !== String(expectedValue)) {
+          isFieldActive = false;
+        }
+      }
+
+      if (isFieldActive && field.isRequired) {
+        const val = enquiry.dynamicFields?.[field.fieldName];
+        const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
+        if (!isFilled) {
+          allRequiredFilled = false;
+          missingFields.push(field);
+        }
+      }
+    }
+
+    return {
+      isComplete: allRequiredFilled,
+      missingFields
+    };
+  } catch (err) {
+    console.error('Error in checkEnquiryCompletion:', err.message);
+    return { isComplete: false, missingFields: [] };
+  }
+}
+
+exports.checkEnquiryCompletion = checkEnquiryCompletion;
+
 
 exports.createEnquiry = async (req, res, next) => {
   try {
@@ -80,6 +135,35 @@ exports.createEnquiry = async (req, res, next) => {
       });
     }
 
+    // Check completeness and auto-promote to 'Ready for Offer'
+    const completion = await checkEnquiryCompletion(enquiry);
+    if (completion.isComplete && ['New', 'Contacted', 'Technical Review'].includes(enquiry.status)) {
+      enquiry.status = 'Ready for Offer';
+      await enquiry.save();
+    }
+
+    // Send automated email if contactEmail is present
+    if (enquiry.contactEmail) {
+      try {
+        const emailBotService = require('../services/emailBotService');
+        await emailBotService.sendAutomatedReply(
+          enquiry.contactEmail,
+          enquiry.contactPerson || 'Customer',
+          enquiry.enquiryId,
+          {
+            productDescription: enquiry.productDescription,
+            productCategory: enquiry.productCategory,
+            quantity: enquiry.quantity,
+            unit: enquiry.unit || 'NOS',
+            priority: enquiry.priority
+          },
+          completion.missingFields
+        );
+      } catch (emailErr) {
+        console.error('[Enquiry Controller] Failed to send automated reply for manual enquiry:', emailErr.message);
+      }
+    }
+
     res.status(201).json({ status: 'success', data: { enquiry, customer } });
   } catch (err) {
     next(err);
@@ -118,7 +202,33 @@ exports.updateEnquiry = async (req, res, next) => {
   try {
     req.body.lastModifiedBy = req.user._id;
     const originalEnquiry = await Enquiry.findById(req.params.id);
-    const enquiry = await Enquiry.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    if (!originalEnquiry) {
+      return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+    }
+
+    // Combine dynamicFields with existing to prevent wiping out unprovided keys
+    if (req.body.dynamicFields) {
+      req.body.dynamicFields = { ...originalEnquiry.dynamicFields, ...req.body.dynamicFields };
+    }
+
+    let enquiry = await Enquiry.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+
+    // Auto-promote status to 'Ready for Offer' if all required fields are complete
+    const completion = await checkEnquiryCompletion(enquiry);
+    if (completion.isComplete && ['New', 'Contacted', 'Technical Review'].includes(enquiry.status)) {
+      enquiry.status = 'Ready for Offer';
+      enquiry = await enquiry.save();
+
+      if (enquiry.assignedTo) {
+        await createNotification({ 
+          user_id: enquiry.assignedTo, 
+          type: 'SYSTEM', 
+          title: '🎉 Enquiry Ready for Offer', 
+          message: `Enquiry ${enquiry.enquiryId} has all required fields completed and is now Ready for Offer!`, 
+          related_id: enquiry._id 
+        });
+      }
+    }
 
     await logActivity({
       req,

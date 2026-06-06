@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   FileText, Download, User as UserIcon, CheckCircle, CheckCircle2,
   Clock, AlertCircle, ArrowLeft, Loader2, IndianRupee,
-  Send, GitBranch, Printer, Lock, X, AlertTriangle, Save, File
+  Send, GitBranch, Printer, Lock, X, AlertTriangle, Save, File,
+  Edit, Sliders, Shield, FileSpreadsheet, Settings, HelpCircle
 } from 'lucide-react';
 import api from '../api/client';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
@@ -39,7 +40,29 @@ const QuotationDetail = () => {
   const [revisionNote, setRevisionNote] = useState('');
   
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const [dynamicValues, setDynamicValues] = useState({});
+  const [activeTab, setActiveTab] = useState('pricing'); // 'pricing' | 'technical' | 'commercial'
+  const [activeItemIndex, setActiveItemIndex] = useState(null); // for item specs drawer
+
+  // Local state for editable parts
+  const [items, setItems] = useState([]);
+  const [techFields, setTechFields] = useState({
+    manufacturerName: '',
+    originOfGoods: '',
+    weightDimensions: '',
+    technicalDocuments: '',
+    deliveryTimeHeader: ''
+  });
+  const [commFields, setCommFields] = useState({
+    priceBasis: '',
+    packingForwardingTerms: '',
+    freightTerms: '',
+    taxDutyTerms: '',
+    validityTerms: '',
+    tpiTerms: '',
+    transitInsurance: '',
+    guaranteeTerms: '',
+    paymentTerms: ''
+  });
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -50,9 +73,30 @@ const QuotationDetail = () => {
     const fetchData = async () => {
       try {
         const qRes = await api.get(`/quotations/${id}`);
-        if (qRes.data.data?.quotation) setQuotation(qRes.data.data.quotation);
+        if (qRes.data.data?.quotation) {
+          const q = qRes.data.data.quotation;
+          setQuotation(q);
+          setItems(q.items || []);
+          setTechFields({
+            manufacturerName: q.manufacturerName || 'M/s. PETRO VALVES PVT LTD',
+            originOfGoods: q.originOfGoods || 'INDIA',
+            weightDimensions: q.weightDimensions || 'This details given at the time of dispatch',
+            technicalDocuments: q.technicalDocuments || 'This is share after receiving of techno-commercial order',
+            deliveryTimeHeader: q.deliveryTimeHeader || 'Provided in COMMERCIAL PART - III'
+          });
+          setCommFields({
+            priceBasis: q.priceBasis || 'Ex Works Ahmedabad.',
+            packingForwardingTerms: q.packingForwardingTerms || 'Extra as given in Price Part - II, If required in wooden box then charge extra',
+            freightTerms: q.freightTerms || 'Extra at actual to your account.',
+            taxDutyTerms: q.taxDutyTerms || 'Extra at actual to your account (18% GST default)',
+            validityTerms: q.validityTerms || 'Three Month from the date of Quote',
+            tpiTerms: q.tpiTerms || 'We will offer valves to your nominated TPIA agency. Charges towards TPIA fees will be to your account.',
+            transitInsurance: q.transitInsurance || 'In your scope only.',
+            guaranteeTerms: q.guaranteeTerms || '12 months from the date of commissioning or 18 months from the date of dispatch',
+            paymentTerms: q.paymentTerms || '10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch.'
+          });
+        }
         
-        // Side data fetch
         api.get('/auth/users')
           .then(res => { if (res.data.data?.users) setUsers(res.data.data.users); })
           .catch(err => console.error('Failed to fetch users:', err));
@@ -66,21 +110,70 @@ const QuotationDetail = () => {
     fetchData();
   }, [id]);
 
-  useEffect(() => {
-    if (quotation?.dynamicFields) setDynamicValues(quotation.dynamicFields);
-  }, [quotation]);
+  const handleItemPricingChange = (idx, field, val) => {
+    const newItems = [...items];
+    newItems[idx][field] = Number(val) || 0;
+    
+    // Recalculate line total excl GST
+    const unitPrice = newItems[idx].unitPrice || 0;
+    const ndt = newItems[idx].ndtCharges || 0;
+    const spec = newItems[idx].specialTestingCharges || 0;
+    const spares = newItems[idx].sparesCharges || 0;
+    const cert = newItems[idx].cert32Charges || 0;
+    const pf = newItems[idx].pfCharges || 0;
+    const tpi = newItems[idx].tpiCharges || 0;
+    const discount = newItems[idx].discountPercent || 0;
 
-  const handleDynamicFieldChange = (fieldName, value) => {
-    setDynamicValues(prev => ({ ...prev, [fieldName]: value }));
+    const unitRateBeforeDiscount = unitPrice + ndt + spec + spares + cert + pf + tpi;
+    const unitRate = unitRateBeforeDiscount * (1 - discount / 100);
+    newItems[idx].lineTotalExclGST = unitRate * (newItems[idx].quantity || 1);
+    
+    setItems(newItems);
   };
 
-  const saveDynamicFields = async () => {
+  const calculateTotals = () => {
+    let subtotal = 0;
+    items.forEach(item => {
+      const unitPrice = Number(item.unitPrice || 0);
+      const ndt = Number(item.ndtCharges || 0);
+      const spec = Number(item.specialTestingCharges || 0);
+      const spares = Number(item.sparesCharges || 0);
+      const cert = Number(item.cert32Charges || 0);
+      const pf = Number(item.pfCharges || 0);
+      const tpi = Number(item.tpiCharges || 0);
+      const discount = Number(item.discountPercent || 0);
+
+      const unitRate = (unitPrice + ndt + spec + spares + cert + pf + tpi) * (1 - discount / 100);
+      subtotal += unitRate * Number(item.quantity || 1);
+    });
+
+    const gst = subtotal * 0.18;
+    const grand = subtotal + gst;
+    return { subtotal, gst, grand };
+  };
+
+  const saveAllDetails = async () => {
     setUpdateLoading(true);
+    const { subtotal } = calculateTotals();
+    const payload = {
+      items,
+      ...techFields,
+      ...commFields,
+      commercialTotals: {
+        subtotalExclGST: subtotal,
+        totalGST: subtotal * 0.18,
+        grandTotal: subtotal
+      }
+    };
     try {
-      const res = await api.patch(`/quotations/${id}/status`, { dynamicFields: dynamicValues });
+      const res = await api.patch(`/quotations/${id}/status`, payload);
       setQuotation(res.data.data.quotation);
-    } catch (err) { alert('Failed to save: ' + (err.response?.data?.message || err.message)); }
-    finally { setUpdateLoading(false); }
+      showToast('Quotation details saved successfully!');
+    } catch (err) {
+      showToast('Failed to save details: ' + (err.response?.data?.message || err.message), 'error');
+    } finally {
+      setUpdateLoading(false);
+    }
   };
 
   const handleUpdate = async (update) => {
@@ -88,7 +181,7 @@ const QuotationDetail = () => {
     try {
       const res = await api.patch(`/quotations/${id}/status`, update);
       setQuotation(res.data.data.quotation);
-      showToast('Quotation updated');
+      showToast('Quotation updated successfully!');
     } catch (err) {
       showToast('Update failed: ' + (err.response?.data?.message || err.message), 'error');
     } finally {
@@ -96,7 +189,6 @@ const QuotationDetail = () => {
     }
   };
 
-  // Approve action (Director / SA only)
   const handleApprove = async () => {
     if (!confirm('Approve this quotation? This will mark it as officially approved.')) return;
     await handleUpdate({ status: 'APPROVED', approvedBy: currentUser.id || currentUser._id });
@@ -105,10 +197,10 @@ const QuotationDetail = () => {
   const handleGeneratePdf = async () => {
     setUpdateLoading(true);
     try {
-      showToast('Generating PDF securely...', 'success');
+      showToast('Generating official modern PDF...', 'success');
       const res = await api.post(`/quotations/${id}/generate-pdf`);
       setQuotation(res.data.data.quotation);
-      showToast('Official PDF Generated & saved to S3!', 'success');
+      showToast('Official PDF generated and attached!', 'success');
     } catch (err) {
       showToast('Generation failed: ' + (err.response?.data?.message || err.message), 'error');
     } finally {
@@ -116,13 +208,11 @@ const QuotationDetail = () => {
     }
   };
 
-  // Reject action
   const handleReject = async () => {
     const reason = prompt('Enter rejection reason (optional):');
     await handleUpdate({ status: 'REJECTED', rejectionReason: reason || '' });
   };
 
-  // Create revision note
   const handleSaveRevision = async () => {
     if (!revisionNote.trim()) return;
     setUpdateLoading(true);
@@ -141,11 +231,6 @@ const QuotationDetail = () => {
     }
   };
 
-  // Client-side print to PDF
-  const handlePrintPdf = () => {
-    window.print();
-  };
-
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]">
       <Loader2 className="w-8 h-8 text-brand-600 animate-spin" />
@@ -155,10 +240,11 @@ const QuotationDetail = () => {
   if (!quotation) return <div className="p-8 text-center text-slate-500 font-medium">Quotation not found.</div>;
 
   const isDirector = ['DIRECTOR', 'SUPER_ADMIN', 'SA', 'DIR'].includes(currentUser.role);
-  const isSalesOrTA = ['SALES', 'TA'].includes(currentUser.role);
-  // Pricing visible to: SA, DIR, ACC, SALES (edit), TA (read)
   const canSeePricing = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR', 'ACC', 'ACCOUNTS', 'SALES'].includes(currentUser.role);
+  const isApproved = quotation.status === 'APPROVED';
   
+  const { subtotal, gst, grand } = calculateTotals();
+
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
       <div className="mb-6 flex items-center gap-2">
@@ -168,61 +254,23 @@ const QuotationDetail = () => {
         <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Back to List</span>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{quotation.quotationId || 'Draft'}</h1>
-              <StatusBadge status={quotation.status} />
-            </div>
-            <p className="text-sm text-slate-500 font-medium mt-1">Ref Enquiry: {quotation.enquiry?.enquiryId || 'N/A'}</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{quotation.quotationId || 'Draft'}</h1>
+            <StatusBadge status={quotation.status} />
           </div>
+          <p className="text-sm text-slate-500 font-medium mt-1">Ref Enquiry: {quotation.enquiry?.enquiryId || 'N/A'}</p>
         </div>
         
         <div className="flex items-center gap-3 flex-wrap">
           {updateLoading && <Loader2 className="w-4 h-4 animate-spin text-brand-600" />}
           
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-visible">
-             <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-xs font-bold text-slate-500">Assign</div>
-             <AutocompleteSelect
-               disabled={!isDirector}
-               options={[
-                 { value: '', label: 'Unassigned' },
-                 ...users.map(u => ({
-                   value: u._id,
-                   label: `${u.fullName || u.name}`,
-                   group: u.department || 'Other'
-                 }))
-               ]}
-               value={quotation.assignedTo || ''}
-               onChange={v => handleUpdate({ assignedTo: v })}
-               placeholder="Assign to user..."
-               allowClear={false}
-               className="w-48"
-             />
-          </div>
+          <button onClick={saveAllDetails} disabled={updateLoading || isApproved}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-50">
+            <Save className="w-4 h-4" /> Save Quotation
+          </button>
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-hidden">
-             <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-xs font-bold text-slate-500">Status</div>
-             <AutocompleteSelect
-               options={[
-                 { value: 'DRAFT', label: 'DRAFT' },
-                 { value: 'TECH_REVIEW', label: 'TECH REVIEW' },
-                 { value: 'PENDING_APPROVAL', label: 'PENDING APPROVAL' },
-                 ...(isDirector ? [
-                   { value: 'APPROVED', label: 'APPROVED' },
-                   { value: 'REJECTED', label: 'REJECTED' },
-                 ] : []),
-               ]}
-               value={quotation.status}
-               onChange={v => handleUpdate({ status: v })}
-               placeholder="Select status..."
-               allowClear={false}
-               className="w-44"
-             />
-          </div>
-
-          {/* Approve / Reject — Director only */}
           {isDirector && quotation.status === 'PENDING_APPROVAL' && (
             <>
               <button onClick={handleApprove}
@@ -236,7 +284,6 @@ const QuotationDetail = () => {
             </>
           )}
 
-          {/* Revision button */}
           <button onClick={() => setShowRevisionPanel(p => !p)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all">
             <GitBranch className="w-4 h-4" /> Revision
@@ -244,30 +291,26 @@ const QuotationDetail = () => {
 
           <button onClick={() => setShowEmailModal(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all">
-            <Send className="w-4 h-4 text-brand-600" /> Email Customer
+            <Send className="w-4 h-4 text-brand-600" /> Email
           </button>
 
           <button onClick={handleGeneratePdf} disabled={updateLoading}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-60">
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-60">
             {updateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-            Generate Official PDF
+            Generate PDF
           </button>
         </div>
       </div>
 
-      {/* Toast */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-sm font-bold animate-in slide-in-from-top-2 ${
-          toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
-        }`}>
-          {toast.type === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+        <div className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-sm font-bold animate-in slide-in-from-top-2 bg-brand-900 text-white`}>
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           {toast.msg}
         </div>
       )}
 
-      {/* Revision Note Panel */}
       {showRevisionPanel && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3 animate-in slide-in-from-top-2 mb-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3 mb-4">
           <h4 className="text-xs font-black text-amber-700 uppercase tracking-widest">Add Revision Note</h4>
           <textarea
             value={revisionNote}
@@ -285,67 +328,363 @@ const QuotationDetail = () => {
         </div>
       )}
 
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 gap-6">
+        <button
+          onClick={() => setActiveTab('pricing')}
+          className={`pb-4 text-sm font-bold border-b-2 transition-all ${
+            activeTab === 'pricing'
+              ? 'border-brand-600 text-brand-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <IndianRupee className="w-4 h-4" /> Price Part-II & Checklist
+          </div>
+        </button>
+        <button
+          onClick={() => setActiveTab('technical')}
+          className={`pb-4 text-sm font-bold border-b-2 transition-all ${
+            activeTab === 'technical'
+              ? 'border-brand-600 text-brand-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4" /> Technical Part-I
+          </div>
+        </button>
+        <button
+          onClick={() => setActiveTab('commercial')}
+          className={`pb-4 text-sm font-bold border-b-2 transition-all ${
+            activeTab === 'commercial'
+              ? 'border-brand-600 text-brand-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4" /> Commercial Part-III
+          </div>
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Customer & Scope */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-            <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-               <FileText className="w-5 h-5 text-brand-600" /> Quotation Details
-            </h2>
-            <div className="grid grid-cols-2 gap-6 mb-8">
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Customer</p>
-                <p className="font-semibold text-slate-800">{quotation.customer?.companyName || 'N/A'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Scope of Supply</p>
-                <p className="font-semibold text-slate-800 italic">"{quotation.scopeOfSupply || 'No description provided'}"</p>
-              </div>
-            </div>
-            
-            <div className="overflow-hidden border border-slate-100 rounded-xl">
-              <table className="min-w-full divide-y divide-slate-100 italic">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Item Description</th>
-                    <th className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">Qty</th>
-                    <th className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">Unit Price</th>
-                    <th className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50 bg-white">
-                  {quotation.items?.map((item, idx) => (
-                    <tr key={idx} className="text-sm">
-                      <td className="px-4 py-4 text-slate-900 font-medium">{item.description}</td>
-                      <td className="px-4 py-4 text-right text-slate-600 font-bold">{item.quantity}</td>
-                      <td className="px-4 py-4 text-right text-slate-600">₹{(item.unitPrice || 0).toLocaleString()}</td>
-                      <td className="px-4 py-4 text-right font-black text-slate-900">₹{(item.lineTotalExclGST || 0).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          
+          {/* TAB 1: PRICING & SPECIFICATIONS CHECKLIST */}
+          {activeTab === 'pricing' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Quotation Line Items</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Specify basic pricing, NDT charges, special tests, and view dynamic specifications.</p>
+                  </div>
+                </div>
 
-          {/* Custom Fields (Dynamic) */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-brand-600" /> Custom Fields
-              </h2>
-              <button onClick={saveDynamicFields} disabled={updateLoading} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition-all">
-                {updateLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                Save Fields
-              </button>
+                <div className="space-y-4">
+                  {items.map((item, idx) => {
+                    const unitPrice = item.unitPrice || 0;
+                    const ndt = item.ndtCharges || 0;
+                    const spec = item.specialTestingCharges || 0;
+                    const spares = item.sparesCharges || 0;
+                    const cert = item.cert32Charges || 0;
+                    const pf = item.pfCharges || 0;
+                    const tpi = item.tpiCharges || 0;
+                    const discount = item.discountPercent || 0;
+
+                    const unitRate = (unitPrice + ndt + spec + spares + cert + pf + tpi) * (1 - discount / 100);
+                    const totalRate = unitRate * (item.quantity || 1);
+
+                    return (
+                      <div key={idx} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 space-y-4 relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1.5 h-full bg-brand-600"></div>
+                        <div className="flex justify-between items-start gap-4">
+                          <div>
+                            <span className="px-2 py-0.5 bg-brand-100 text-brand-700 text-[10px] font-black rounded uppercase">Item {item.itemNo || idx + 1}</span>
+                            <h3 className="font-bold text-slate-800 text-sm mt-1">{item.description}</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">Category: {item.productCategory} · MOC: {item.materialGrade || 'N/A'}</p>
+                          </div>
+                          <button
+                            onClick={() => setActiveItemIndex(idx)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all shadow-sm"
+                          >
+                            <Sliders className="w-3.5 h-3.5 text-brand-600" /> Edit Checklist Specs
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Quantity</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.quantity}
+                              onChange={e => handleItemPricingChange(idx, 'quantity', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Base Unit Price</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.unitPrice}
+                              onChange={e => handleItemPricingChange(idx, 'unitPrice', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">NDT Charges</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.ndtCharges}
+                              onChange={e => handleItemPricingChange(idx, 'ndtCharges', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Special Testing</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.specialTestingCharges}
+                              onChange={e => handleItemPricingChange(idx, 'specialTestingCharges', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Spares Charges</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.sparesCharges}
+                              onChange={e => handleItemPricingChange(idx, 'sparesCharges', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">P&F Charges</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.pfCharges}
+                              onChange={e => handleItemPricingChange(idx, 'pfCharges', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">TPIA Charges</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.tpiCharges}
+                              onChange={e => handleItemPricingChange(idx, 'tpiCharges', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Discount %</label>
+                            <input
+                              type="number"
+                              disabled={isApproved}
+                              value={item.discountPercent}
+                              onChange={e => handleItemPricingChange(idx, 'discountPercent', e.target.value)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
+                          <span className="text-slate-500 font-medium">Calculated Unit Rate: <strong>₹{Math.round(unitRate).toLocaleString()}</strong></span>
+                          <span className="font-bold text-slate-900">Line Total: ₹{Math.round(totalRate).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-            <DynamicFormRenderer
-              formContext="Quotation"
-              values={dynamicValues}
-              onChange={handleDynamicFieldChange}
-              readOnly={false}
-              currentUserRole={currentUser.role}
-            />
-          </div>
+          )}
+
+          {/* TAB 2: TECHNICAL PART-I */}
+          {activeTab === 'technical' && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Technical Part - I Details</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Define general technical cover page settings printed on Page 1 of the official quotation.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Manufacturer Name</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={techFields.manufacturerName}
+                    onChange={e => setTechFields({ ...techFields, manufacturerName: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Origin of Goods</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={techFields.originOfGoods}
+                    onChange={e => setTechFields({ ...techFields, originOfGoods: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Estimated Weight & Dimensions</label>
+                  <textarea
+                    rows={2}
+                    disabled={isApproved}
+                    value={techFields.weightDimensions}
+                    onChange={e => setTechFields({ ...techFields, weightDimensions: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Technical Documents & Drawings Rules</label>
+                  <textarea
+                    rows={2}
+                    disabled={isApproved}
+                    value={techFields.technicalDocuments}
+                    onChange={e => setTechFields({ ...techFields, technicalDocuments: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Delivery Basis Header Summary</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={techFields.deliveryTimeHeader}
+                    onChange={e => setTechFields({ ...techFields, deliveryTimeHeader: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: COMMERCIAL PART-III */}
+          {activeTab === 'commercial' && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Commercial Part - III (Terms & Conditions)</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Customise commercial clauses and legal boundaries shown on Page 4 of the quotation.</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Price Basis</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.priceBasis}
+                    onChange={e => setCommFields({ ...commFields, priceBasis: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Packing & Forwarding Terms</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.packingForwardingTerms}
+                    onChange={e => setCommFields({ ...commFields, packingForwardingTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Freight Terms</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.freightTerms}
+                    onChange={e => setCommFields({ ...commFields, freightTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Tax & Duty Terms</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.taxDutyTerms}
+                    onChange={e => setCommFields({ ...commFields, taxDutyTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Payment Terms</label>
+                  <textarea
+                    rows={2}
+                    disabled={isApproved}
+                    value={commFields.paymentTerms}
+                    onChange={e => setCommFields({ ...commFields, paymentTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Validity Terms</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.validityTerms}
+                    onChange={e => setCommFields({ ...commFields, validityTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Third Party Inspection (TPIA) Terms</label>
+                  <textarea
+                    rows={2}
+                    disabled={isApproved}
+                    value={commFields.tpiTerms}
+                    onChange={e => setCommFields({ ...commFields, tpiTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Transit Insurance</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.transitInsurance}
+                    onChange={e => setCommFields({ ...commFields, transitInsurance: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Guarantee / Warranty Period</label>
+                  <input
+                    type="text"
+                    disabled={isApproved}
+                    value={commFields.guaranteeTerms}
+                    onChange={e => setCommFields({ ...commFields, guaranteeTerms: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Attachments & Files */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mt-6">
@@ -360,35 +699,36 @@ const QuotationDetail = () => {
                  setQuotation(prev => ({ ...prev, files: [...(prev.files || []), newFile] }));
                  handleUpdate({ files: [...(quotation.files || []).map(f => f._id || f), newFile._id] });
               }}
-              readOnly={quotation.status === 'APPROVED'}
+              readOnly={isApproved}
             />
           </div>
         </div>
 
+        {/* SIDE PANEL */}
         <div className="space-y-6">
-          {/* Commercial Summary — role gated */}
+          {/* Commercial Summary */}
           {canSeePricing ? (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden relative">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-brand-50 rounded-bl-full opacity-50 -mr-10 -mt-10"></div>
-            <h2 className="text-lg font-bold text-slate-900 mb-6 relative z-10 flex items-center gap-2">
-               <IndianRupee className="w-5 h-5 text-brand-600" /> Commercial Summary
-            </h2>
-            <div className="space-y-4 relative z-10">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-500 font-medium">Subtotal (Excl. GST)</span>
-                <span className="font-bold text-slate-900">₹{(quotation.commercialTotals?.grandTotal || 0).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-500 font-medium">Estimated GST (18%)</span>
-                <span className="font-bold text-slate-900">₹{((quotation.commercialTotals?.grandTotal || 0) * 0.18).toLocaleString()}</span>
-              </div>
-              <hr className="border-slate-100" />
-              <div className="flex justify-between items-center pt-2">
-                <span className="text-slate-900 font-black uppercase tracking-tight">Grand Total</span>
-                <span className="text-xl font-black text-brand-600">₹{((quotation.commercialTotals?.grandTotal || 0) * 1.18).toLocaleString()}</span>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden relative">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-brand-50 rounded-bl-full opacity-50 -mr-10 -mt-10"></div>
+              <h2 className="text-lg font-bold text-slate-900 mb-6 relative z-10 flex items-center gap-2">
+                 <IndianRupee className="w-5 h-5 text-brand-600" /> Commercial Summary
+              </h2>
+              <div className="space-y-4 relative z-10">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500 font-medium">Subtotal (Excl. GST)</span>
+                  <span className="font-bold text-slate-900">₹{Math.round(subtotal).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500 font-medium">Estimated GST (18%)</span>
+                  <span className="font-bold text-slate-900">₹{Math.round(gst).toLocaleString()}</span>
+                </div>
+                <hr className="border-slate-100" />
+                <div className="flex justify-between items-center pt-2">
+                  <span className="text-slate-900 font-black uppercase tracking-tight">Grand Total</span>
+                  <span className="text-xl font-black text-brand-600">₹{Math.round(grand).toLocaleString()}</span>
+                </div>
               </div>
             </div>
-          </div>
           ) : (
             <div className="bg-slate-100 border border-slate-200 rounded-2xl p-6 flex items-center gap-3 text-slate-500">
               <Lock className="w-5 h-5" />
@@ -399,7 +739,7 @@ const QuotationDetail = () => {
             </div>
           )}
 
-          {/* Revision Notes History */}
+          {/* Revision History */}
           {(quotation.revisionNotes?.length > 0) && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
               <h3 className="text-xs font-black text-amber-700 uppercase tracking-widest mb-3">Revision History</h3>
@@ -449,7 +789,56 @@ const QuotationDetail = () => {
           </div>
         </div>
       </div>
-      {/* Email Composer */}
+
+      {/* SPECIFICATIONS DRAWER */}
+      {activeItemIndex !== null && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Contract Checklist Specifications</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Item {activeItemIndex + 1}: {items[activeItemIndex]?.description}</p>
+              </div>
+              <button
+                onClick={() => setActiveItemIndex(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <DynamicFormRenderer
+                formContext="Quotation"
+                values={{
+                  productCategory: items[activeItemIndex]?.productCategory || '',
+                  ...(items[activeItemIndex]?.dynamicFields || {})
+                }}
+                onChange={(fieldName, value) => {
+                  const newItems = [...items];
+                  if (!newItems[activeItemIndex].dynamicFields) {
+                    newItems[activeItemIndex].dynamicFields = {};
+                  }
+                  newItems[activeItemIndex].dynamicFields[fieldName] = value;
+                  setItems(newItems);
+                }}
+                readOnly={isApproved}
+                currentUserRole={currentUser.role}
+              />
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                onClick={() => setActiveItemIndex(null)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50"
+              >
+                Close & Keep Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <EmailComposerModal
         isOpen={showEmailModal}
         onClose={() => setShowEmailModal(false)}

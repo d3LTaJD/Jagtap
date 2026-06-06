@@ -35,7 +35,7 @@ const enquirySchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['New', 'Contacted', 'Technical Review', 'Quoted', 'Negotiating', 'Won', 'Lost', 'On Hold', 'Abandoned'],
+    enum: ['New', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'Won', 'Lost', 'On Hold', 'Abandoned'],
     default: 'New'
   },
   lostReason: { type: String, enum: ['Price', 'Delivery', 'Competition', 'No Response', 'Spec Mismatch', 'Budget', 'Project Cancelled', 'Other'] },

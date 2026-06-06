@@ -1,4 +1,5 @@
 const Notification = require('../models/Notification');
+const nodemailer = require('nodemailer');
 
 const User = require('../models/User');
 const Role = require('../models/Role');
@@ -19,38 +20,37 @@ exports.sendEmail = async ({ userId, subject, text }) => {
     const u = await User.findById(userId);
     if (!u || !u.email) return;
 
-    if (!process.env.BREVO_API_KEY) {
-      console.log(`\n========== [Email Mock] ==========`);
-      console.log(`To: ${u.email}\nSubject: ${subject}\nBody: \n${text}`);
-      console.log(`==================================\n`);
-      return; 
-    }
+    const senderEmail = process.env.EMAIL_USER || 'ai@petrovalves.co.in';
 
-    const payload = {
-      sender: { name: "Petro Valve Workflow System", email: process.env.EMAIL_USER || "datawhiz.ai@gmail.com" },
-      to: [{ email: u.email }],
-      subject: subject,
-      textContent: text
-    };
+    // 1. Try SMTP first
+    try {
+      const port = parseInt(process.env.SMTP_PORT || 465, 10);
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'mail.petrovalves.co.in',
+        port: port,
+        secure: port === 465,
+        auth: {
+          user: process.env.SMTP_USER || 'ai@petrovalves.co.in',
+          pass: process.env.SMTP_PASS || 'Ai@@27042026'
+        },
+        connectionTimeout: 5000,
+        greetingTimeout: 5000
+      });
 
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'api-key': process.env.BREVO_API_KEY,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
+      await transporter.sendMail({
+        from: `"Petro Valve Workflow System" <${senderEmail}>`,
+        to: u.email,
+        subject: subject,
+        text: text
+      });
 
-    if (!response.ok) {
-      const errData = await response.text();
-      console.error('[Email] Brevo API Error:', errData);
-    } else {
-      console.log(`[Email] Successfully sent via Brevo to ${u.email}`);
+      console.log(`[Email] Notification email successfully sent via SMTP to ${u.email}`);
+      return;
+    } catch (smtpErr) {
+      console.error(`[Email] SMTP send failed: ${smtpErr.message}. Email could not be sent to ${u.email}`);
     }
   } catch (err) {
-    console.error('[Email] Error sending email via Brevo:', err.message);
+    console.error('[Email] Error sending email:', err.message);
   }
 };
 

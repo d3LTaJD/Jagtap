@@ -378,10 +378,12 @@ const Dashboard = () => {
                     <div className="w-2 h-2 rounded-full bg-brand-500"></div>
                   </span>
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 mb-1">
-                    <p className="text-sm font-bold text-slate-900">{act.addedBy?.name || 'Team'} <span className="text-slate-500 font-normal">logged a {act.type?.toLowerCase().replace('_', ' ')} on</span> {act.enquiry?.enquiryId || 'Unknown Enquiry'}</p>
+                    <p className="text-sm font-bold text-slate-900">{act.addedBy?.name || 'AI Bot'} <span className="text-slate-500 font-normal">logged a {act.type?.toLowerCase().replace('_', ' ')} on</span> {act.enquiry?.enquiryId ? <span className="text-brand-600">{act.enquiry.enquiryId}</span> : <span className="text-slate-400 italic text-xs">Enquiry</span>}</p>
                     <span className="text-xs text-slate-400">{new Date(act.createdAt).toLocaleDateString('en-GB')}</span>
                   </div>
-                  <p className="text-sm text-slate-600 leading-relaxed mb-2 bg-slate-50/50 p-3 rounded-xl border border-slate-100 italic">"{act.notes}"</p>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-2 bg-slate-50/50 p-3 rounded-xl border border-slate-100 italic">
+                    &ldquo;{(act.notes || '').length > 150 ? (act.notes).slice(0, 150) + '…' : act.notes}&rdquo;
+                  </p>
                   <div className="flex flex-wrap gap-2 mt-2">
                     {act.outcome && <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">{act.outcome}</span>}
                   </div>

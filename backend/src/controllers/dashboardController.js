@@ -5,7 +5,7 @@ const FollowUp = require('../models/FollowUp');
 const Customer = require('../models/Customer');
 
 // All statuses that mean the enquiry is still alive / active
-const ACTIVE_STATUSES = ['New', 'Contacted', 'Technical Review', 'Quoted', 'Negotiating', 'On Hold'];
+const ACTIVE_STATUSES = ['New', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'On Hold'];
 
 exports.getDashboardStats = async (req, res, next) => {
   try {

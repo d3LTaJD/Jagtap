@@ -41,7 +41,16 @@ exports.extractEnquiryDetails = async (emailText, metadata = {}) => {
   
   console.log(`[AI Extraction] Processing email from "${fromAddress}" with subject "${subjectText}"`);
 
-  // Attempt using Gemini first
+  // Attempt using Groq first
+  if (process.env.GROQ_API_KEY) {
+    try {
+      return await callGroq(emailText, fromAddress, subjectText);
+    } catch (err) {
+      console.error('[AI Extraction] Groq API call failed, trying fallback...', err.message);
+    }
+  }
+
+  // Attempt using Gemini next
   if (process.env.GEMINI_API_KEY) {
     try {
       return await callGemini(emailText, fromAddress, subjectText);
@@ -63,6 +72,44 @@ exports.extractEnquiryDetails = async (emailText, metadata = {}) => {
   console.log('[AI Extraction] Using heuristic regex-based fallback extractor.');
   return runHeuristicExtraction(emailText, fromAddress, subjectText);
 };
+
+/**
+ * Call Groq API with JSON response format.
+ */
+async function callGroq(text, from, subject) {
+  const apiKey = process.env.GROQ_API_KEY;
+  const url = 'https://api.groq.com/openai/v1/chat/completions';
+  
+  const prompt = buildPrompt(text, from, subject);
+
+  const payload = {
+    model: 'llama-3.3-70b-versatile',
+    messages: [
+      { role: 'user', content: prompt }
+    ],
+    response_format: { type: 'json_object' }
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Groq API returned status ${res.status}: ${errorText}`);
+  }
+
+  const result = await res.json();
+  const rawText = result.choices?.[0]?.message?.content;
+  if (!rawText) throw new Error("Groq response is empty or formatted incorrectly");
+
+  return cleanAndNormalizeResult(JSON.parse(rawText.trim()), from);
+}
 
 /**
  * Call Gemini 1.5 Flash API with JSON response constraints.
@@ -299,3 +346,192 @@ function extractEmailFromString(str) {
   const match = str.match(/<([^>]+)>/) || str.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
   return match ? match[1].trim() : str.trim();
 }
+
+/**
+ * Dynamic Field Extractor from emails
+ */
+exports.extractDynamicFields = async (emailText, fieldDefinitions) => {
+  if (!fieldDefinitions || fieldDefinitions.length === 0) return {};
+
+  const fieldListStr = fieldDefinitions.map(f => {
+    return `- "${f.fieldName}" (type: ${f.fieldType}, label: "${f.fieldLabel}"): ${f.placeholder || ''} ${f.options && f.options.length ? '(Options: ' + JSON.stringify(f.options) + ')' : ''}`;
+  }).join('\n');
+
+  const prompt = `You are a data extraction bot.
+Read the email text below:
+"""
+${emailText}
+"""
+
+We have defined the following custom fields that we need to extract from this text:
+${fieldListStr}
+
+Extract values for these fields. Return ONLY a JSON object containing the fieldName keys that you found values for. For fields that are not mentioned or cannot be determined, do NOT include them in the JSON object.
+Ensure values match the expected types:
+- Dropdown fields must match one of the listed options (case-insensitive or exact).
+- Checkbox fields must be boolean (true/false).
+- Number fields must be numeric.
+- Text fields must be strings.
+
+Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanations.`;
+
+  // 1. Try Groq
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const apiKey = process.env.GROQ_API_KEY;
+      const url = 'https://api.groq.com/openai/v1/chat/completions';
+      const payload = {
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' }
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = result.choices?.[0]?.message?.content;
+        if (rawText) {
+          // Normalize and validate option fields against available choices
+          const data = JSON.parse(rawText.trim());
+          const normalized = {};
+          for (const key of Object.keys(data)) {
+            const field = fieldDefinitions.find(f => f.fieldName === key);
+            if (field) {
+              let val = data[key];
+              if (field.fieldType.includes('Dropdown') && field.options && field.options.length) {
+                const matchedOpt = field.options.find(opt => {
+                  const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+                  return normalizeStr(opt) === normalizeStr(val);
+                });
+                if (matchedOpt) {
+                  normalized[key] = matchedOpt;
+                  continue;
+                }
+              }
+              normalized[key] = val;
+            }
+          }
+          return normalized;
+        }
+      }
+    } catch (err) {
+      console.error('[AI Dynamic Extraction] Groq API failed:', err.message);
+    }
+  }
+
+  // 2. Try Gemini
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          return JSON.parse(rawText.trim());
+        }
+      }
+    } catch (err) {
+      console.error('[AI Dynamic Extraction] Gemini API failed:', err.message);
+    }
+  }
+
+  // 3. Try OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const apiKey = process.env.OPENAI_API_KEY;
+      const url = 'https://api.openai.com/v1/chat/completions';
+      const payload = {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' }
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = result.choices?.[0]?.message?.content;
+        if (rawText) {
+          return JSON.parse(rawText.trim());
+        }
+      }
+    } catch (err) {
+      console.error('[AI Dynamic Extraction] OpenAI API failed:', err.message);
+    }
+  }
+
+  // Heuristic fallback
+  const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const extracted = {};
+  for (const field of fieldDefinitions) {
+    const label = field.fieldLabel;
+    const labelClean = label.replace(/\([^)]*\)/g, '').trim(); // Remove parentheticals like "(DN)"
+    const name = field.fieldName;
+    
+    const escapedLabel = escapeRegExp(label);
+    const escapedLabelClean = escapeRegExp(labelClean);
+    const escapedName = escapeRegExp(name);
+
+    // Try multiple matching patterns
+    const patterns = [
+      new RegExp(`${escapedLabel}\\s*[:=-]\\s*([^\\n]+)`, 'i'),
+      new RegExp(`${escapedLabelClean}\\s*[:=-]\\s*([^\\n]+)`, 'i'),
+      new RegExp(`${escapedName}\\s*[:=-]\\s*([^\\n]+)`, 'i')
+    ];
+    
+    for (const regex of patterns) {
+      const match = emailText.match(regex);
+      if (match) {
+        let val = match[1].trim();
+        val = val.replace(/[,;]$/, '');
+        if (field.fieldType.includes('Number')) {
+          const num = parseFloat(val);
+          if (!isNaN(num)) extracted[field.fieldName] = num;
+        } else if (field.fieldType.includes('Checkbox')) {
+          extracted[field.fieldName] = /yes|true|1/i.test(val);
+        } else {
+          if (field.options && field.options.length) {
+            // Case-insensitive exact option matching
+            let matchedOpt = field.options.find(opt => String(opt).toLowerCase() === val.toLowerCase());
+            if (!matchedOpt) {
+              // Try normalized comparison (strip spaces, quotes, punctuation)
+              const normalize = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+              const normVal = normalize(val);
+              matchedOpt = field.options.find(opt => normalize(opt) === normVal);
+            }
+            if (matchedOpt) {
+              extracted[field.fieldName] = matchedOpt;
+            } else {
+              extracted[field.fieldName] = val;
+            }
+          } else {
+            extracted[field.fieldName] = val;
+          }
+        }
+        break;
+      }
+    }
+  }
+  return extracted;
+};

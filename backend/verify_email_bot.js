@@ -67,14 +67,14 @@ v.singh@ril.com
     console.log("==================================================");
     
     // Check if the mock customer already exists, delete it so we can test the creation flow cleanly
-    const testEmail = 'v.singh@ril.com';
+    const testEmail = 'jeetdodia12@gmail.com';
     await Customer.deleteOne({ emailAddress: testEmail });
     
     // Construct mock parsed email object for simpleParser
     const mockParsedEmail = {
       from: {
-        text: '"Vikram Singh" <v.singh@ril.com>',
-        value: [{ address: 'v.singh@ril.com', name: 'Vikram Singh' }]
+        text: '"Vikram Singh" <jeetdodia12@gmail.com>',
+        value: [{ address: 'jeetdodia12@gmail.com', name: 'Vikram Singh' }]
       },
       subject: "Enquiry for Ball Valves - Reliance Industries",
       text: mockEmailText
