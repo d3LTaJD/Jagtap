@@ -47,7 +47,22 @@ exports.sendEmail = async ({ userId, subject, text }) => {
       console.log(`[Email] Notification email successfully sent via SMTP to ${u.email}`);
       return;
     } catch (smtpErr) {
-      console.error(`[Email] SMTP send failed: ${smtpErr.message}. Email could not be sent to ${u.email}`);
+      console.error(`[Email] SMTP send failed: ${smtpErr.message}. Trying fallback to Brevo HTTP API...`);
+      if (process.env.BREVO_API_KEY) {
+        try {
+          const { sendEmailViaBrevoApi } = require('./emailService');
+          await sendEmailViaBrevoApi({
+            to: u.email,
+            subject: subject,
+            text: text
+          });
+          console.log(`[Email] Notification email successfully sent via Brevo HTTP API to ${u.email}`);
+        } catch (fallbackErr) {
+          console.error(`[Email] Brevo HTTP API fallback also failed: ${fallbackErr.message}`);
+        }
+      } else {
+        console.error(`[Email] No BREVO_API_KEY set. Cannot try fallback.`);
+      }
     }
   } catch (err) {
     console.error('[Email] Error sending email:', err.message);

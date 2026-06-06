@@ -213,7 +213,23 @@ ${senderEmail}`;
     console.log(`[Email Bot] Automated reply sent via SMTP to ${recipientEmail}. MessageId: ${info.messageId}`);
     return;
   } catch (smtpErr) {
-    console.error(`[Email Bot] SMTP send failed: ${smtpErr.message}. Email could not be sent to ${recipientEmail}`);
+    console.error(`[Email Bot] SMTP send failed: ${smtpErr.message}. Trying fallback to Brevo HTTP API...`);
+    if (process.env.BREVO_API_KEY) {
+      try {
+        const { sendEmailViaBrevoApi } = require('./emailService');
+        await sendEmailViaBrevoApi({
+          to: recipientEmail,
+          subject: `Acknowledgement: Enquiry Registered [Ref: ${enquiryId}]`,
+          text: textContent,
+          html: htmlContent
+        });
+        console.log(`[Email Bot] Automated reply successfully sent via Brevo HTTP API to ${recipientEmail}`);
+      } catch (fallbackErr) {
+        console.error(`[Email Bot] Brevo HTTP API fallback also failed: ${fallbackErr.message}`);
+      }
+    } else {
+      console.error(`[Email Bot] No BREVO_API_KEY set. Cannot try fallback.`);
+    }
   }
 }
 

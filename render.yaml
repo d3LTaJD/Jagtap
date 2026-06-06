@@ -1,24 +1,60 @@
 services:
-  # Backend Node.js / Puppeteer API
+  # Backend Node.js API
   - type: web
     name: petro-valve-backend
     env: docker
     region: singapore
-    plan: free # Note: Free tier has 512MB RAM. Puppeteer might run out of memory occasionally, but usually fine for simple PDFs.
+    plan: starter # Free tier may run out of memory with Puppeteer; Starter recommended
     rootDir: backend
     envVars:
       - key: PORT
         value: 5000
       - key: NODE_ENV
         value: production
+
+      # ── Database ──────────────────────────────────────────────────
       - key: MONGODB_URI
-        sync: false # Set this securely in the Render Dashboard
+        sync: false   # Set in Render Dashboard > Environment
+
+      # ── Auth ──────────────────────────────────────────────────────
       - key: JWT_SECRET
-        generateValue: true
+        generateValue: true   # Render auto-generates a secure random value
+
+      # ── AI (Groq) ─────────────────────────────────────────────────
+      - key: GROQ_API_KEY
+        sync: false   # Get from console.groq.com
+
+      # ── Email Bot Inbox (IMAP - reading incoming emails) ──────────
+      - key: IMAP_HOST
+        value: mail.petrovalves.co.in
+      - key: IMAP_PORT
+        value: 993
+      - key: IMAP_USER
+        sync: false   # ai@petrovalves.co.in
+      - key: IMAP_PASS
+        sync: false
+
+      # ── Outgoing Email / Bot Replies (Brevo SMTP) ─────────────────
+      - key: SMTP_HOST
+        value: smtp-relay.brevo.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        sync: false   # Brevo SMTP login (from Brevo dashboard)
+      - key: SMTP_PASS
+        sync: false   # Brevo SMTP key
+
+      # ── Brevo API (for fallback email sending via HTTPS) ──────────
+      - key: BREVO_API_KEY
+        sync: false   # Get from Brevo > SMTP & API > API Keys
+
+      # ── Sender identity (the FROM address on outgoing emails) ─────
       - key: EMAIL_USER
-        sync: false
+        value: ai@petrovalves.co.in
       - key: EMAIL_PASS
-        sync: false
+        sync: false   # ai@petrovalves.co.in password (for legacy/direct SMTP)
+
+      # ── AWS S3 (file uploads) ─────────────────────────────────────
       - key: AWS_REGION
         sync: false
       - key: AWS_ACCESS_KEY_ID
@@ -28,10 +64,11 @@ services:
       - key: AWS_S3_BUCKET
         sync: false
 
-  # Frontend Vite React App
+  # Frontend Vite React (Static Site)
   - type: web
     name: petro-valve-frontend
     env: static
+    region: singapore
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
@@ -41,8 +78,5 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: petro-valve-backend
-          property: host
-          value: https://${host}/api
+        value: https://petro-valve-backend.onrender.com/api
+        # ↑ Replace with your actual Render backend URL after first deploy
