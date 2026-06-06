@@ -142,6 +142,9 @@ async function sendAutomatedReply(recipientEmail, contactName, enquiryId, extrac
     `;
   }
 
+  let textContent = '';
+  let htmlContent = '';
+
   // 1. Try SMTP first
   try {
     const port = parseInt(process.env.SMTP_PORT || 465, 10);
@@ -157,7 +160,7 @@ async function sendAutomatedReply(recipientEmail, contactName, enquiryId, extrac
       greetingTimeout: 5000
     });
 
-    const textContent = `Dear ${contactName},
+    textContent = `Dear ${contactName},
 
 Thank you for your enquiry. We have successfully registered/updated your request in our system under Reference ID: ${enquiryId}.
 
@@ -173,7 +176,7 @@ Best regards,
 Petro Valve AI Team
 ${senderEmail}`;
 
-    const htmlContent = `
+    htmlContent = `
       <div style="font-family:'Helvetica Neue',Arial,sans-serif;padding:25px;color:#334155;line-height:1.6;max-width:600px;border:1px solid #e2e8f0;border-radius:16px;">
         <div style="border-bottom:2px solid #2563eb;padding-bottom:15px;margin-bottom:20px;">
           <h2 style="color:#1e3a8a;margin:0;font-size:20px;">Petro Valve AI Assistant</h2>
