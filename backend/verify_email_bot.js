@@ -55,7 +55,7 @@ v.singh@ril.com
     `;
 
     console.log("Extracting data from mock email text...");
-    const extractedData = await aiService.extractEnquiryDetails(mockEmailText, {
+    const extractedData = await aiService.extractEnquiries(mockEmailText, [], {
       from: '"Vikram Singh" <v.singh@ril.com>',
       subject: "Enquiry for Ball Valves - Reliance Industries"
     });
@@ -82,6 +82,16 @@ v.singh@ril.com
 
     console.log("Simulating processEmailMessage with parsed email...");
     await emailBotService.processEmailMessage(mockParsedEmail);
+
+    console.log("Processing background queue jobs manually...");
+    const { processJobs } = require('./src/services/queueService');
+    const QueueJob = require('./src/models/QueueJob');
+    let pendingJobs = await QueueJob.countDocuments({ status: { $in: ['Pending', 'Processing'] } });
+    while (pendingJobs > 0) {
+      await processJobs();
+      pendingJobs = await QueueJob.countDocuments({ status: { $in: ['Pending', 'Processing'] } });
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
 
     // Fetch the newly created Customer and Enquiry
     const customerRecord = await Customer.findOne({ emailAddress: testEmail });

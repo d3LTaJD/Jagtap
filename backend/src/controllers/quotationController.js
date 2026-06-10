@@ -8,6 +8,7 @@ const { getNextSequenceValue } = require('../utils/counter');
 exports.createQuotation = async (req, res, next) => {
   try {
     req.body.preparedBy = req.user._id;
+    req.body.createdBy = req.body.createdBy || req.user._id;
     
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -34,15 +35,22 @@ exports.createQuotation = async (req, res, next) => {
 
     if (req.body.enquiry) {
       const enquiry = await Enquiry.findById(req.body.enquiry);
-      if (enquiry) {
-        req.body.productCategory = enquiry.productCategory;
-        // Copy enquiry dynamicFields to parent and to each item
-        req.body.dynamicFields = { ...enquiry.dynamicFields, ...req.body.dynamicFields };
-        if (req.body.items && Array.isArray(req.body.items)) {
-          req.body.items.forEach(item => {
-            item.dynamicFields = { ...enquiry.dynamicFields, ...item.dynamicFields };
-          });
-        }
+      if (!enquiry) {
+        return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+      }
+      if (enquiry.status !== 'Ready for Offer') {
+        return res.status(400).json({
+          status: 'error',
+          message: `Quotation generation is blocked. The associated enquiry is in '${enquiry.status}' status and must be promoted to 'Ready for Offer' before creating a quotation.`
+        });
+      }
+      req.body.productCategory = enquiry.productCategory;
+      // Copy enquiry dynamicFields to parent and to each item
+      req.body.dynamicFields = { ...enquiry.dynamicFields, ...req.body.dynamicFields };
+      if (req.body.items && Array.isArray(req.body.items)) {
+        req.body.items.forEach(item => {
+          item.dynamicFields = { ...enquiry.dynamicFields, ...item.dynamicFields };
+        });
       }
     }
 
@@ -61,6 +69,14 @@ exports.createQuotation = async (req, res, next) => {
     if (req.body.enquiry) {
       await Enquiry.findByIdAndUpdate(req.body.enquiry, { status: 'Quoted' });
     }
+
+    // Log QuotationConversionRate metric
+    const Metrics = require('../models/Metrics');
+    await Metrics.create({
+      metricName: 'QuotationConversionRate',
+      value: 1,
+      metadata: { quotationId: quotation._id, enquiryId: req.body.enquiry }
+    }).catch(err => console.error('[Quotation Controller] Failed to log quotation metric:', err.message));
 
     res.status(201).json({ status: 'success', data: { quotation } });
   } catch (err) {
@@ -241,7 +257,7 @@ exports.downloadPDF = async (req, res, next) => {
 };
 
 const { generateQuotationPdf } = require('../services/pdfService');
-const { uploadFileToS3 } = require('../services/s3Service');
+const { uploadFile } = require('../services/localStorageService');
 const FileMetadata = require('../models/FileMetadata');
 
 exports.generatePdf = async (req, res, next) => {
@@ -256,16 +272,16 @@ exports.generatePdf = async (req, res, next) => {
     // 1. Generate PDF buffer using puppeteer service
     const pdfBuffer = await generateQuotationPdf(quotation);
     
-    // 2. Upload to S3 directly from memory buffer
+    // 2. Save file to local storage
     const fileName = `${quotation.quotationId}_Official.pdf`;
     const mimeType = 'application/pdf';
-    const s3Key = await uploadFileToS3(pdfBuffer, fileName, mimeType);
+    const fileKey = await uploadFile(pdfBuffer, fileName, mimeType);
 
     // 3. Save FileMetadata tracking record
     const fileMeta = await FileMetadata.create({
       fileName,
       originalName: fileName,
-      s3Key,
+      fileKey,
       mimeType,
       size: pdfBuffer.length,
       uploadedBy: req.user._id,

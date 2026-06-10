@@ -35,19 +35,60 @@ const enquirySchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['New', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'Won', 'Lost', 'On Hold', 'Abandoned'],
+    enum: ['New', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'Won', 'Lost', 'On Hold', 'Abandoned', 'Needs Review', 'Verified'],
     default: 'New'
   },
   lostReason: { type: String, enum: ['Price', 'Delivery', 'Competition', 'No Response', 'Spec Mismatch', 'Budget', 'Project Cancelled', 'Other'] },
   lostReasonDetail: { type: String, maxlength: 200 },
   winPoValue: { type: Number },
 
+  // Verification and confidence metrics
+  isUnverified: { type: Boolean, default: false },
+  extractionConfidence: { type: Number }, // Final score
+  aiConfidence: { type: Number },
+  ocrConfidence: { type: Number },
+
+  // Traceability tracking
+  originalMessageId: { type: String, index: true },
+  sourceEmailId: { type: String },
+  threadId: { type: String, index: true },
+
   // Mixed object to explicitly support the Dynamic Field configuration dictated by M0 Field Builder
   dynamicFields: { type: mongoose.Schema.Types.Mixed, default: {} },
 
+  products: [
+    {
+      description: { type: String, default: '' },
+      quantity: { type: Number, default: 1 },
+      unit: {
+        type: String,
+        enum: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'],
+        default: 'NOS'
+      },
+      category: { type: String },
+      standardCode: { type: String },
+      confidence: { type: Number }
+    }
+  ],
+  minConfidence: { type: Number },
+
   internalNotes: { type: String, maxlength: 300 },
   attachments: [{ type: String }], // Legacy URLs
-  files: [{ type: mongoose.Schema.Types.ObjectId, ref: 'FileMetadata' }], // New secure S3 files
+  files: [{ type: mongoose.Schema.Types.ObjectId, ref: 'FileMetadata' }], // Local storage files
+  attachmentsList: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Attachment' }], // Linked attachments (Granular & Versioned)
+
+  // Review History Audit Log
+  reviewHistory: [
+    {
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      reviewedAt: { type: Date, default: Date.now },
+      oldValues: { type: mongoose.Schema.Types.Mixed },
+      newValues: { type: mongoose.Schema.Types.Mixed },
+      reviewNotes: { type: String },
+      confidenceBefore: { type: Number },
+      confidenceAfter: { type: Number }
+    }
+  ],
 
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   lastModifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -55,6 +96,10 @@ const enquirySchema = new mongoose.Schema({
   // Follow-up Engine (denormalized for quick display)
   nextFollowUpDate: { type: Date, default: null },
   lastFollowUpAt: { type: Date, default: null },
+  processingStatus: { type: String, enum: ['Pending', 'Processing', 'Completed', 'Failed'], default: 'Pending', index: true },
+  processingMessage: { type: String },
+  processingStartedAt: { type: Date },
+  processingCompletedAt: { type: Date }
 }, { timestamps: true });
 
 enquirySchema.index({ status: 1 });

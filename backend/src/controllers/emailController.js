@@ -1,6 +1,6 @@
 const { sendEmail } = require('../services/emailService');
 const FileMetadata = require('../models/FileMetadata');
-const { getFileBufferFromS3 } = require('../services/s3Service');
+const { getFileBuffer } = require('../services/localStorageService');
 
 exports.sendCustomEmail = async (req, res, next) => {
   try {
@@ -28,8 +28,8 @@ exports.sendCustomEmail = async (req, res, next) => {
       
       for (const file of files) {
         try {
-          // Fetch the actual file body from S3
-          const buffer = await getFileBufferFromS3(file.s3Key);
+          // Fetch the actual file body from local storage
+          const buffer = await getFileBuffer(file.fileKey);
           
           if (buffer) {
             emailOptions.attachments.push({

@@ -24,6 +24,7 @@ import Gallery from './pages/Gallery';
 import SystemSettings from './pages/SystemSettings';
 import MasterData from './pages/MasterData';
 import AuditLog from './pages/AuditLog';
+import SystemLogs from './pages/SystemLogs';
 import Vendors from './pages/Vendors';
 import Products from './pages/Products';
 import { AbilityProvider } from './context/AbilityContext';
@@ -64,6 +65,7 @@ function App() {
           <Route path="settings" element={<SystemSettings />} />
           <Route path="master-data" element={<MasterData />} />
           <Route path="audit-logs" element={<AuditLog />} />
+          <Route path="system-logs" element={<SystemLogs />} />
         </Route>
         
         <Route path="*" element={<Navigate to="/login" replace />} />

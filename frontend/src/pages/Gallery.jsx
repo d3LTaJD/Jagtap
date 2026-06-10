@@ -47,7 +47,7 @@ const Gallery = () => {
       const res = await api.get(`/files/${fileId}/download-url`);
       const { url } = res.data.data;
       
-      // Open in new tab (secure S3 link)
+      // Open in new tab (secure local storage link)
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       console.error('Download failed:', err);

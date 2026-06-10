@@ -95,7 +95,30 @@ const Quotations = () => {
   const handleEnquirySelect = (e) => {
     const enqId = e.target.value;
     const selected = enquiriesForSelect.find(eq => eq._id === enqId);
-    setFormData({ ...formData, enquiry: enqId, customer: selected?.customer?._id || '' });
+    if (selected) {
+      const defaultItems = selected.products && selected.products.length > 0
+        ? selected.products.map(p => ({
+            description: p.description || '',
+            quantity: p.quantity || 1,
+            unitPrice: 0,
+            lineTotalExclGST: 0
+          }))
+        : [{
+            description: selected.productDescription || '',
+            quantity: selected.quantity || 1,
+            unitPrice: 0,
+            lineTotalExclGST: 0
+          }];
+      setFormData({
+        ...formData,
+        enquiry: enqId,
+        customer: selected.customer?._id || '',
+        scopeOfSupply: selected.productDescription || '',
+        items: defaultItems
+      });
+    } else {
+      setFormData({ ...formData, enquiry: enqId, customer: '' });
+    }
   };
 
   const addItem = () => setFormData({...formData, items: [...formData.items, { description: '', quantity: 1, unitPrice: 0, lineTotalExclGST: 0 }]});
@@ -158,6 +181,37 @@ const Quotations = () => {
     const interval = setInterval(fetchQuotations, 60000); // Auto-refresh every 60s
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const createForEnquiryId = params.get('createForEnquiry');
+    if (createForEnquiryId && enquiriesForSelect.length > 0) {
+      const selected = enquiriesForSelect.find(eq => eq._id === createForEnquiryId);
+      if (selected) {
+        const defaultItems = selected.products && selected.products.length > 0
+          ? selected.products.map(p => ({
+              description: p.description || '',
+              quantity: p.quantity || 1,
+              unitPrice: 0,
+              lineTotalExclGST: 0
+            }))
+          : [{
+              description: selected.productDescription || '',
+              quantity: selected.quantity || 1,
+              unitPrice: 0,
+              lineTotalExclGST: 0
+            }];
+        setFormData(prev => ({
+          ...prev,
+          enquiry: createForEnquiryId,
+          customer: selected.customer?._id || '',
+          scopeOfSupply: selected.productDescription || '',
+          items: defaultItems
+        }));
+        setShowNewModal(true);
+      }
+    }
+  }, [enquiriesForSelect]);
 
   const formatCurrency = (amount) => {
     if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
@@ -302,10 +356,12 @@ const Quotations = () => {
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-slate-700 mb-1">Select Source Enquiry</label>
                       <AutocompleteSelect
-                        options={enquiriesForSelect.map(eq => ({
-                          value: eq._id,
-                          label: `${eq.enquiryId} - ${eq.customer?.companyName} (${eq.coreFields?.productCategory || 'N/A'})`
-                        }))}
+                        options={enquiriesForSelect
+                          .filter(eq => eq.status === 'Ready for Offer' || eq._id === formData.enquiry)
+                          .map(eq => ({
+                            value: eq._id,
+                            label: `${eq.enquiryId} - ${eq.customer?.companyName} (${eq.productCategory || eq.coreFields?.productCategory || 'N/A'})`
+                          }))}
                         value={formData.enquiry}
                         onChange={v => handleEnquirySelect({ target: { value: v } })}
                         placeholder="-- Select an active Enquiry --"

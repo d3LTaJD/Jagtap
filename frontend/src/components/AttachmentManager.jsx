@@ -104,7 +104,7 @@ const AttachmentManager = ({ moduleName, entityId = null, onUploadComplete, uplo
             <h4 className="text-sm font-bold text-slate-800">
               {uploading ? 'Uploading securely...' : 'Click or drag files here'}
             </h4>
-            <p className="text-xs text-slate-500">Securely stored encrypted in AWS S3.</p>
+            <p className="text-xs text-slate-500">Stored securely on local server.</p>
           </div>
         </div>
       )}

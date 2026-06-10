@@ -30,3 +30,8 @@ logs/
 backend/scratch_*.js
 backend/scratch_*.txt
 backend/scratch/
+
+# Local Storage, Backups & Trained Data
+backend/backups/
+backend/uploads/
+backend/eng.traineddata

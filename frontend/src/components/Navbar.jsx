@@ -197,10 +197,14 @@ const Navbar = ({ onMenuClick }) => {
           <div ref={dropdownRef} className="relative">
             <button
               onClick={() => setShowDropdown(!showDropdown)}
-              className="relative p-2 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-full transition-colors"
+              className="relative p-2 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-full transition-colors animate-in"
             >
               <Bell className="w-5 h-5" />
-              {unreadCount > 0 && <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white" />}
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 bg-red-500 text-white font-extrabold text-[9px] h-4.5 min-w-[18px] rounded-full flex items-center justify-center border border-white shadow-sm px-1 transform translate-x-1 -translate-y-1">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </button>
 
             {showDropdown && (

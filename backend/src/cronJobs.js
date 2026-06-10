@@ -38,4 +38,13 @@ exports.initCronJobs = () => {
       console.error('Error in cron job checking follow-ups:', err);
     }
   });
+  // Daily Backup Cron (Run at midnight: 0 0 * * *)
+  cron.schedule('0 0 * * *', async () => {
+    try {
+      const { runDailyBackup } = require('./services/backupService');
+      await runDailyBackup();
+    } catch (err) {
+      console.error('Error in daily backup cron:', err);
+    }
+  });
 };

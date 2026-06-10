@@ -9,6 +9,25 @@ const Role = require('../models/Role');
 exports.createNotification = async ({ user_id, type, title, message, related_id }) => {
   try {
     if (!user_id) return;
+    
+    // Prevent duplicate notifications in the last 60 seconds
+    const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+    const existing = await Notification.findOne({
+      $or: [{ user_id }, { userId: user_id }],
+      type,
+      title,
+      $or: [
+        { related_id: related_id || null },
+        { entityId: related_id || null }
+      ],
+      created_at: { $gte: sixtySecondsAgo }
+    });
+
+    if (existing) {
+      console.log(`[Notification] Duplicate notification blocked for user ${user_id}: "${title}"`);
+      return existing;
+    }
+
     const notif = await Notification.create({ user_id, type, title, message, related_id });
     console.log(`[Notification] Created: "${title}" for user ${user_id}`);
     return notif;

@@ -4,6 +4,9 @@ const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Public download route for window.open downloads
+router.get('/download-local/:key', uploadController.downloadLocalFile);
+
 router.use(protect); // Secure all file operations
 
 router.get('/', uploadController.getAllFiles);

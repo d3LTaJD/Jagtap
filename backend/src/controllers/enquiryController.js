@@ -189,7 +189,9 @@ exports.getEnquiry = async (req, res, next) => {
       .populate('customer')
       .populate('assignedTo', 'fullName')
       .populate('createdBy', 'fullName')
-      .populate('files');
+      .populate('files')
+      .populate('attachmentsList')
+      .populate('reviewHistory.reviewedBy', 'fullName');
     
     if (!enquiry) return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
     res.status(200).json({ status: 'success', data: { enquiry } });
@@ -286,7 +288,15 @@ exports.updateEnquiry = async (req, res, next) => {
       });
     }
 
-    res.status(200).json({ status: 'success', data: { enquiry } });
+    const populatedEnquiry = await Enquiry.findById(enquiry._id)
+      .populate('customer')
+      .populate('assignedTo', 'fullName')
+      .populate('createdBy', 'fullName')
+      .populate('files')
+      .populate('attachmentsList')
+      .populate('reviewHistory.reviewedBy', 'fullName');
+
+    res.status(200).json({ status: 'success', data: { enquiry: populatedEnquiry } });
   } catch (err) {
     next(err);
   }
@@ -314,6 +324,176 @@ exports.deleteEnquiry = async (req, res, next) => {
     });
 
     res.status(200).json({ status: 'success', message: 'Enquiry deleted' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/enquiries/:id/verify-approve
+exports.verifyAndApproveEnquiry = async (req, res, next) => {
+  try {
+    const { updatedFields, reviewNotes } = req.body;
+    const enquiry = await Enquiry.findById(req.params.id);
+    if (!enquiry) {
+      return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+    }
+
+    // Capture changes to record in reviewHistory
+    const oldValues = {};
+    const newValues = {};
+
+    // First build temporary updated enquiry object to validate
+    const tempEnquiry = enquiry.toObject();
+
+    if (updatedFields) {
+      for (const key of Object.keys(updatedFields)) {
+        if (key === 'dynamicFields') {
+          tempEnquiry.dynamicFields = { ...tempEnquiry.dynamicFields, ...updatedFields.dynamicFields };
+        } else {
+          if (Enquiry.schema.paths[key]) {
+            tempEnquiry[key] = updatedFields[key];
+          } else {
+            if (!tempEnquiry.dynamicFields) tempEnquiry.dynamicFields = {};
+            tempEnquiry.dynamicFields[key] = updatedFields[key];
+          }
+        }
+      }
+    }
+
+    // Validate required fields based on category
+    const fields = await FieldDefinition.find({
+      formContext: 'Enquiry',
+      isDeleted: false,
+      isActive: true
+    });
+
+    const relevantFields = fields.filter(f => {
+      if (!f.productCategory) return true;
+      return f.productCategory === tempEnquiry.productCategory;
+    });
+
+    const missingFields = [];
+    for (const field of relevantFields) {
+      let isFieldActive = true;
+      if (field.conditionalLogic && field.conditionalLogic.dependsOnField) {
+        const parentFieldName = field.conditionalLogic.dependsOnField;
+        const expectedValue = field.conditionalLogic.requiredValue;
+        const actualValue = tempEnquiry.dynamicFields?.[parentFieldName] !== undefined
+          ? tempEnquiry.dynamicFields[parentFieldName]
+          : tempEnquiry[parentFieldName];
+
+        if (String(actualValue) !== String(expectedValue)) {
+          isFieldActive = false;
+        }
+      }
+
+      if (isFieldActive && field.isRequired) {
+        const val = tempEnquiry.dynamicFields?.[field.fieldName];
+        const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
+        if (!isFilled) {
+          missingFields.push(field.fieldLabel);
+        }
+      }
+    }
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Verification failed. The following required fields for category '${tempEnquiry.productCategory}' are missing: ${missingFields.join(', ')}`
+      });
+    }
+
+    // If validation passes, apply values to the original enquiry instance
+    if (updatedFields) {
+      for (const key of Object.keys(updatedFields)) {
+        if (key === 'dynamicFields') {
+          oldValues.dynamicFields = { ...enquiry.dynamicFields };
+          newValues.dynamicFields = { ...updatedFields.dynamicFields };
+          enquiry.dynamicFields = { ...enquiry.dynamicFields, ...updatedFields.dynamicFields };
+        } else {
+          const oldVal = enquiry.dynamicFields?.[key] !== undefined ? enquiry.dynamicFields[key] : enquiry[key];
+          oldValues[key] = oldVal;
+          newValues[key] = updatedFields[key];
+
+          if (Enquiry.schema.paths[key]) {
+            enquiry[key] = updatedFields[key];
+          } else {
+            if (!enquiry.dynamicFields) enquiry.dynamicFields = {};
+            enquiry.dynamicFields[key] = updatedFields[key];
+          }
+        }
+      }
+    }
+
+    // Record the audit trace in reviewHistory
+    enquiry.reviewHistory.push({
+      reviewedBy: req.user._id,
+      reviewedAt: new Date(),
+      oldValues,
+      newValues,
+      reviewNotes: reviewNotes || 'Manually verified and approved',
+      confidenceBefore: enquiry.extractionConfidence || enquiry.aiConfidence || 0,
+      confidenceAfter: 100 // Fully human-verified
+    });
+
+    // Mark as verified
+    enquiry.isUnverified = false;
+    enquiry.status = 'Verified';
+    enquiry.lastModifiedBy = req.user._id;
+
+    // Save Enquiry
+    const savedEnquiry = await enquiry.save();
+
+    const populatedEnquiry = await Enquiry.findById(savedEnquiry._id)
+      .populate('customer')
+      .populate('assignedTo', 'fullName')
+      .populate('createdBy', 'fullName')
+      .populate('files')
+      .populate('attachmentsList')
+      .populate('reviewHistory.reviewedBy', 'fullName');
+
+    // Log activity
+    await logActivity({
+      req,
+      action: 'UPDATE',
+      module: 'ENQUIRY',
+      resourceId: populatedEnquiry._id,
+      resourceName: populatedEnquiry.enquiryId,
+      details: `Enquiry verified and approved: ${populatedEnquiry.enquiryId}. Notes: ${reviewNotes || 'none'}`
+    });
+
+    // Log VerificationCompletionRate metric
+    const Metrics = require('../models/Metrics');
+    await Metrics.create({
+      metricName: 'VerificationCompletionRate',
+      value: 1,
+      metadata: { enquiryId: populatedEnquiry._id }
+    }).catch(err => console.error('[Enquiry Controller] Failed to log verification metric:', err.message));
+
+    res.status(200).json({ status: 'success', data: { enquiry: populatedEnquiry } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/enquiries/:id/thread-emails
+exports.getEnquiryThreadEmails = async (req, res, next) => {
+  try {
+    const enquiry = await Enquiry.findById(req.params.id);
+    if (!enquiry) {
+      return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+    }
+
+    if (!enquiry.threadId) {
+      return res.status(200).json({ status: 'success', results: 0, data: { emails: [] } });
+    }
+
+    const EmailMessage = require('../models/EmailMessage');
+    const emails = await EmailMessage.find({ threadId: enquiry.threadId })
+      .populate('attachments')
+      .sort({ receivedAt: 1 });
+
+    res.status(200).json({ status: 'success', results: emails.length, data: { emails } });
   } catch (err) {
     next(err);
   }

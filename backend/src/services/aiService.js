@@ -1,10 +1,5 @@
 const { logActivity } = require('../utils/logger');
 
-/**
- * AI Service for parsing email texts into structured lead objects.
- * Supports Gemini 1.5 Flash (default), OpenAI GPT-4o-mini, and a regex heuristic fallback.
- */
-
 // Normalizes AI product category outputs to the Mongoose Enquiry enum
 const PRODUCT_CATEGORIES = [
   'Pressure Vessel',
@@ -29,339 +24,305 @@ const STANDARD_CODES = [
 ];
 
 /**
- * Extracts structured enquiry data from email raw text.
+ * Extracts a list of enquiries and customer details from email body and attachments.
+ * One email may contain one or more product items. The system will create one Enquiry per extracted product item.
  * 
  * @param {string} emailText The email body content
+ * @param {Array} attachments List of attachments with originalFileName and extractedText
  * @param {object} metadata Information about the email sender (from, subject)
- * @returns {Promise<object>} Parsed structured lead details
+ * @returns {Promise<object>} Parsed structured details containing enquiries array
  */
-exports.extractEnquiryDetails = async (emailText, metadata = {}) => {
+exports.extractEnquiries = async (emailText, attachments = [], metadata = {}) => {
   const fromAddress = metadata.from || '';
   const subjectText = metadata.subject || '';
   
-  console.log(`[AI Extraction] Processing email from "${fromAddress}" with subject "${subjectText}"`);
+  console.log(`[AI Multi-Extraction] Processing email from "${fromAddress}" with subject "${subjectText}"`);
 
-  // Attempt using Groq first
-  if (process.env.GROQ_API_KEY) {
-    try {
-      return await callGroq(emailText, fromAddress, subjectText);
-    } catch (err) {
-      console.error('[AI Extraction] Groq API call failed, trying fallback...', err.message);
-    }
-  }
+  // Format attachments list for prompt context
+  const attachmentsListStr = (attachments || []).map((att, index) => {
+    return `Attachment #${index + 1}:
+Filename: ${att.originalFileName}
+Category: ${att.attachmentCategory || 'Unknown'}
+Extracted Text Content:
+"""
+${att.extractedText || '(No text content extracted)'}
+"""`;
+  }).join('\n\n');
 
-  // Attempt using Gemini next
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      return await callGemini(emailText, fromAddress, subjectText);
-    } catch (err) {
-      console.error('[AI Extraction] Gemini API call failed, trying fallback...', err.message);
-    }
-  }
+  const prompt = `You are an enterprise email routing and requirements gathering bot for Petro Valve Workflow Automation.
+Read the customer email request and its parsed attachments:
 
-  // Attempt using OpenAI next
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      return await callOpenAI(emailText, fromAddress, subjectText);
-    } catch (err) {
-      console.error('[AI Extraction] OpenAI API call failed, trying fallback...', err.message);
-    }
-  }
-
-  // Final fallback: Local Heuristics (no API keys, offline testing, or API failure)
-  console.log('[AI Extraction] Using heuristic regex-based fallback extractor.');
-  return runHeuristicExtraction(emailText, fromAddress, subjectText);
-};
-
-/**
- * Call Groq API with JSON response format.
- */
-async function callGroq(text, from, subject) {
-  const apiKey = process.env.GROQ_API_KEY;
-  const url = 'https://api.groq.com/openai/v1/chat/completions';
-  
-  const prompt = buildPrompt(text, from, subject);
-
-  const payload = {
-    model: 'llama-3.3-70b-versatile',
-    messages: [
-      { role: 'user', content: prompt }
-    ],
-    response_format: { type: 'json_object' }
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Groq API returned status ${res.status}: ${errorText}`);
-  }
-
-  const result = await res.json();
-  const rawText = result.choices?.[0]?.message?.content;
-  if (!rawText) throw new Error("Groq response is empty or formatted incorrectly");
-
-  return cleanAndNormalizeResult(JSON.parse(rawText.trim()), from);
-}
-
-/**
- * Call Gemini 1.5 Flash API with JSON response constraints.
- */
-async function callGemini(text, from, subject) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-  
-  const prompt = buildPrompt(text, from, subject);
-  
-  const payload = {
-    contents: [{
-      parts: [{ text: prompt }]
-    }],
-    generationConfig: {
-      responseMimeType: "application/json"
-    }
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Gemini API returned status ${res.status}: ${errorText}`);
-  }
-
-  const result = await res.json();
-  const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) throw new Error("Gemini response is empty or formatted incorrectly");
-
-  return cleanAndNormalizeResult(JSON.parse(rawText.trim()), from);
-}
-
-/**
- * Call OpenAI Chat Completion API with JSON response format.
- */
-async function callOpenAI(text, from, subject) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const url = 'https://api.openai.com/v1/chat/completions';
-  
-  const prompt = buildPrompt(text, from, subject);
-
-  const payload = {
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'user', content: prompt }
-    ],
-    response_format: { type: 'json_object' }
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`OpenAI API returned status ${res.status}: ${errorText}`);
-  }
-
-  const result = await res.json();
-  const rawText = result.choices?.[0]?.message?.content;
-  if (!rawText) throw new Error("OpenAI response is empty or formatted incorrectly");
-
-  return cleanAndNormalizeResult(JSON.parse(rawText.trim()), from);
-}
-
-/**
- * Builds the prompting guidelines for the model.
- */
-function buildPrompt(emailText, from, subject) {
-  return `You are a data entry automation bot for Petro Valve Workflow Automation.
-Your task is to parse a customer's email request and extract structured enquiry details to fit our backend database.
-
-Read the email details below:
-Sender Info (From): ${from}
-Subject: ${subject}
+Sender Info (From): ${fromAddress}
+Subject: ${subjectText}
 Email Body:
 """
 ${emailText}
 """
 
-Extract and return ONLY a JSON object containing the following keys (do not wrap in markdown quotes, return ONLY the raw JSON string):
+Parsed Email Attachments:
+${attachmentsListStr || 'None'}
 
-1. "companyName" (string): The company the sender represents. If not mentioned in the text, guess it from the email signature or domain name of the email address (e.g. for "sales@abccorp.com", return "ABC Corp"). If it's a generic public email (e.g. Gmail/Yahoo) and no company is mentioned, write "Individual Customer".
-2. "primaryContactName" (string): The sender's name. Check the signature or headers (e.g., if From is "John Doe <john@abc.com>", it's "John Doe"). Default to "Email Contact" if unknown.
-3. "mobileNumber" (string): The contact's phone/mobile number. Check the email signature block or text. If not found, output "0000000000".
-4. "productCategory" (string): Must match exactly one of the following:
-   - "Piping" (Use this for all valves, ball valves, gate valves, check valves, flanges, piping parts, etc.)
-   - "Pressure Vessel"
-   - "Heat Exchanger"
-   - "Storage Tank"
-   - "Structural"
-   - "Custom"
-   - "Multiple"
-   Default to "Piping" for valve inquiries.
-5. "productDescription" (string): A short, professional summary of the items and specs requested (e.g., "50 pcs Ball Valves, 2 inch, Class 150"). Limit to 200 characters.
-6. "quantity" (number): The total quantity of items requested (integer). Default to 1 if not specified.
-7. "unit" (string): The unit of quantity. Must be one of: "NOS", "SET", "MT", "KG", "M", "M2", "Job". Default is "NOS".
-8. "standardCode" (string): The technical standard requested. Must be one of: "ASME", "IS", "BS", "EN", "API", "IBR", "Custom", "Not specified". Default to "Not specified" if unknown.
-9. "specialRequirements" (string): Any specific material details, inspections, delivery requests, or paint specs. Limit to 400 characters. Leave empty if none.
-10. "priority" (string): The urgency of the request. Must be one of: "Urgent", "High", "Medium", "Low". Base this on words like "urgent", "immediate", "ASAP" or deadlines. Default is "Medium".
-11. "isEnquiry" (boolean): True if this email is a genuine commercial inquiry, request for quotation (RFQ), or product specification request for Petro Valve's products (valves, pipes, flanges, vessels, etc.). False if it is a general discussion, promotional material, spam, newsletter, newsletter subscription, delivery failure bounce, personal email, or unrelated content.
+Your task is to parse this email request and its attachments, extract customer contact details, and split the request into one or more product enquiries. One email may contain one or more product items. The system will create one Enquiry per extracted product item.
+
+Return ONLY a JSON object containing the following keys (do not wrap in markdown quotes, return ONLY the raw JSON string):
+
+1. "isEnquiry" (boolean): True if this email is a genuine commercial inquiry, request for quotation (RFQ), or product specification request for Petro Valve's products (valves, pipes, flanges, vessels, etc.). False if it is a general discussion, promotional material, spam, newsletter, bounce, or unrelated content.
+2. "companyName" (string): The company the sender represents. Guess it from the signature, email domain, or attachments. Write "Individual Customer" if unknown.
+3. "primaryContactName" (string): The sender's name. Default to "Email Contact" if unknown.
+4. "mobileNumber" (string): The contact's phone/mobile number. Check the signature block. Default to "0000000000" if unknown.
+5. "enquiries" (array of objects): An array of product items extracted. Each item must contain:
+   - "productCategory" (string): Must match exactly one of: "Piping", "Pressure Vessel", "Heat Exchanger", "Storage Tank", "Structural", "Custom", "Multiple". (Default is "Piping" for valve inquiries).
+   - "productDescription" (string): A short, professional summary of the items and specs requested (e.g., "CS BALL VALVE BWE 300#, 100MM (4\")"). Limit to 200 characters.
+   - "quantity" (number): The quantity of items requested. Default is 1.
+   - "unit" (string): Must be one of: "NOS", "SET", "MT", "KG", "M", "M2", "Job". Default is "NOS".
+   - "standardCode" (string): Must be one of: "ASME", "IS", "BS", "EN", "API", "IBR", "Custom", "Not specified". Default is "Not specified".
+   - "specialRequirements" (string): Any specific material details, paint specs, or special inspections. Limit to 400 characters.
+   - "priority" (string): Must be one of: "Urgent", "High", "Medium", "Low". Default is "Medium".
+   - "confidence" (number): A score from 0 to 100 representing your certainty of this extraction.
+   - "linkedAttachmentNames" (array of strings): The exact filenames of the attachments that contain details or drawings for this specific product item. (Must match the filenames provided in the attachment list above).
 
 You MUST return a valid JSON object matching these instructions. Do not add explanations.`;
-}
 
-/**
- * Normalizes values to make sure they match database schemas perfectly.
- */
-function cleanAndNormalizeResult(data, defaultFromEmail) {
-  // 1. Clean product category
-  let category = data.productCategory;
-  if (!PRODUCT_CATEGORIES.includes(category)) {
-    // If it's a valve, default to Piping
-    if (category?.toLowerCase().includes('valve')) {
-      category = 'Piping';
-    } else {
-      category = 'Custom';
+  // 1. Try Groq
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const apiKey = process.env.GROQ_API_KEY;
+      const url = 'https://api.groq.com/openai/v1/chat/completions';
+      const payload = {
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' }
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = result.choices?.[0]?.message?.content;
+        if (rawText) {
+          return cleanAndNormalizeMultiResult(JSON.parse(rawText.trim()), fromAddress);
+        }
+      }
+    } catch (err) {
+      console.error('[AI Multi-Extraction] Groq API call failed, trying fallback...', err.message);
     }
   }
 
-  // 2. Clean standard code
-  let std = data.standardCode;
-  if (!STANDARD_CODES.includes(std)) {
-    std = 'Not specified';
+  // 2. Try Gemini
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          return cleanAndNormalizeMultiResult(JSON.parse(rawText.trim()), fromAddress);
+        }
+      }
+    } catch (err) {
+      console.error('[AI Multi-Extraction] Gemini API call failed, trying fallback...', err.message);
+    }
   }
 
-  // 3. Clean Priority
-  let prio = data.priority;
-  if (!['Urgent', 'High', 'Medium', 'Low'].includes(prio)) {
-    prio = 'Medium';
+  // 3. Try OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const apiKey = process.env.OPENAI_API_KEY;
+      const url = 'https://api.openai.com/v1/chat/completions';
+      const payload = {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' }
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = result.choices?.[0]?.message?.content;
+        if (rawText) {
+          return cleanAndNormalizeMultiResult(JSON.parse(rawText.trim()), fromAddress);
+        }
+      }
+    } catch (err) {
+      console.error('[AI Multi-Extraction] OpenAI API call failed, trying fallback...', err.message);
+    }
   }
 
-  // 4. Ensure mobile number exists and is a string
+  // Final fallback: Local Heuristics
+  console.log('[AI Multi-Extraction] Using heuristic fallback.');
+  const singleEnquiry = runHeuristicExtraction(emailText, fromAddress, subjectText);
+  return {
+    isEnquiry: singleEnquiry.isEnquiry,
+    companyName: singleEnquiry.companyName,
+    primaryContactName: singleEnquiry.primaryContactName,
+    mobileNumber: singleEnquiry.mobileNumber,
+    enquiries: [
+      {
+        productCategory: singleEnquiry.productCategory,
+        productDescription: singleEnquiry.productDescription,
+        quantity: singleEnquiry.quantity,
+        unit: singleEnquiry.unit,
+        standardCode: singleEnquiry.standardCode,
+        specialRequirements: singleEnquiry.specialRequirements,
+        priority: singleEnquiry.priority,
+        confidence: 100,
+        linkedAttachmentNames: []
+      }
+    ]
+  };
+};
+
+/**
+ * Normalizes values of multi-enquiry AI output to match schemas perfectly.
+ */
+function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
+  if (data.isEnquiry === false || !data.enquiries || !Array.isArray(data.enquiries)) {
+    return {
+      isEnquiry: false,
+      companyName: 'Individual Customer',
+      primaryContactName: 'Email Sender',
+      mobileNumber: '0000000000',
+      enquiries: []
+    };
+  }
+
+  // Clean contact details
   let mobile = String(data.mobileNumber || '').trim().replace(/[^0-9+]/g, '');
   if (!mobile || mobile.length < 5) {
     mobile = '0000000000';
   }
 
-  // 5. Ensure quantities are numeric
-  let qty = parseInt(data.quantity, 10);
-  if (isNaN(qty) || qty <= 0) qty = 1;
+  const cleanedEnquiries = data.enquiries.map(item => {
+    let category = item.productCategory;
+    if (!PRODUCT_CATEGORIES.includes(category)) {
+      category = category?.toLowerCase().includes('valve') ? 'Piping' : 'Custom';
+    }
 
-  // 6. Clean email
-  const extractedEmail = String(data.emailAddress || '').trim();
-  const matchedEmail = extractedEmail.includes('@') ? extractedEmail : extractEmailFromString(defaultFromEmail);
+    let std = item.standardCode;
+    if (!STANDARD_CODES.includes(std)) {
+      std = 'Not specified';
+    }
+
+    let prio = item.priority;
+    if (!['Urgent', 'High', 'Medium', 'Low'].includes(prio)) {
+      prio = 'Medium';
+    }
+
+    let qty = parseInt(item.quantity, 10);
+    if (isNaN(qty) || qty <= 0) qty = 1;
+
+    let conf = parseInt(item.confidence, 10);
+    if (isNaN(conf) || conf < 0 || conf > 100) conf = 100;
+
+    return {
+      productCategory: category,
+      productDescription: String(item.productDescription || '').trim().substring(0, 200) || 'Valve Enquiry via Email',
+      quantity: qty,
+      unit: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'].includes(item.unit) ? item.unit : 'NOS',
+      standardCode: std,
+      specialRequirements: String(item.specialRequirements || '').trim().substring(0, 400),
+      priority: prio,
+      confidence: conf,
+      linkedAttachmentNames: Array.isArray(item.linkedAttachmentNames) ? item.linkedAttachmentNames.map(f => String(f).trim()) : []
+    };
+  });
 
   return {
+    isEnquiry: true,
     companyName: String(data.companyName || '').trim() || 'Individual Customer',
     primaryContactName: String(data.primaryContactName || '').trim() || 'Email Sender',
     mobileNumber: mobile,
-    emailAddress: matchedEmail,
-    productCategory: category,
-    productDescription: String(data.productDescription || '').trim().substring(0, 200) || 'Valve Enquiry via Email',
-    quantity: qty,
-    unit: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'].includes(data.unit) ? data.unit : 'NOS',
-    standardCode: std,
-    specialRequirements: String(data.specialRequirements || '').trim().substring(0, 400),
-    priority: prio,
-    isEnquiry: data.isEnquiry === undefined ? true : Boolean(data.isEnquiry)
+    emailAddress: extractEmailFromString(defaultFromEmail),
+    enquiries: cleanedEnquiries
   };
 }
 
 /**
- * Local Regex fallback extractor for offline test runs or API errors.
+ * Dynamic Field Extractor from emails focusing on a target product description.
  */
-function runHeuristicExtraction(text, from, subject) {
-  const cleanFrom = extractEmailFromString(from);
-  const fromName = from.split('<')[0].trim().replace(/"/g, '') || 'Email Sender';
-  
-  // Try to extract company name from domain
-  let domain = cleanFrom.split('@')[1] || '';
-  let company = 'Individual Customer';
-  if (domain && !['gmail.com', 'yahoo.com', 'hotmail.com', 'rediffmail.com', 'outlook.com'].includes(domain.toLowerCase())) {
-    const parts = domain.split('.');
-    company = parts[0].charAt(0).toUpperCase() + parts[0].slice(1) + ' Ltd';
-  }
-
-  // Try to find quantity (numbers before words like pcs, pieces, nos, qty)
-  let qty = 1;
-  const qtyMatch = text.match(/(\d+)\s*(?:pcs|pieces|nos|qty|items)/i);
-  if (qtyMatch) {
-    qty = parseInt(qtyMatch[1], 10);
-  }
-
-  // Guess priority
-  let priority = 'Medium';
-  if (/urgent|asap|immediate|critical|fast/i.test(text) || /urgent|asap/i.test(subject)) {
-    priority = 'Urgent';
-  }
-
-  // Standard code check
-  let standard = 'Not specified';
-  if (/asme/i.test(text)) standard = 'ASME';
-  else if (/api/i.test(text)) standard = 'API';
-  else if (/ibr/i.test(text)) standard = 'IBR';
-  else if (/is\s*\d+/i.test(text)) standard = 'IS';
-
-  // Build a short description
-  let desc = subject.substring(0, 100);
-  if (text.length > 0) {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5 && !l.includes(':'));
-    if (lines.length > 0) {
-      desc = lines[0].substring(0, 150);
-    }
-  }
-
-  return {
-    companyName: company,
-    primaryContactName: fromName,
-    mobileNumber: '0000000000',
-    emailAddress: cleanFrom,
-    productCategory: 'Piping', // Default to valve category
-    productDescription: desc || 'Enquiry via email',
-    quantity: qty,
-    unit: 'NOS',
-    standardCode: standard,
-    specialRequirements: `Raw Subject: ${subject}`,
-    priority: priority,
-    isEnquiry: true
-  };
-}
-
-function extractEmailFromString(str) {
-  const match = str.match(/<([^>]+)>/) || str.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
-  return match ? match[1].trim() : str.trim();
-}
-
-/**
- * Dynamic Field Extractor from emails
- */
-exports.extractDynamicFields = async (emailText, fieldDefinitions) => {
+exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescription = '') => {
   if (!fieldDefinitions || fieldDefinitions.length === 0) return {};
 
-  const fieldListStr = fieldDefinitions.map(f => {
+  // ── Smart Field Pre-Filtering ──────────────────────────────────────────────
+  // When there are many fields (cross-category), the LLM can return {} or poor
+  // results because the prompt is too long. Score fields by relevance to the
+  // text and keep the top MAX_FIELDS most relevant ones (always including
+  // required fields so they are never silently dropped).
+  const MAX_FIELDS = 35;
+  let relevantFields = fieldDefinitions;
+
+  if (fieldDefinitions.length > MAX_FIELDS) {
+    const textLower = (emailText + ' ' + productDescription).toLowerCase();
+
+    const scoreField = (f) => {
+      let score = 0;
+      // Required fields always get a bonus
+      if (f.isRequired) score += 100;
+      // Score by how many words from the label appear in the text
+      const labelWords = f.fieldLabel.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+      for (const word of labelWords) {
+        if (textLower.includes(word)) score += 10;
+      }
+      // Score by fieldName keyword match (e.g. valve_ prefix when text has 'valve')
+      const nameWords = f.fieldName.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+      for (const word of nameWords) {
+        if (textLower.includes(word)) score += 5;
+      }
+      return score;
+    };
+
+    const scored = fieldDefinitions
+      .map(f => ({ field: f, score: scoreField(f) }))
+      .sort((a, b) => b.score - a.score);
+
+    // Always include required fields + top scoring optional fields up to MAX_FIELDS
+    const required = scored.filter(s => s.field.isRequired).map(s => s.field);
+    const optional = scored.filter(s => !s.field.isRequired).slice(0, MAX_FIELDS - required.length).map(s => s.field);
+    relevantFields = [...required, ...optional];
+
+    console.log(`[AI Dynamic Extraction] Filtered ${fieldDefinitions.length} fields → ${relevantFields.length} relevant fields for: "${productDescription}"`);
+  }
+
+  const fieldListStr = relevantFields.map(f => {
     return `- "${f.fieldName}" (type: ${f.fieldType}, label: "${f.fieldLabel}"): ${f.placeholder || ''} ${f.options && f.options.length ? '(Options: ' + JSON.stringify(f.options) + ')' : ''}`;
   }).join('\n');
+
+  let itemContextFocus = '';
+  if (productDescription) {
+    itemContextFocus = `
+CRITICAL FOCUS:
+We are extracting specifications specifically for this product item: "${productDescription}".
+Ignore specifications that belong to other product items mentioned in the text. Focus ONLY on this specific item.
+`;
+  }
 
   const prompt = `You are a data extraction bot.
 Read the email text below:
 """
 ${emailText}
 """
+${itemContextFocus}
 
 We have defined the following custom fields that we need to extract from this text:
 ${fieldListStr}
@@ -397,28 +358,13 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
         const result = await res.json();
         const rawText = result.choices?.[0]?.message?.content;
         if (rawText) {
-          // Normalize and validate option fields against available choices
-          const data = JSON.parse(rawText.trim());
-          const normalized = {};
-          for (const key of Object.keys(data)) {
-            const field = fieldDefinitions.find(f => f.fieldName === key);
-            if (field) {
-              let val = data[key];
-              if (field.fieldType.includes('Dropdown') && field.options && field.options.length) {
-                const matchedOpt = field.options.find(opt => {
-                  const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-                  return normalizeStr(opt) === normalizeStr(val);
-                });
-                if (matchedOpt) {
-                  normalized[key] = matchedOpt;
-                  continue;
-                }
-              }
-              normalized[key] = val;
-            }
-          }
-          return normalized;
+          const parsed = JSON.parse(rawText.trim());
+          console.log(`[AI Dynamic Extraction] Groq extracted ${Object.keys(parsed).length} field(s):`, JSON.stringify(parsed));
+          return normalizeExtractedFields(parsed, fieldDefinitions);
         }
+      } else {
+        const errBody = await res.json().catch(() => ({}));
+        console.error(`[AI Dynamic Extraction] Groq API error ${res.status}:`, JSON.stringify(errBody).substring(0, 200));
       }
     } catch (err) {
       console.error('[AI Dynamic Extraction] Groq API failed:', err.message);
@@ -443,7 +389,7 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
         const result = await res.json();
         const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (rawText) {
-          return JSON.parse(rawText.trim());
+          return normalizeExtractedFields(JSON.parse(rawText.trim()), fieldDefinitions);
         }
       }
     } catch (err) {
@@ -473,7 +419,7 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
         const result = await res.json();
         const rawText = result.choices?.[0]?.message?.content;
         if (rawText) {
-          return JSON.parse(rawText.trim());
+          return normalizeExtractedFields(JSON.parse(rawText.trim()), fieldDefinitions);
         }
       }
     } catch (err) {
@@ -486,14 +432,13 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
   const extracted = {};
   for (const field of fieldDefinitions) {
     const label = field.fieldLabel;
-    const labelClean = label.replace(/\([^)]*\)/g, '').trim(); // Remove parentheticals like "(DN)"
+    const labelClean = label.replace(/\([^)]*\)/g, '').trim();
     const name = field.fieldName;
     
     const escapedLabel = escapeRegExp(label);
     const escapedLabelClean = escapeRegExp(labelClean);
     const escapedName = escapeRegExp(name);
 
-    // Try multiple matching patterns
     const patterns = [
       new RegExp(`${escapedLabel}\\s*[:=-]\\s*([^\\n]+)`, 'i'),
       new RegExp(`${escapedLabelClean}\\s*[:=-]\\s*([^\\n]+)`, 'i'),
@@ -512,10 +457,8 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
           extracted[field.fieldName] = /yes|true|1/i.test(val);
         } else {
           if (field.options && field.options.length) {
-            // Case-insensitive exact option matching
             let matchedOpt = field.options.find(opt => String(opt).toLowerCase() === val.toLowerCase());
             if (!matchedOpt) {
-              // Try normalized comparison (strip spaces, quotes, punctuation)
               const normalize = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
               const normVal = normalize(val);
               matchedOpt = field.options.find(opt => normalize(opt) === normVal);
@@ -535,3 +478,88 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
   }
   return extracted;
 };
+
+/**
+ * Normalizes options and drops irrelevant keys.
+ */
+function normalizeExtractedFields(data, fieldDefinitions) {
+  const normalized = {};
+  for (const key of Object.keys(data)) {
+    const field = fieldDefinitions.find(f => f.fieldName === key);
+    if (field) {
+      let val = data[key];
+      if (field.fieldType.includes('Dropdown') && field.options && field.options.length) {
+        const matchedOpt = field.options.find(opt => {
+          const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normalizeStr(opt) === normalizeStr(val);
+        });
+        if (matchedOpt) {
+          normalized[key] = matchedOpt;
+          continue;
+        }
+      }
+      normalized[key] = val;
+    }
+  }
+  return normalized;
+}
+
+/**
+ * Local Regex fallback extractor for offline test runs or API errors.
+ */
+function runHeuristicExtraction(text, from, subject) {
+  const cleanFrom = extractEmailFromString(from);
+  const fromName = from.split('<')[0].trim().replace(/"/g, '') || 'Email Sender';
+  
+  let domain = cleanFrom.split('@')[1] || '';
+  let company = 'Individual Customer';
+  if (domain && !['gmail.com', 'yahoo.com', 'hotmail.com', 'rediffmail.com', 'outlook.com'].includes(domain.toLowerCase())) {
+    const parts = domain.split('.');
+    company = parts[0].charAt(0).toUpperCase() + parts[0].slice(1) + ' Ltd';
+  }
+
+  let qty = 1;
+  const qtyMatch = text.match(/(\d+)\s*(?:pcs|pieces|nos|qty|items)/i);
+  if (qtyMatch) {
+    qty = parseInt(qtyMatch[1], 10);
+  }
+
+  let priority = 'Medium';
+  if (/urgent|asap|immediate|critical|fast/i.test(text) || /urgent|asap/i.test(subject)) {
+    priority = 'Urgent';
+  }
+
+  let standard = 'Not specified';
+  if (/asme/i.test(text)) standard = 'ASME';
+  else if (/api/i.test(text)) standard = 'API';
+  else if (/ibr/i.test(text)) standard = 'IBR';
+  else if (/is\s*\d+/i.test(text)) standard = 'IS';
+
+  let desc = subject.substring(0, 100);
+  if (text.length > 0) {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5 && !l.includes(':'));
+    if (lines.length > 0) {
+      desc = lines[0].substring(0, 150);
+    }
+  }
+
+  return {
+    companyName: company,
+    primaryContactName: fromName,
+    mobileNumber: '0000000000',
+    emailAddress: cleanFrom,
+    productCategory: 'Piping',
+    productDescription: desc || 'Enquiry via email',
+    quantity: qty,
+    unit: 'NOS',
+    standardCode: standard,
+    specialRequirements: `Raw Subject: ${subject}`,
+    priority: priority,
+    isEnquiry: true
+  };
+}
+
+function extractEmailFromString(str) {
+  const match = str.match(/<([^>]+)>/) || str.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
+  return match ? match[1].trim() : str.trim();
+}

@@ -1,8 +1,10 @@
+const fs = require('fs');
+const path = require('path');
 const multer = require('multer');
 const FileMetadata = require('../models/FileMetadata');
-const { uploadFileToS3, getSignedDownloadUrl } = require('../services/s3Service');
+const { uploadFile, getDownloadUrl } = require('../services/localStorageService');
 
-// Use memory storage to process file buffer before sending to S3
+// Use memory storage to process file buffer before saving
 const storage = multer.memoryStorage();
 exports.upload = multer({ 
   storage,
@@ -18,14 +20,14 @@ exports.uploadFile = async (req, res, next) => {
 
     const { module = 'Temp', entityId } = req.body;
     
-    // 1. Upload buffer to S3
-    const s3Key = await uploadFileToS3(req.file.buffer, req.file.originalname, req.file.mimetype);
+    // 1. Save file to disk
+    const fileKey = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
 
     // 2. Save metadata to MongoDB
     const fileMeta = await FileMetadata.create({
       fileName: req.file.originalname,
       originalName: req.file.originalname,
-      s3Key,
+      fileKey,
       mimeType: req.file.mimetype,
       size: req.file.size,
       uploadedBy: req.user._id,
@@ -43,15 +45,13 @@ exports.uploadFile = async (req, res, next) => {
 };
 
 // GET /api/files/:id/download-url
-// Returns a short-lived presigned URL for secure frontend viewing
+// Returns local server download link
 exports.getSecureDownloadUrl = async (req, res, next) => {
   try {
     const fileMeta = await FileMetadata.findById(req.params.id);
     if (!fileMeta) return res.status(404).json({ status: 'fail', message: 'File not found' });
 
-    // TODO: Add authorization checks here if file is private and user doesn't have module access
-
-    const downloadUrl = await getSignedDownloadUrl(fileMeta.s3Key);
+    const downloadUrl = await getDownloadUrl(fileMeta.fileKey);
     
     res.status(200).json({ 
       status: 'success', 
@@ -61,6 +61,23 @@ exports.getSecureDownloadUrl = async (req, res, next) => {
         mimeType: fileMeta.mimeType
       } 
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/files/download-local/:key
+// Public endpoint for downloading files stored locally on server disk
+exports.downloadLocalFile = (req, res, next) => {
+  try {
+    const key = req.params.key;
+    const filePath = path.join(__dirname, '../../uploads', key);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ status: 'fail', message: 'File not found' });
+    }
+    
+    res.download(filePath);
   } catch (err) {
     next(err);
   }

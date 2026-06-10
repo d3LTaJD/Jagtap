@@ -4,6 +4,8 @@ const otpUtils = require('../utils/otp');
 const ActivityLog = require('../models/ActivityLog');
 const { logActivity } = require('../utils/logger');
 const { getNextSequenceValue } = require('../utils/counter');
+const QueueJob = require('../models/QueueJob');
+const SystemAuditLog = require('../models/SystemAuditLog');
 
 // @desc    Create new user (Admin only)
 // @route   POST /api/admin/users
@@ -244,6 +246,137 @@ exports.getAllActivityLogs = async (req, res, next) => {
       .limit(200);
       
     res.status(200).json({ status: 'success', data: { logs } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getSystemAuditLogs = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const { eventType, entityType } = req.query;
+
+    const filter = {};
+    if (eventType) filter.eventType = eventType;
+    if (entityType) filter.entityType = entityType;
+
+    const total = await SystemAuditLog.countDocuments(filter);
+    const logs = await SystemAuditLog.find(filter)
+      .populate('performedBy', 'fullName name role')
+      .sort('-timestamp')
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        logs,
+        total,
+        page,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get all active/failed queue jobs
+// @route   GET /api/admin/queue-jobs
+exports.getQueueJobs = async (req, res, next) => {
+  try {
+    const status = req.query.status;
+    const filter = {};
+    if (status) filter.status = status;
+
+    const jobs = await QueueJob.find(filter)
+      .sort('-createdAt')
+      .limit(100);
+
+    res.status(200).json({ status: 'success', data: { jobs } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Retry a failed job manually
+// @route   POST /api/admin/queue-jobs/:id/retry
+exports.retryQueueJob = async (req, res, next) => {
+  try {
+    const job = await QueueJob.findById(req.params.id);
+    if (!job) {
+      return res.status(404).json({ status: 'error', message: 'Job not found' });
+    }
+
+    job.status = 'Pending';
+    job.attempts = 0;
+    job.lockedBy = null;
+    job.lockedAt = null;
+    job.nextRetryAt = null;
+    job.errorLogs.push({
+      message: `Manual retry initiated by admin ${req.user.name}`,
+      stack: ''
+    });
+    
+    await job.save();
+
+    await SystemAuditLog.create({
+      eventType: 'QUEUE_EXECUTION',
+      entityType: 'QueueJob',
+      entityId: job._id,
+      action: `Manual job retry queued for ${job.queueName}`,
+      metadata: { queueName: job.queueName }
+    });
+
+    res.status(200).json({ status: 'success', message: 'Job successfully scheduled for retry', data: { job } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get queue health metrics
+// @route   GET /api/admin/queue-health
+exports.getQueueHealth = async (req, res, next) => {
+  try {
+    const queueDepth = await QueueJob.countDocuments({ status: 'Pending' });
+    const ocrBacklog = await QueueJob.countDocuments({ 
+      queueName: 'OCRProcessingQueue', 
+      status: { $in: ['Pending', 'Processing'] } 
+    });
+    const aiBacklog = await QueueJob.countDocuments({ 
+      queueName: 'AIExtractionQueue', 
+      status: { $in: ['Pending', 'Processing'] } 
+    });
+    const failedJobs = await QueueJob.countDocuments({ status: 'Failed' });
+    
+    // Sum of attempts across all jobs
+    const attemptsResult = await QueueJob.aggregate([
+      { $group: { _id: null, totalAttempts: { $sum: '$attempts' } } }
+    ]);
+    const retryCount = attemptsResult.length > 0 ? attemptsResult[0].totalAttempts : 0;
+
+    // Average processing time (completed duration from start to finish)
+    const completedJobs = await QueueJob.find({ status: 'Completed', startedAt: { $ne: null }, completedAt: { $ne: null } });
+    let averageProcessingTime = 0;
+    if (completedJobs.length > 0) {
+      const totalDuration = completedJobs.reduce((sum, job) => {
+        return sum + (job.completedAt - job.startedAt);
+      }, 0);
+      averageProcessingTime = Math.round(totalDuration / completedJobs.length);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        queueDepth,
+        ocrBacklog,
+        aiBacklog,
+        failedJobs,
+        retryCount,
+        averageProcessingTime
+      }
+    });
   } catch (err) {
     next(err);
   }

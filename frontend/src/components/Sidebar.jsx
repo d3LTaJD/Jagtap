@@ -25,6 +25,7 @@ const Sidebar = ({ onClose }) => {
     navItems.push({ label: 'Field Builder', icon: Wrench, path: '/app/field-builder', show: true });
     navItems.push({ label: 'Role Builder', icon: Shield, path: '/app/role-builder', show: true });
     navItems.push({ label: 'Audit Logs', icon: ClipboardList, path: '/app/audit-logs', show: true });
+    navItems.push({ label: 'System Logs', icon: ClipboardList, path: '/app/system-logs', show: true });
     navItems.push({ label: 'User Management', icon: Users, path: '/app/admin', show: true });
     navItems.push({ label: 'Settings', icon: Settings, path: '/app/settings', show: true });
   }

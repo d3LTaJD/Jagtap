@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Loader2, ArrowLeft, Save, Trash2, Download, CheckCircle2,
   AlertTriangle, Trophy, XCircle, PauseCircle, Flag,
-  UserCheck, Tag, CalendarDays, ChevronDown, Pencil, X
+  UserCheck, Tag, CalendarDays, ChevronDown, Pencil, X, FileCheck
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -30,6 +30,8 @@ const STATUS_CONFIG = {
   'Lost':             { color: 'bg-red-100 text-red-700',         label: 'Lost'             },
   'On Hold':          { color: 'bg-amber-100 text-amber-700',     label: 'On Hold'          },
   'Abandoned':        { color: 'bg-slate-100 text-slate-500',     label: 'Abandoned'        },
+  'Needs Review':     { color: 'bg-rose-100 text-rose-700 border-rose-200', label: 'Needs Review' },
+  'Verified':         { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Verified' },
 };
 
 const Toast = ({ msg, type, onClose }) => (
@@ -56,6 +58,12 @@ const EnquiryDetail = () => {
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
   const statusRef  = useRef(null);
   const priorityRef = useRef(null);
+
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [threadEmails, setThreadEmails] = useState([]);
+  const [emailsLoading, setEmailsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('emails');
 
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const isHighAuth  = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(currentUser.role);
@@ -97,6 +105,55 @@ const EnquiryDetail = () => {
   useEffect(() => {
     if (enquiry?.dynamicFields) setDynamicValues(enquiry.dynamicFields);
   }, [enquiry]);
+
+  useEffect(() => {
+    const fetchEmails = async () => {
+      setEmailsLoading(true);
+      try {
+        const res = await api.get(`/enquiries/${id}/thread-emails`);
+        if (res.data?.data?.emails) {
+          setThreadEmails(res.data.data.emails);
+        }
+      } catch (err) {
+        console.error('Failed to fetch thread emails', err);
+      } finally {
+        setEmailsLoading(false);
+      }
+    };
+    if (id && enquiry?.threadId) {
+      fetchEmails();
+    }
+  }, [id, enquiry?.threadId]);
+
+  const handleVerifyAndApprove = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        updatedFields: {
+          ...dynamicValues,
+          productCategory: enquiry.productCategory,
+          productDescription: enquiry.productDescription,
+          quantity: enquiry.quantity,
+          unit: enquiry.unit,
+          standardCode: enquiry.standardCode,
+          requiredDeliveryWeeks: enquiry.requiredDeliveryWeeks,
+          budgetFrom: enquiry.budgetFrom,
+          budgetTo: enquiry.budgetTo,
+          specialRequirements: enquiry.specialRequirements,
+          thirdPartyInspection: enquiry.thirdPartyInspection,
+        },
+        reviewNotes
+      };
+      const res = await api.patch(`/enquiries/${id}/verify-approve`, payload);
+      setEnquiry(res.data.data.enquiry);
+      setShowVerifyModal(false);
+      showToast('Enquiry successfully verified and approved!');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Verification failed', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleUpdate = async (field, value) => {
     setSaving(true);
@@ -238,6 +295,47 @@ const EnquiryDetail = () => {
     <div className="p-6 lg:p-8 max-w-7xl mx-auto animate-in fade-in duration-500 text-slate-900">
       {toast && <Toast {...toast} />}
 
+      {/* Background Processing Progress Banner */}
+      {enquiry.processingStatus && ['Pending', 'Processing'].includes(enquiry.processingStatus) && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between shadow-sm animate-pulse">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-brand-500 animate-spin" />
+            <div>
+              <h3 className="text-sm font-bold text-blue-800">
+                {enquiry.processingStatus === 'Pending' ? 'Pending Processing...' : 'AI Processing In Progress...'}
+              </h3>
+              <p className="text-xs text-blue-600 mt-0.5">
+                {enquiry.processingMessage || 'The system is analyzing the enquiry, extracting specifications, and calculating confidence.'}
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-brand-600 bg-brand-50 border border-brand-200 px-2.5 py-1 rounded-full shrink-0">
+            Background Queue
+          </span>
+        </div>
+      )}
+
+      {/* Warning Banner for Unverified/Needs Review Enquiry */}
+      {(enquiry.isUnverified || enquiry.status === 'Needs Review') && (
+        <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 shadow-sm">
+          <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-rose-800 animate-pulse">Unverified Enquiry Extraction</h3>
+            <p className="text-xs text-rose-600 mt-1">
+              This enquiry was automatically extracted by AI with low confidence (Confidence: {enquiry.extractionConfidence ? `${enquiry.extractionConfidence}%` : 'Low'}). Please verify specifications, edit any incorrect fields, and click "Verify & Approve" to validate this enquiry.
+            </p>
+            <div className="mt-3">
+              <button
+                onClick={() => setShowVerifyModal(true)}
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm shadow-rose-500/20"
+              >
+                Verify & Approve
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Back */}
       <div className="mb-6 flex items-center gap-2">
         <button onClick={() => navigate(-1)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all">
@@ -266,6 +364,8 @@ const EnquiryDetail = () => {
               {showStatusMenu && (
                 <div className="absolute top-full mt-1 left-0 z-20 bg-white rounded-xl shadow-xl border border-slate-200 w-44 py-1 animate-in slide-in-from-top-1">
                   {[
+                    { v: 'Needs Review',     icon: AlertTriangle, label: 'Needs Review',   cls: 'text-rose-600' },
+                    { v: 'Verified',         icon: CheckCircle2,  label: 'Verified',       cls: 'text-emerald-600' },
                     { v: 'New',              icon: Tag,          label: 'New' },
                     { v: 'Contacted',        icon: UserCheck,    label: 'Contacted' },
                     { v: 'Technical Review', icon: CheckCircle2, label: 'Technical Review' },
@@ -334,6 +434,19 @@ const EnquiryDetail = () => {
               className="w-48"
             />
           </div>
+
+          <button
+            onClick={() => navigate(`/app/quotations?createForEnquiry=${enquiry._id}`)}
+            disabled={enquiry.status !== 'Ready for Offer'}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
+              enquiry.status === 'Ready for Offer'
+                ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                : 'bg-slate-300 cursor-not-allowed opacity-60'
+            }`}
+            title={enquiry.status !== 'Ready for Offer' ? "Quotation generation is blocked. Status must be 'Ready for Offer'." : "Create Quotation"}
+          >
+            <FileCheck className="w-3.5 h-3.5" /> Create Quotation
+          </button>
 
           {canEdit && (
             <button onClick={openEdit} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold transition-all">
@@ -448,6 +561,214 @@ const EnquiryDetail = () => {
               }}
               readOnly={!canEdit}
             />
+          </div>
+
+          {/* Governance & Audit Section (Tabs) */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+            <div className="flex border-b border-slate-200 bg-slate-50/50">
+              {[
+                { id: 'emails', label: 'Email Thread' },
+                { id: 'ocr', label: 'Extracted OCR Text' },
+                { id: 'history', label: 'Review Audit History' },
+                { id: 'versions', label: 'Document Versions' }
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  type="button"
+                  className={`px-5 py-4 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${
+                    activeTab === t.id
+                      ? 'border-brand-600 text-brand-600 bg-white'
+                      : 'border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-100/50'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6">
+              {/* Email Thread Tab */}
+              {activeTab === 'emails' && (
+                <div className="space-y-4">
+                  {emailsLoading && <Loader2 className="w-6 h-6 animate-spin text-brand-600 mx-auto" />}
+                  {!emailsLoading && threadEmails.length === 0 && (
+                    <p className="text-sm text-slate-400 text-center py-6">No raw email messages archived for this thread.</p>
+                  )}
+                  {!emailsLoading && threadEmails.map((email, idx) => (
+                    <div key={email._id || idx} className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                      <div className="px-5 py-4 bg-slate-100/50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-800">{email.subject}</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            From: <span className="font-semibold">{email.sender}</span>
+                          </p>
+                        </div>
+                        <span className="text-xs font-bold text-slate-400">
+                          {new Date(email.receivedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </span>
+                      </div>
+                      <div className="p-5 text-sm text-slate-700 whitespace-pre-wrap font-sans max-h-96 overflow-y-auto bg-white">
+                        {email.bodyText || '(No plain text body content)'}
+                      </div>
+                      {email.attachments && email.attachments.length > 0 && (
+                        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-2">
+                          <span className="text-xs font-black text-slate-400 uppercase tracking-wider shrink-0 mt-1.5">Email Attachments:</span>
+                          {email.attachments.map(att => (
+                            <a
+                              key={att._id}
+                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/files/download-local/${att.storagePath}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 transition-all"
+                            >
+                              <Download className="w-3 h-3 text-slate-400" />
+                              {att.originalFileName} ({att.attachmentCategory})
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* OCR Extracted Text Tab */}
+              {activeTab === 'ocr' && (
+                <div className="space-y-4">
+                  {(!enquiry.attachmentsList || enquiry.attachmentsList.length === 0) ? (
+                    <p className="text-sm text-slate-400 text-center py-6">No parsed attachments found on this enquiry.</p>
+                  ) : (
+                    enquiry.attachmentsList.map((att, idx) => (
+                      <div key={att._id || idx} className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                        <div className="px-5 py-4 bg-slate-100/50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-800">{att.originalFileName}</h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Category: <span className="font-semibold text-brand-600">{att.attachmentCategory}</span> • Owner: <span className="font-semibold text-slate-600">{att.attachmentOwnerType}</span>
+                            </p>
+                          </div>
+                          {att.ocrConfidence !== undefined && (
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                              att.ocrConfidence >= 80 ? 'bg-emerald-100 text-emerald-700' :
+                              att.ocrConfidence >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                            }`}>
+                              OCR Conf: {att.ocrConfidence}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-5">
+                          <label className="block text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Extracted Specifications & Text</label>
+                          <textarea
+                            readOnly
+                            rows={6}
+                            value={att.extractedText || 'No text extracted or OCR not run for this file type.'}
+                            className="w-full p-4 bg-white border border-slate-200 rounded-xl text-sm font-mono focus:outline-none resize-y"
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* Audit History Tab */}
+              {activeTab === 'history' && (
+                <div className="space-y-4">
+                  {(!enquiry.reviewHistory || enquiry.reviewHistory.length === 0) ? (
+                    <p className="text-sm text-slate-400 text-center py-6">No manual review or verification history recorded.</p>
+                  ) : (
+                    enquiry.reviewHistory.map((hist, idx) => (
+                      <div key={hist._id || idx} className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <span className="text-sm font-bold text-slate-800">
+                            Reviewed by {hist.reviewedBy?.fullName || 'System User'}
+                          </span>
+                          <span className="text-xs text-slate-400 font-semibold">
+                            {new Date(hist.reviewedAt).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-1">Notes / Remarks</p>
+                          <p className="text-sm text-slate-700 italic bg-white p-3 rounded-xl border border-slate-100">"{hist.reviewNotes}"</p>
+                        </div>
+                        {hist.oldValues && Object.keys(hist.newValues || {}).length > 0 && (
+                          <div>
+                            <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Specifications Modified</p>
+                            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                              <div className="grid grid-cols-3 gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider px-4 py-2 bg-slate-50">
+                                <span>Specification</span>
+                                <span>Original Value</span>
+                                <span>Verified Value</span>
+                              </div>
+                              {Object.keys(hist.newValues).map(key => {
+                                const oldVal = typeof hist.oldValues[key] === 'object' ? JSON.stringify(hist.oldValues[key]) : hist.oldValues[key];
+                                const newVal = typeof hist.newValues[key] === 'object' ? JSON.stringify(hist.newValues[key]) : hist.newValues[key];
+                                return (
+                                  <div key={key} className="grid grid-cols-3 gap-2 text-xs px-4 py-2.5 items-center">
+                                    <span className="font-bold text-slate-600">{key}</span>
+                                    <span className="text-red-500 line-through truncate">{String(oldVal ?? '—')}</span>
+                                    <span className="text-emerald-600 font-semibold truncate">{String(newVal ?? '—')}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-400">
+                          <span>Confidence Before: {hist.confidenceBefore ? `${hist.confidenceBefore}%` : 'N/A'}</span>
+                          <span>Confidence After: {hist.confidenceAfter ? `${hist.confidenceAfter}%` : '100%'}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* Document Versions Tab */}
+              {activeTab === 'versions' && (
+                <div className="space-y-4">
+                  {(!enquiry.attachmentsList || enquiry.attachmentsList.length === 0) ? (
+                    <p className="text-sm text-slate-400 text-center py-6">No versioned documents linked to this enquiry.</p>
+                  ) : (
+                    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                      <div className="grid grid-cols-4 gap-2 text-xs font-black text-slate-400 uppercase tracking-wider px-5 py-3 bg-slate-50">
+                        <span>Document Name</span>
+                        <span>Version / Owner</span>
+                        <span>Uploaded At</span>
+                        <span className="text-right">Action</span>
+                      </div>
+                      {enquiry.attachmentsList.map((att, idx) => (
+                        <div key={att._id || idx} className="grid grid-cols-4 gap-2 text-xs px-5 py-4 items-center">
+                          <div className="truncate font-semibold text-slate-800">
+                            {att.originalFileName}
+                          </div>
+                          <div>
+                            <span className="inline-flex items-center rounded-md bg-brand-50 px-2 py-1 text-xs font-bold text-brand-700 ring-1 ring-inset ring-brand-700/10 mr-1.5">
+                              v{att.versionNumber || 1}
+                            </span>
+                            <span className="text-slate-500">{att.attachmentOwnerType}</span>
+                          </div>
+                          <div className="text-slate-500">
+                            {new Date(att.uploadedAt || att.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                          </div>
+                          <div className="text-right">
+                            <a
+                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/files/download-local/${att.storagePath}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 font-bold"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -606,6 +927,66 @@ const EnquiryDetail = () => {
                 className="flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold disabled:opacity-60 transition-all">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Verify & Approve Modal */}
+      {showVerifyModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" /> Verify & Approve Enquiry
+              </h2>
+              <button
+                onClick={() => setShowVerifyModal(false)}
+                type="button"
+                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-slate-500">
+                You are about to verify and sign off the automatically extracted specifications for enquiry <span className="font-semibold text-slate-800">{enquiry.enquiryId}</span>. This transitions the status to <span className="font-semibold text-emerald-600">Verified</span>.
+              </p>
+              
+              <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl">
+                <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                  <strong>Verification Check:</strong> Please ensure all required product specifications (standard code, size, rating, material, etc.) are filled in correctly before verifying.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Review Notes / Remarks</label>
+                <textarea
+                  rows={3}
+                  value={reviewNotes}
+                  onChange={e => setReviewNotes(e.target.value)}
+                  placeholder="e.g., Checked against drawings, corrected size to 4 inches. Ready for tech review."
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 rounded-2xl text-sm outline-none resize-none"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
+              <button
+                onClick={() => setShowVerifyModal(false)}
+                type="button"
+                className="px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-sm font-bold shadow-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleVerifyAndApprove}
+                disabled={saving}
+                type="button"
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-sm disabled:opacity-60 transition-all flex items-center gap-1.5"
+              >
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                Approve & Verify
               </button>
             </div>
           </div>
