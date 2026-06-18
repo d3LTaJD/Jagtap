@@ -4,6 +4,7 @@ const connectDB = require('./src/config/db');
 const { initCronJobs } = require('./src/cronJobs');
 const emailBotService = require('./src/services/emailBotService');
 const { startQueueWorker } = require('./src/services/queueService');
+require('./src/services/queueHandlers'); // Register background queue handlers on startup
 
 const PORT = process.env.PORT || 5000;
 

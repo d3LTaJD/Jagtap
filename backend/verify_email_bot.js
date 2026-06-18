@@ -69,6 +69,10 @@ v.singh@ril.com
     // Check if the mock customer already exists, delete it so we can test the creation flow cleanly
     const testEmail = 'jeetdodia12@gmail.com';
     await Customer.deleteOne({ emailAddress: testEmail });
+    const ProcessedEmail = require('./src/models/ProcessedEmail');
+    const EmailMessage = require('./src/models/EmailMessage');
+    await ProcessedEmail.deleteMany({ sender: testEmail });
+    await EmailMessage.deleteMany({ sender: testEmail });
     
     // Construct mock parsed email object for simpleParser
     const mockParsedEmail = {
@@ -118,6 +122,8 @@ v.singh@ril.com
     console.log("\nCleaning up test records from database...");
     await Enquiry.deleteOne({ _id: enquiryRecord._id });
     await Customer.deleteOne({ _id: customerRecord._id });
+    await ProcessedEmail.deleteMany({ sender: testEmail });
+    await EmailMessage.deleteMany({ sender: testEmail });
     if (taskRecord) {
       await Task.deleteOne({ _id: taskRecord._id });
     }

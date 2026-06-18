@@ -522,6 +522,7 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
 
       enquiry.processingStatus = 'Completed';
       enquiry.processingCompletedAt = new Date();
+      enquiry.markModified('dynamicFields');
       await enquiry.save();
 
       // Log FollowUp
@@ -643,6 +644,7 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
 
       enquiry.processingStatus = 'Completed';
       enquiry.processingCompletedAt = new Date();
+      enquiry.markModified('dynamicFields');
       await enquiry.save();
 
       // Create tasks

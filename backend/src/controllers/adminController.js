@@ -381,3 +381,70 @@ exports.getQueueHealth = async (req, res, next) => {
     next(err);
   }
 };
+
+// @desc    Clear all system audit logs
+// @route   DELETE /api/admin/system-logs
+exports.clearSystemAuditLogs = async (req, res, next) => {
+  try {
+    await SystemAuditLog.deleteMany({});
+    
+    await logActivity({
+      req,
+      action: 'DELETE',
+      module: 'SYSTEM_AUDIT_LOG',
+      resourceId: req.user._id,
+      resourceName: 'All logs',
+      details: `Admin cleared all system audit logs`
+    });
+
+    res.status(200).json({ status: 'success', message: 'System audit logs cleared successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Delete a specific queue job
+// @route   DELETE /api/admin/queue-jobs/:id
+exports.deleteQueueJob = async (req, res, next) => {
+  try {
+    const job = await QueueJob.findByIdAndDelete(req.params.id);
+    if (!job) {
+      return res.status(404).json({ status: 'error', message: 'Job not found' });
+    }
+
+    res.status(200).json({ status: 'success', message: 'Queue job deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Clear all failed queue jobs
+// @route   DELETE /api/admin/queue-jobs
+exports.clearAllFailedQueueJobs = async (req, res, next) => {
+  try {
+    await QueueJob.deleteMany({ status: 'Failed' });
+
+    res.status(200).json({ status: 'success', message: 'All failed queue jobs cleared successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Delete selected activity logs
+// @route   DELETE /api/admin/logs
+exports.deleteActivityLogs = async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No log IDs provided' });
+    }
+
+    await ActivityLog.deleteMany({ _id: { $in: ids } });
+
+    res.status(200).json({ status: 'success', message: `${ids.length} logs deleted successfully` });
+  } catch (err) {
+    next(err);
+  }
+};
+
+

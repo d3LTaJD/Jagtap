@@ -26,11 +26,21 @@ router.route('/users/:id')
   .delete(require('../controllers/adminController').deleteUser);
 router.post('/users/:id/reset-password', resetUserPassword);
 router.get('/users/:id/logs', require('../controllers/adminController').getUserActivityLogs);
-router.get('/logs', require('../controllers/adminController').getAllActivityLogs);
-router.get('/system-logs', require('../controllers/adminController').getSystemAuditLogs);
+router.route('/logs')
+  .get(require('../controllers/adminController').getAllActivityLogs)
+  .delete(require('../controllers/adminController').deleteActivityLogs);
+router.route('/system-logs')
+  .get(require('../controllers/adminController').getSystemAuditLogs)
+  .delete(require('../controllers/adminController').clearSystemAuditLogs);
 
-router.get('/queue-jobs', getQueueJobs);
-router.post('/queue-jobs/:id/retry', retryQueueJob);
+router.route('/queue-jobs')
+  .get(getQueueJobs)
+  .delete(require('../controllers/adminController').clearAllFailedQueueJobs);
+
+router.route('/queue-jobs/:id')
+  .post(retryQueueJob)
+  .delete(require('../controllers/adminController').deleteQueueJob);
+
 router.get('/queue-health', getQueueHealth);
 
 module.exports = router;

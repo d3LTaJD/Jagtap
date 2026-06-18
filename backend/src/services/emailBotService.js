@@ -298,7 +298,7 @@ async function processEmailMessage(parsed) {
 
   let existingProcessed = null;
   if (messageId) {
-    existingProcessed = await ProcessedEmail.findOne({ $or: [{ messageId }, { contentHash }] });
+    existingProcessed = await ProcessedEmail.findOne({ messageId });
   } else {
     existingProcessed = await ProcessedEmail.findOne({ contentHash });
   }
@@ -310,7 +310,7 @@ async function processEmailMessage(parsed) {
 
   // Save ProcessedEmail record
   await ProcessedEmail.create({
-    messageId: messageId || null,
+    messageId: messageId || undefined,
     contentHash,
     sender: senderEmail,
     subject
@@ -442,7 +442,7 @@ async function processEmailMessage(parsed) {
 
   // 4. Archive Email Message
   const emailMsg = await EmailMessage.create({
-    messageId: messageId || null,
+    messageId: messageId || undefined,
     threadId,
     sender: senderEmail,
     recipients: parsed.to ? (Array.isArray(parsed.to.value) ? parsed.to.value.map(v => v.address) : [parsed.to.text]) : [],

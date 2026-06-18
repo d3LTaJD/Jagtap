@@ -442,6 +442,7 @@ exports.verifyAndApproveEnquiry = async (req, res, next) => {
     enquiry.lastModifiedBy = req.user._id;
 
     // Save Enquiry
+    enquiry.markModified('dynamicFields');
     const savedEnquiry = await enquiry.save();
 
     const populatedEnquiry = await Enquiry.findById(savedEnquiry._id)

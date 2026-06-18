@@ -10,8 +10,13 @@ build/
 
 # Environment variables
 .env
+.env.*
+*.env*
 backend/.env
+backend/.env.*
 frontend/.env
+frontend/.env.*
+
 
 # IDE and OS files
 .vscode/

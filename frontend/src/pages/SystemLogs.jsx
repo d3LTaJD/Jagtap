@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ClipboardList, Search, Filter, Calendar, User, Database, 
   ChevronRight, ChevronDown, History, AlertCircle, Loader2,
-  Info, Eye, Sparkles, Activity, ShieldAlert
+  Info, Eye, Sparkles, Activity, ShieldAlert, Trash2
 } from 'lucide-react';
 import api from '../api/client';
 
@@ -29,6 +29,56 @@ const SystemLogs = () => {
   const [fetchingHealth, setFetchingHealth] = useState(true);
   const [fetchingFailed, setFetchingFailed] = useState(true);
   const [retryingJobId, setRetryingJobId] = useState(null);
+
+  const handleClearLogs = async () => {
+    if (!window.confirm('Are you sure you want to permanently delete all system audit logs? This action cannot be undone.')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.delete('/admin/system-logs');
+      setPage(1);
+      fetchLogs();
+    } catch (err) {
+      console.error('Failed to clear logs:', err);
+      alert('Error: Failed to clear system audit logs');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClearFailedJobs = async () => {
+    if (!window.confirm('Are you sure you want to permanently clear all failed queue jobs?')) {
+      return;
+    }
+    setFetchingFailed(true);
+    try {
+      await api.delete('/admin/queue-jobs');
+      fetchFailedJobs();
+      fetchQueueHealth();
+      fetchLogs();
+    } catch (err) {
+      console.error('Failed to clear failed jobs:', err);
+      alert('Error: Failed to clear failed queue jobs');
+    } finally {
+      setFetchingFailed(false);
+    }
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    if (!window.confirm('Are you sure you want to delete this failed job?')) {
+      return;
+    }
+    try {
+      await api.delete(`/admin/queue-jobs/${jobId}`);
+      fetchFailedJobs();
+      fetchQueueHealth();
+      fetchLogs();
+    } catch (err) {
+      console.error('Failed to delete job:', err);
+      alert('Error: Failed to delete queue job');
+    }
+  };
 
   // Filters
   const [eventType, setEventType] = useState('');
@@ -138,13 +188,24 @@ const SystemLogs = () => {
           <p className="text-slate-500 mt-2 font-medium">Observability and tracking of background queues, OCR parser, and AI extractions.</p>
         </div>
         
-        <button 
-          onClick={triggerAllFetches}
-          className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2 font-bold text-sm"
-        >
-          <History className={`w-4 h-4 ${loading || fetchingHealth || fetchingFailed ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          {logs.length > 0 && (
+            <button 
+              onClick={handleClearLogs}
+              className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 hover:bg-rose-100 transition-all shadow-sm flex items-center gap-2 font-bold text-sm"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear Logs
+            </button>
+          )}
+          <button 
+            onClick={triggerAllFetches}
+            className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2 font-bold text-sm"
+          >
+            <History className={`w-4 h-4 ${loading || fetchingHealth || fetchingFailed ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Queue Health Dashboard section */}
@@ -189,10 +250,21 @@ const SystemLogs = () => {
 
       {/* Dead Letter Queue (Failed Jobs) */}
       <div className="mb-8 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-        <h2 className="text-lg font-black text-slate-900 mb-4 flex items-center gap-2">
-          <ShieldAlert className="w-5 h-5 text-rose-500" />
-          Dead Letter Queue (Failed Jobs)
-        </h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-rose-500" />
+            Dead Letter Queue (Failed Jobs)
+          </h2>
+          {failedJobs.length > 0 && (
+            <button
+              onClick={handleClearFailedJobs}
+              className="px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 hover:bg-rose-100 transition-all shadow-sm flex items-center gap-1.5 font-bold text-xs"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear All
+            </button>
+          )}
+        </div>
         
         {fetchingFailed ? (
           <div className="flex justify-center py-6">
@@ -226,18 +298,27 @@ const SystemLogs = () => {
                     </span>
                   </p>
                 </div>
-                <button
-                  disabled={retryingJobId === job._id}
-                  onClick={() => handleRetryJob(job._id)}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm transition-colors flex items-center gap-1.5 shrink-0 disabled:opacity-50"
-                >
-                  {retryingJobId === job._id ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <History className="w-3.5 h-3.5" />
-                  )}
-                  Retry Job
-                </button>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    disabled={retryingJobId === job._id}
+                    onClick={() => handleRetryJob(job._id)}
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {retryingJobId === job._id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <History className="w-3.5 h-3.5" />
+                    )}
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => handleDeleteJob(job._id)}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm transition-colors flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
           </div>

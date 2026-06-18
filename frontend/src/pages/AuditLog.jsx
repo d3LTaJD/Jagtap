@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ClipboardList, Search, Filter, Calendar, User, Database, 
   ChevronRight, ChevronDown, History, AlertCircle, Loader2,
-  ArrowRight, Info, Eye
+  ArrowRight, Info, Eye, Trash2
 } from 'lucide-react';
 import api from '../api/client';
 
@@ -36,6 +36,42 @@ const AuditLog = () => {
   const [expandedLog, setExpandedLog] = useState(null);
   const [filters, setFilters] = useState({ module: '', user: '', action: '' });
   const [users, setUsers] = useState([]);
+  const [selectedLogs, setSelectedLogs] = useState([]);
+
+  useEffect(() => {
+    setSelectedLogs([]);
+  }, [logs]);
+
+  const toggleSelectLog = (id) => {
+    setSelectedLogs(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedLogs.length === logs.length) {
+      setSelectedLogs([]);
+    } else {
+      setSelectedLogs(logs.map(log => log._id));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!selectedLogs.length) return;
+    if (!window.confirm(`Are you sure you want to permanently delete the ${selectedLogs.length} selected audit log(s)?`)) {
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.delete('/admin/logs', { data: { ids: selectedLogs } });
+      setSelectedLogs([]);
+      fetchLogs();
+    } catch (err) {
+      console.error('Failed to delete logs:', err);
+      alert('Error: Failed to delete selected audit logs');
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchLogs();
@@ -175,13 +211,24 @@ const AuditLog = () => {
           <p className="text-slate-500 mt-2 font-medium">Traceable record of every system action and data change.</p>
         </div>
         
-        <button 
-          onClick={fetchLogs}
-          className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all shadow-sm"
-          title="Refresh logs"
-        >
-          <History className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex gap-2">
+          {selectedLogs.length > 0 && (
+            <button 
+              onClick={handleDeleteSelected}
+              className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 hover:bg-rose-100 transition-all shadow-sm flex items-center gap-2 font-bold text-sm"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              Delete Selected ({selectedLogs.length})
+            </button>
+          )}
+          <button 
+            onClick={fetchLogs}
+            className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all shadow-sm"
+            title="Refresh logs"
+          >
+            <History className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -237,33 +284,64 @@ const AuditLog = () => {
             <p className="text-sm text-slate-500 mt-1">Try adjusting your filters or perform some actions first.</p>
           </div>
         ) : (
-          logs.map(log => (
-            <div 
-              key={log._id} 
-              className={`bg-white rounded-[1.5rem] border transition-all duration-200 overflow-hidden ${
-                expandedLog === log._id ? 'border-slate-400 ring-4 ring-slate-100' : 'border-slate-200 hover:border-slate-300'
-              }`}
-            >
+          <>
+            {/* Select All Checkbar */}
+            <div className="flex items-center justify-between px-6 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-500 shadow-sm mb-3">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input 
+                  type="checkbox"
+                  checked={logs.length > 0 && selectedLogs.length === logs.length}
+                  onChange={toggleSelectAll}
+                  className="w-4.5 h-4.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                />
+                <span>Select All ({logs.length} logs)</span>
+              </label>
+              {selectedLogs.length > 0 && (
+                <span className="text-brand-600">{selectedLogs.length} selected</span>
+              )}
+            </div>
+
+            {logs.map(log => (
               <div 
-                className="px-6 py-4 flex flex-col md:flex-row md:items-center gap-4 cursor-pointer"
-                onClick={() => setExpandedLog(expandedLog === log._id ? null : log._id)}
+                key={log._id} 
+                className={`bg-white rounded-[1.5rem] border transition-all duration-200 overflow-hidden ${
+                  expandedLog === log._id ? 'border-slate-400 ring-4 ring-slate-100' : 'border-slate-200 hover:border-slate-300'
+                } mb-3`}
               >
-                <div className="flex items-center gap-4 flex-1 min-w-0">
-                  <div className={`p-2.5 rounded-xl bg-slate-50 shrink-0 ${ACTION_COLORS[log.action] || 'text-slate-400'}`}>
-                    <History className="w-5 h-5" />
+                <div 
+                  className="px-6 py-4 flex flex-row items-center gap-4 cursor-pointer"
+                  onClick={() => setExpandedLog(expandedLog === log._id ? null : log._id)}
+                >
+                  {/* Checkbox */}
+                  <div 
+                    className="shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input 
+                      type="checkbox"
+                      checked={selectedLogs.includes(log._id)}
+                      onChange={() => toggleSelectLog(log._id)}
+                      className="w-4.5 h-4.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                    />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 ${MODULE_COLORS[log.module] || 'bg-slate-100 text-slate-600'}`}>
-                        {log.module}
-                      </span>
-                      <span className="text-sm font-black text-slate-900">{log.action?.replace(/_/g, ' ')}</span>
+
+                  <div className="flex-1 flex flex-col md:flex-row md:items-center gap-4 min-w-0">
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <div className={`p-2.5 rounded-xl bg-slate-50 shrink-0 ${ACTION_COLORS[log.action] || 'text-slate-400'}`}>
+                        <History className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 ${MODULE_COLORS[log.module] || 'bg-slate-100 text-slate-600'}`}>
+                            {log.module}
+                          </span>
+                          <span className="text-sm font-black text-slate-900">{log.action?.replace(/_/g, ' ')}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5 font-medium truncate">
+                          {log.details || `Modified ${log.resourceName || 'Resource'}`}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5 font-medium truncate">
-                      {log.details || `Modified ${log.resourceName || 'Resource'}`}
-                    </p>
-                  </div>
-                </div>
 
                 <div className="flex items-center gap-6 text-xs font-bold text-slate-400 shrink-0">
                   <div className="flex items-center gap-2">
@@ -278,6 +356,7 @@ const AuditLog = () => {
                     {expandedLog === log._id ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                   </div>
                 </div>
+              </div>
               </div>
 
               {/* Expansion content */}
@@ -303,7 +382,8 @@ const AuditLog = () => {
                 </div>
               )}
             </div>
-          ))
+          ))}
+          </>
         )}
       </div>
     </div>
