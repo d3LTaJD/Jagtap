@@ -764,7 +764,7 @@ async function handleNotificationProcessing({ emailMessageId, isReply, enquiryId
   // Trigger unified reply email to customer
   const { sendAutomatedRepliesUnified } = require('./emailBotService');
   try {
-    await sendAutomatedRepliesUnified(emailMsg.sender, senderName, unifiedEnquiriesData);
+    await sendAutomatedRepliesUnified(emailMsg.sender, senderName, unifiedEnquiriesData, emailMsg);
   } catch (smtpErr) {
     console.error(`[Notification Queue] Failed to send unified customer reply:`, smtpErr.message);
   }

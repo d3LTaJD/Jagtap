@@ -75,6 +75,10 @@ const sendEmailViaBrevoApi = async (options) => {
       payload.attachment = brevoAttachments;
     }
 
+    if (options.headers) {
+      payload.headers = options.headers;
+    }
+
     const data = JSON.stringify(payload);
 
     const reqOptions = {
