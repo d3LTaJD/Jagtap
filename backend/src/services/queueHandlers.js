@@ -629,20 +629,43 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         ]
       });
 
-      // AI dynamic spec extraction per product
+      // AI dynamic spec extraction per product — MERGE with existing fields (don't wipe)
       const previousFields = { ...enquiry.dynamicFields };
-      enquiry.dynamicFields = {};
+      const newlyExtractedGlobal = {};
       
       if (enquiry.products && enquiry.products.length > 0) {
         for (const prod of enquiry.products) {
+          const existingProdFields = { ...(prod.dynamicFields || {}) };
           const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description);
-          prod.dynamicFields = prodFields;
-          Object.assign(enquiry.dynamicFields, prodFields);
+          // Merge: keep existing values, overlay with newly extracted non-empty values
+          prod.dynamicFields = { ...existingProdFields, ...prodFields };
+          Object.assign(newlyExtractedGlobal, prodFields);
         }
+
+        // Apply any newly extracted fields to ALL products that were missing them
+        // (e.g. customer replied "150#" without specifying which product — apply to all)
+        for (const [key, val] of Object.entries(newlyExtractedGlobal)) {
+          if (!val) continue;
+          for (const prod of enquiry.products) {
+            const prodCat = prod.category || enquiry.productCategory;
+            // Only fill if this product's category matches the field's category
+            const fieldDef = fields.find(f => f.fieldName === key);
+            if (fieldDef && fieldDef.productCategory && fieldDef.productCategory !== prodCat) continue;
+            if (!prod.dynamicFields[key]) {
+              prod.dynamicFields[key] = val;
+            }
+          }
+        }
+
         enquiry.markModified('products');
+        // Rebuild root dynamicFields from merged product fields
+        enquiry.dynamicFields = { ...previousFields };
+        for (const prod of enquiry.products) {
+          Object.assign(enquiry.dynamicFields, prod.dynamicFields);
+        }
       } else {
         const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
-        enquiry.dynamicFields = extractedFields;
+        enquiry.dynamicFields = { ...previousFields, ...extractedFields };
       }
 
       const updatedFieldsLog = [];
