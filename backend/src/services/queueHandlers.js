@@ -887,7 +887,8 @@ async function handleNotificationProcessing({ emailMessageId, isReply, enquiryId
       unit: enquiry.unit,
       status: enquiry.status,
       missingFields: completion.missingFields,
-      dynamicFields: enquiry.dynamicFields || {}
+      dynamicFields: enquiry.dynamicFields || {},
+      products: enquiry.products || []
     });
 
     // Notify agents

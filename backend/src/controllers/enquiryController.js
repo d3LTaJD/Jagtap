@@ -38,15 +38,40 @@ async function checkEnquiryCompletion(enquiry) {
       }
 
       if (isFieldActive && field.isRequired) {
-        // Skip category-specific required fields for multi-product enquiries (specs are item-specific)
-        if (enquiry.products && enquiry.products.length > 1 && field.productCategory) {
-          continue;
-        }
-        const val = enquiry.dynamicFields?.[field.fieldName];
-        const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
-        if (!isFilled) {
-          allRequiredFilled = false;
-          missingFields.push(field);
+        if (enquiry.products && enquiry.products.length > 0) {
+          // If the field belongs to a specific product category
+          if (field.productCategory) {
+            // Check if any product of this category is missing the field
+            for (const prod of enquiry.products) {
+              const prodCat = prod.category || enquiry.productCategory;
+              if (prodCat === field.productCategory) {
+                const val = prod.dynamicFields?.[field.fieldName];
+                const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
+                if (!isFilled) {
+                  allRequiredFilled = false;
+                  if (!missingFields.some(f => f.fieldName === field.fieldName)) {
+                    missingFields.push(field);
+                  }
+                }
+              }
+            }
+          } else {
+            // Root-level required field
+            const val = enquiry.dynamicFields?.[field.fieldName];
+            const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
+            if (!isFilled) {
+              allRequiredFilled = false;
+              missingFields.push(field);
+            }
+          }
+        } else {
+          // Single product fallback
+          const val = enquiry.dynamicFields?.[field.fieldName];
+          const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
+          if (!isFilled) {
+            allRequiredFilled = false;
+            missingFields.push(field);
+          }
         }
       }
     }
