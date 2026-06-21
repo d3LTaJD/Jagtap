@@ -517,6 +517,18 @@ async function handleAIExtraction({ emailMessageId }) {
       const prefix = `ENQ-${year}-${month}-`;
       const seq = await getNextSequenceValue(prefix);
       const enquiryId = `${prefix}${String(seq).padStart(4, '0')}`;
+      // Determine targeted email account from recipients
+      let emailAccount = 'info@';
+      const allRecipients = [
+        ...(emailMsg.recipients || []),
+        ...(emailMsg.cc || [])
+      ].map(r => String(r).toLowerCase());
+
+      if (allRecipients.some(r => r.includes('sales@'))) {
+        emailAccount = 'sales@';
+      } else if (allRecipients.some(r => r.includes('support@'))) {
+        emailAccount = 'support@';
+      }
 
       // Create model
       const enquiry = await Enquiry.create({
