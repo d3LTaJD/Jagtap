@@ -10,6 +10,8 @@ const emailMessageSchema = new mongoose.Schema({
   subject: { type: String, required: true },
   bodyText: { type: String },
   htmlBody: { type: String },
+  inReplyTo: { type: String },
+  references: { type: String },
   attachments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Attachment' }],
   receivedAt: { type: Date, required: true },
   processedAt: { type: Date, default: Date.now },

@@ -365,11 +365,18 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
       </p>
     </div>`;
 
-  // Build headers for thread grouping
+  // Build headers for thread grouping — include full References chain so mail
+  // clients (Gmail, Outlook, etc.) always keep replies in the same thread.
   const mailHeaders = {};
   if (incomingEmailMsg && incomingEmailMsg.messageId) {
     mailHeaders['In-Reply-To'] = incomingEmailMsg.messageId;
-    mailHeaders['References'] = incomingEmailMsg.messageId;
+
+    // Build a References chain: previous References + current message ID
+    const prevRefs = incomingEmailMsg.references || '';
+    const refParts = prevRefs
+      ? [...prevRefs.split(/\s+/).filter(Boolean), incomingEmailMsg.messageId]
+      : [incomingEmailMsg.messageId];
+    mailHeaders['References'] = [...new Set(refParts)].join(' ');
   }
 
   // 1. Try SMTP first
@@ -590,7 +597,12 @@ async function processEmailMessage(parsed) {
     }
   }
 
-  // 4. Archive Email Message
+  // 4. Archive Email Message (including threading headers)
+  const parsedInReplyTo = parsed.inReplyTo || null;
+  const parsedReferences = Array.isArray(parsed.references)
+    ? parsed.references.join(' ')
+    : (parsed.references || null);
+
   const emailMsg = await EmailMessage.create({
     messageId: messageId || undefined,
     threadId,
@@ -601,6 +613,8 @@ async function processEmailMessage(parsed) {
     subject,
     bodyText,
     htmlBody,
+    inReplyTo: parsedInReplyTo,
+    references: parsedReferences,
     attachments: savedAttachments.map(a => a._id),
     receivedAt: parsed.date || new Date(),
     processedAt: new Date(),

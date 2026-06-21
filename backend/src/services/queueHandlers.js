@@ -676,6 +676,56 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         }
       }
 
+      // ── Direct option-matching fallback for short replies ──────────────
+      // When a customer replies with just "150#", the AI may fail to map it.
+      // Scan the stripped reply text against the options of each still-missing
+      // required field and fill them in directly.
+      const replyOnlyText = stripQuotedText(emailMsg.bodyText || '').trim();
+      if (replyOnlyText.length > 0 && replyOnlyText.length < 500) {
+        const preCheck = await checkEnquiryCompletion(enquiry);
+        if (!preCheck.isComplete && preCheck.missingFields.length > 0) {
+          const replyLower = replyOnlyText.toLowerCase();
+          const normalize = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+          for (const missingField of preCheck.missingFields) {
+            if (!missingField.options || missingField.options.length === 0) continue;
+
+            // Check if any option value appears in the reply text
+            let matchedOption = null;
+            for (const opt of missingField.options) {
+              const optLower = String(opt).toLowerCase();
+              const optNorm = normalize(opt);
+              if (replyLower.includes(optLower) || normalize(replyOnlyText).includes(optNorm)) {
+                matchedOption = opt;
+                break;
+              }
+            }
+
+            if (matchedOption) {
+              console.log(`[Follow-Up Heuristic] Matched reply "${replyOnlyText}" → ${missingField.fieldLabel}: "${matchedOption}"`);
+              // Apply to all products that are missing this field
+              if (enquiry.products && enquiry.products.length > 0) {
+                for (const prod of enquiry.products) {
+                  const prodCat = prod.category || enquiry.productCategory;
+                  if (missingField.productCategory && missingField.productCategory !== prodCat) continue;
+                  if (!prod.dynamicFields) prod.dynamicFields = {};
+                  if (!prod.dynamicFields[missingField.fieldName]) {
+                    prod.dynamicFields[missingField.fieldName] = matchedOption;
+                  }
+                }
+                enquiry.markModified('products');
+              }
+              // Also set on root
+              if (!enquiry.dynamicFields) enquiry.dynamicFields = {};
+              if (!enquiry.dynamicFields[missingField.fieldName]) {
+                enquiry.dynamicFields[missingField.fieldName] = matchedOption;
+              }
+              enquiry.markModified('dynamicFields');
+            }
+          }
+        }
+      }
+
       // Link attachments bidirectionally using freshAttachments
       if (freshAttachments.length > 0) {
         enquiry.attachmentsList = [...new Set([...(enquiry.attachmentsList || []), ...freshAttachments.map(a => a._id)])];
