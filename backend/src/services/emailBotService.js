@@ -211,7 +211,53 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
     // Build human-readable list of extracted specifications/dynamicFields
     let specsHtml = '';
     let specsText = '';
-    if (item.dynamicFields && Object.keys(item.dynamicFields).length > 0) {
+    if (item.products && item.products.length > 0) {
+      let prodsHtmlList = [];
+      let prodsTextList = [];
+      item.products.forEach((prod, pIdx) => {
+        let prodSpecLines = [];
+        let prodSpecTextLines = [];
+        if (prod.dynamicFields && Object.keys(prod.dynamicFields).length > 0) {
+          for (const [key, val] of Object.entries(prod.dynamicFields)) {
+            if (val === undefined || val === null || val === '') continue;
+            const def = fieldDefs.find(f => f.fieldName === key);
+            const label = def ? def.fieldLabel : key;
+            prodSpecLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${val}</li>`);
+            prodSpecTextLines.push(`    - ${label}: ${val}`);
+          }
+        }
+        
+        let prodHtml = `
+          <div style="margin-top: 6px; padding: 6px 10px; background-color: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; font-size: 12px; color: #334155;">
+            <strong style="color: #0f172a;">Product #${pIdx + 1}: ${prod.description} (Qty: ${prod.quantity} ${prod.unit || 'NOS'})</strong>
+        `;
+        if (prodSpecLines.length > 0) {
+          prodHtml += `
+            <ul style="margin: 4px 0 0 0; padding-left: 18px; color: #475569;">
+              ${prodSpecLines.join('')}
+            </ul>
+          `;
+        } else {
+          prodHtml += `<div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">No specific parameters extracted</div>`;
+        }
+        prodHtml += `</div>`;
+        prodsHtmlList.push(prodHtml);
+
+        let prodText = `  * Product #${pIdx + 1}: ${prod.description} (Qty: ${prod.quantity} ${prod.unit || 'NOS'})\n`;
+        if (prodSpecTextLines.length > 0) {
+          prodText += prodSpecTextLines.join('\n') + '\n';
+        }
+        prodsTextList.push(prodText);
+      });
+
+      specsHtml = `
+        <div style="margin-top:8px;">
+          <strong style="color:#1e3a8a;display:block;margin-bottom:4px;font-size:12px;">Product Specifications:</strong>
+          ${prodsHtmlList.join('')}
+        </div>
+      `;
+      specsText = `Product Specifications:\n${prodsTextList.join('\n')}\n`;
+    } else if (item.dynamicFields && Object.keys(item.dynamicFields).length > 0) {
       const specLines = [];
       const specTextLines = [];
       for (const [key, val] of Object.entries(item.dynamicFields)) {

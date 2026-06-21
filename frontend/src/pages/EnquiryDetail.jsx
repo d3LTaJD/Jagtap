@@ -59,6 +59,14 @@ const SourceTypeBadge = ({ sourceType }) => {
   );
 };
 
+const formatFieldName = (key) => {
+  if (!key) return '';
+  return key
+    .split(/[_-]/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 const EnquiryDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -586,7 +594,22 @@ const EnquiryDetail = () => {
                     {enquiry.products.map((prod, idx) => (
                       <tr key={prod._id || idx} className="text-slate-700 hover:bg-slate-50/50 transition-colors">
                         <td className="py-3.5 font-bold pr-4 text-slate-400">{idx + 1}</td>
-                        <td className="py-3.5 font-semibold pr-4 text-slate-900">{prod.description}</td>
+                        <td className="py-3.5 pr-4">
+                          <div className="font-semibold text-slate-900">{prod.description}</div>
+                          {prod.dynamicFields && Object.keys(prod.dynamicFields).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                              {Object.entries(prod.dynamicFields).map(([key, val]) => {
+                                if (val === undefined || val === null || val === '') return null;
+                                return (
+                                  <span key={key} className="inline-flex items-center gap-1 rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                                    <span className="text-slate-400">{formatFieldName(key)}:</span>
+                                    <span>{val}</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-3.5 pr-4">
                           <span className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">
                             {prod.category || enquiry.productCategory}

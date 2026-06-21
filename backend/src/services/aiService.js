@@ -482,12 +482,39 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
 /**
  * Normalizes options and drops irrelevant keys.
  */
+const inchToMmMap = {
+  '1/2': '15', '0.5': '15',
+  '3/4': '20', '0.75': '20',
+  '1': '25',
+  '1.25': '32', '1-1/4': '32', '1 1/4': '32',
+  '1.5': '40', '1-1/2': '40', '1 1/2': '40',
+  '2': '50',
+  '2.5': '65', '2-1/2': '65', '2 1/2': '65',
+  '3': '80',
+  '4': '100',
+  '6': '150',
+  '8': '200',
+  '10': '250',
+  '12': '300',
+  '14': '350',
+  '16': '400',
+  '18': '450',
+  '20': '500',
+  '24': '600'
+};
+
 function normalizeExtractedFields(data, fieldDefinitions) {
   const normalized = {};
   for (const key of Object.keys(data)) {
     const field = fieldDefinitions.find(f => f.fieldName === key);
     if (field) {
       let val = data[key];
+      if (key.toLowerCase().includes('size') && field.fieldType.includes('Dropdown') && field.options && field.options.length) {
+        let cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
+        if (inchToMmMap[cleanVal]) {
+          val = inchToMmMap[cleanVal];
+        }
+      }
       if (field.fieldType.includes('Dropdown') && field.options && field.options.length) {
         const matchedOpt = field.options.find(opt => {
           const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');

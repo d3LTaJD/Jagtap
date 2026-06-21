@@ -5,6 +5,7 @@
  *   node rerun_ai.js
  */
 
+require('dotenv').config();
 const mongoose = require('mongoose');
 const MONGO_URI = 'mongodb+srv://jeetdodia12_db_user:JD86048604%40%40@jagtap.p3fbvac.mongodb.net/petro-valve?appName=petro-valve';
 
@@ -94,19 +95,26 @@ mongoose.connect(MONGO_URI).then(async () => {
     console.log('  🤖  Calling AI extractDynamicFields ...');
     let extractedFields = {};
     try {
-      extractedFields = await aiService.extractDynamicFields(
-        combinedText, fields, enq.productDescription
-      );
+      if (enq.products && enq.products.length > 0) {
+        for (const prod of enq.products) {
+          console.log(`    Extracting for product: ${prod.description}`);
+          const prodFields = await aiService.extractDynamicFields(
+            combinedText, fields, prod.description
+          );
+          prod.dynamicFields = prodFields;
+          Object.assign(extractedFields, prodFields);
+        }
+        enq.markModified('products');
+      } else {
+        extractedFields = await aiService.extractDynamicFields(
+          combinedText, fields, enq.productDescription
+        );
+      }
     } catch (aiErr) {
       console.error('  ❌  AI error:', aiErr.message);
       continue;
     }
     console.log('  Extracted:', JSON.stringify(extractedFields));
-
-    if (Object.keys(extractedFields).length === 0) {
-      console.log('  ⚠️   AI returned no fields\n');
-      continue;
-    }
 
     // ── Merge into enquiry ─────────────────────────────────────
     const current = enq.dynamicFields ? JSON.parse(JSON.stringify(enq.dynamicFields)) : {};

@@ -417,7 +417,8 @@ async function handleAIExtraction({ emailMessageId }) {
       unit: item.unit || 'NOS',
       category: item.productCategory,
       standardCode: item.standardCode,
-      confidence: item.confidence
+      confidence: item.confidence,
+      dynamicFields: {}
     }));
 
     // Build merged enquiry fields
@@ -516,19 +517,6 @@ async function handleAIExtraction({ emailMessageId }) {
       const prefix = `ENQ-${year}-${month}-`;
       const seq = await getNextSequenceValue(prefix);
       const enquiryId = `${prefix}${String(seq).padStart(4, '0')}`;
-
-      // Determine targeted email account from recipients
-      let emailAccount = 'info@';
-      const allRecipients = [
-        ...(emailMsg.recipients || []),
-        ...(emailMsg.cc || [])
-      ].map(r => String(r).toLowerCase());
-
-      if (allRecipients.some(r => r.includes('sales@'))) {
-        emailAccount = 'sales@';
-      } else if (allRecipients.some(r => r.includes('support@'))) {
-        emailAccount = 'support@';
-      }
 
       // Create model
       const enquiry = await Enquiry.create({
@@ -629,16 +617,27 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         ]
       });
 
-      // AI dynamic spec extraction
-      const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
-      
-      const updatedFieldsLog = [];
+      // AI dynamic spec extraction per product
       const previousFields = { ...enquiry.dynamicFields };
-      for (const key of Object.keys(extractedFields)) {
-        if (extractedFields[key] !== previousFields[key]) {
+      enquiry.dynamicFields = {};
+      
+      if (enquiry.products && enquiry.products.length > 0) {
+        for (const prod of enquiry.products) {
+          const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description);
+          prod.dynamicFields = prodFields;
+          Object.assign(enquiry.dynamicFields, prodFields);
+        }
+        enquiry.markModified('products');
+      } else {
+        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
+        enquiry.dynamicFields = extractedFields;
+      }
+
+      const updatedFieldsLog = [];
+      for (const key of Object.keys(enquiry.dynamicFields)) {
+        if (enquiry.dynamicFields[key] !== previousFields[key]) {
           const fieldDef = fields.find(f => f.fieldName === key);
-          updatedFieldsLog.push(`${fieldDef ? fieldDef.fieldLabel : key}: "${previousFields[key] || 'None'}" → "${extractedFields[key]}"`);
-          enquiry.dynamicFields[key] = extractedFields[key];
+          updatedFieldsLog.push(`${fieldDef ? fieldDef.fieldLabel : key}: "${previousFields[key] || 'None'}" → "${enquiry.dynamicFields[key]}"`);
         }
       }
 
@@ -740,8 +739,18 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         ]
       });
 
-      const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
-      enquiry.dynamicFields = extractedFields;
+      enquiry.dynamicFields = {};
+      if (enquiry.products && enquiry.products.length > 0) {
+        for (const prod of enquiry.products) {
+          const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description);
+          prod.dynamicFields = prodFields;
+          Object.assign(enquiry.dynamicFields, prodFields);
+        }
+        enquiry.markModified('products');
+      } else {
+        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
+        enquiry.dynamicFields = extractedFields;
+      }
 
       // Find attachments mapped by AI — use freshAttachments (full documents, not ObjectIds)
       const mappedAttachments = freshAttachments.filter(att =>

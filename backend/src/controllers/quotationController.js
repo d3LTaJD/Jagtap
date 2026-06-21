@@ -86,8 +86,21 @@ exports.createQuotation = async (req, res, next) => {
       // Copy enquiry dynamicFields to parent and to each item
       req.body.dynamicFields = { ...enquiry.dynamicFields, ...req.body.dynamicFields };
       if (req.body.items && Array.isArray(req.body.items)) {
-        req.body.items.forEach(item => {
-          item.dynamicFields = { ...enquiry.dynamicFields, ...item.dynamicFields };
+        req.body.items.forEach((item, itemIdx) => {
+          // Attempt to find matching product in enquiry.products
+          let matchedProd = null;
+          if (enquiry.products && enquiry.products.length > 0) {
+            // First try by index if the description matches
+            if (enquiry.products[itemIdx] && enquiry.products[itemIdx].description === item.description) {
+              matchedProd = enquiry.products[itemIdx];
+            } else {
+              // Try by matching description exactly or partially
+              matchedProd = enquiry.products.find(p => p.description === item.description) || enquiry.products[itemIdx];
+            }
+          }
+          const prodDynamicFields = matchedProd ? (matchedProd.dynamicFields || {}) : {};
+          item.dynamicFields = { ...prodDynamicFields, ...item.dynamicFields };
+
           if (extractedTerms.technicalDeviations) {
             item.technicalDeviations = item.technicalDeviations || extractedTerms.technicalDeviations;
           }

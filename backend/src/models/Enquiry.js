@@ -76,7 +76,8 @@ const enquirySchema = new mongoose.Schema({
       },
       category: { type: String },
       standardCode: { type: String },
-      confidence: { type: Number }
+      confidence: { type: Number },
+      dynamicFields: { type: mongoose.Schema.Types.Mixed, default: {} }
     }
   ],
   minConfidence: { type: Number },
