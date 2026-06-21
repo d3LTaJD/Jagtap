@@ -5,6 +5,6 @@ const { protect, requirePermission } = require('../middleware/auth');
 
 // Only SA (Super Admin) can read/update system settings
 router.get('/', protect, getSettings);
-router.patch('/', protect, requirePermission('settings', 'edit'), updateSettings);
+router.patch('/', protect, requirePermission('Admin', 'edit'), updateSettings);
 
 module.exports = router;

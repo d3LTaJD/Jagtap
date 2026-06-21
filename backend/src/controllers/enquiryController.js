@@ -38,6 +38,10 @@ async function checkEnquiryCompletion(enquiry) {
       }
 
       if (isFieldActive && field.isRequired) {
+        // Skip category-specific required fields for multi-product enquiries (specs are item-specific)
+        if (enquiry.products && enquiry.products.length > 1 && field.productCategory) {
+          continue;
+        }
         const val = enquiry.dynamicFields?.[field.fieldName];
         const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
         if (!isFilled) {
@@ -77,6 +81,8 @@ exports.createEnquiry = async (req, res, next) => {
     enquiryData.customer = customer._id;
     enquiryData.createdBy = req.user._id;
     enquiryData.assignedTo = enquiryData.assignedTo || req.user._id;
+    enquiryData.sourceType = enquiryData.sourceType || 'Manual Entry';
+    enquiryData.sourceChannel = enquiryData.sourceChannel || 'Manual Entry';
     
     // Generate sequential ENQ-YYYY-MM-NNNN ID atomically
     const year = new Date().getFullYear();
@@ -84,6 +90,7 @@ exports.createEnquiry = async (req, res, next) => {
     const prefix = `ENQ-${year}-${month}-`;
     const seq = await getNextSequenceValue(prefix);
     enquiryData.enquiryId = `${prefix}${String(seq).padStart(4, '0')}`;
+    enquiryData.processingStatus = 'Completed';
 
     const enquiry = await Enquiry.create(enquiryData);
 
@@ -135,10 +142,10 @@ exports.createEnquiry = async (req, res, next) => {
       });
     }
 
-    // Check completeness and auto-promote to 'Ready for Offer'
+    // Check completeness and auto-promote to 'Confirmed'
     const completion = await checkEnquiryCompletion(enquiry);
-    if (completion.isComplete && ['New', 'Contacted', 'Technical Review'].includes(enquiry.status)) {
-      enquiry.status = 'Ready for Offer';
+    if (completion.isComplete && ['New', 'Contacted'].includes(enquiry.status)) {
+      enquiry.status = 'Confirmed';
       await enquiry.save();
     }
 
@@ -215,18 +222,18 @@ exports.updateEnquiry = async (req, res, next) => {
 
     let enquiry = await Enquiry.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
 
-    // Auto-promote status to 'Ready for Offer' if all required fields are complete
+    // Auto-promote status to 'Confirmed' if all required fields are complete
     const completion = await checkEnquiryCompletion(enquiry);
-    if (completion.isComplete && ['New', 'Contacted', 'Technical Review'].includes(enquiry.status)) {
-      enquiry.status = 'Ready for Offer';
+    if (completion.isComplete && ['New', 'Contacted'].includes(enquiry.status)) {
+      enquiry.status = 'Confirmed';
       enquiry = await enquiry.save();
 
       if (enquiry.assignedTo) {
         await createNotification({ 
           user_id: enquiry.assignedTo, 
           type: 'SYSTEM', 
-          title: '🎉 Enquiry Ready for Offer', 
-          message: `Enquiry ${enquiry.enquiryId} has all required fields completed and is now Ready for Offer!`, 
+          title: '🎉 Enquiry Confirmed', 
+          message: `Enquiry ${enquiry.enquiryId} has all required fields completed and is now Confirmed!`, 
           related_id: enquiry._id 
         });
       }
@@ -388,6 +395,10 @@ exports.verifyAndApproveEnquiry = async (req, res, next) => {
       }
 
       if (isFieldActive && field.isRequired) {
+        // Skip category-specific required fields for multi-product enquiries (specs are item-specific)
+        if (tempEnquiry.products && tempEnquiry.products.length > 1 && field.productCategory) {
+          continue;
+        }
         const val = tempEnquiry.dynamicFields?.[field.fieldName];
         const isFilled = val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
         if (!isFilled) {
@@ -438,7 +449,7 @@ exports.verifyAndApproveEnquiry = async (req, res, next) => {
 
     // Mark as verified
     enquiry.isUnverified = false;
-    enquiry.status = 'Verified';
+    enquiry.status = 'Confirmed';
     enquiry.lastModifiedBy = req.user._id;
 
     // Save Enquiry
@@ -495,6 +506,45 @@ exports.getEnquiryThreadEmails = async (req, res, next) => {
       .sort({ receivedAt: 1 });
 
     res.status(200).json({ status: 'success', results: emails.length, data: { emails } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/enquiries/suggest-fields
+exports.suggestEnquiryFields = async (req, res, next) => {
+  try {
+    const { customerId, mobileNumber, emailAddress, productCategory, productDescription } = req.body;
+
+    if (!productCategory || !productDescription) {
+      return res.status(400).json({ status: 'error', message: 'Product category and description are required.' });
+    }
+
+    // Find customer based on ID, mobile, or email
+    let customer = null;
+    if (customerId) {
+      customer = await Customer.findById(customerId);
+    } else if (mobileNumber) {
+      customer = await Customer.findOne({ mobileNumber });
+    } else if (emailAddress) {
+      customer = await Customer.findOne({ emailAddress: emailAddress.toLowerCase() });
+    }
+
+    let customerHistory = [];
+    if (customer) {
+      customerHistory = await Enquiry.find({ customer: customer._id })
+        .select('productCategory productDescription quantity unit standardCode specialRequirements priority dynamicFields')
+        .sort({ createdAt: -1 })
+        .limit(10);
+    }
+
+    const aiService = require('../services/aiService');
+    const suggestionResult = await aiService.suggestEnquiryFields(productCategory, productDescription, customerHistory);
+
+    res.status(200).json({
+      status: 'success',
+      data: suggestionResult
+    });
   } catch (err) {
     next(err);
   }

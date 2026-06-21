@@ -5,7 +5,7 @@ const FollowUp = require('../models/FollowUp');
 const Customer = require('../models/Customer');
 
 // All statuses that mean the enquiry is still alive / active
-const ACTIVE_STATUSES = ['New', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'On Hold'];
+const ACTIVE_STATUSES = ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'On Hold'];
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
@@ -97,18 +97,39 @@ exports.getDashboardStats = async (req, res, next) => {
       .limit(5);
 
     // ── My Tasks (role-aware) ──────────────────────────────────────
-    // Enquiries assigned to me needing action (New or Contacted)
+    // Enquiries assigned to me needing action (New, Confirmed, or Contacted)
     const myEnquiries = await Enquiry.find({
       assignedTo: req.user._id,
-      status: { $in: ['New', 'Contacted'] }
+      status: { $in: ['New', 'Confirmed', 'Contacted'] }
     }).populate('customer', 'companyName').limit(5).select('enquiryId productCategory status customer');
 
-    // Overdue follow-ups logged by me
-    const myDueFollowUps = await FollowUp.find({
-      addedBy: req.user._id,
-      nextFollowUpDate: { $lte: new Date() },
-      isOverridden: false
-    }).populate('enquiry', 'enquiryId').limit(5);
+    // Overdue or due today follow-ups on enquiries assigned to me
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const myDueEnquiries = await Enquiry.find({
+      assignedTo: req.user._id,
+      nextFollowUpDate: { $lte: todayEnd, $ne: null },
+      status: { $nin: ['Won', 'Lost', 'Abandoned'] }
+    })
+    .populate('customer', 'companyName')
+    .sort({ nextFollowUpDate: 1, priority: -1 });
+
+    const myDueFollowUps = myDueEnquiries.map(enq => ({
+      _id: enq._id, // use the enquiry ID so we can reference it easily
+      enquiry: {
+        _id: enq._id,
+        enquiryId: enq.enquiryId,
+        status: enq.status,
+        priority: enq.priority,
+        customer: enq.customer,
+        productCategory: enq.productCategory,
+        nextFollowUpDate: enq.nextFollowUpDate,
+        lastFollowUpAt: enq.lastFollowUpAt
+      },
+      nextFollowUpDate: enq.nextFollowUpDate,
+      notes: 'Automated follow-up reminder'
+    }));
 
     // Approvals (role-specific)
     let myApprovals = [];

@@ -80,48 +80,116 @@ async function extractTextFromFile(buffer, fileType, fileName) {
       console.log(`[File Parsing] Extracting text from PDF: ${fileName} (buffer size: ${buffer.length})`);
       
       // Attempt 1: Use PDFParse class (pdf-parse v2.x)
+      let pdfTextResult = '';
       if (_PDFParse) {
         try {
           const parser = new _PDFParse({ data: buffer });
           await parser.load();
           const result = await parser.getText();
-          const text = (result.text || '').trim();
-          console.log(`[File Parsing] PDF text extracted via PDFParse class: ${text.length} chars from ${fileName}`);
+          pdfTextResult = (result.text || '').trim();
+          console.log(`[File Parsing] PDF text extracted via PDFParse class: ${pdfTextResult.length} chars from ${fileName}`);
 
-          if (text.length < 50) {
-            console.log(`[File Parsing] PDF has very little text (${text.length} chars) — likely scanned: ${fileName}`);
-            return {
-              text: text || '[Scanned PDF - Text Not Extractable]',
-              confidence: 50,
-              status: 'SUCCESS',
-              category
-            };
+          if (pdfTextResult.length >= 50) {
+            return { text: pdfTextResult, confidence: 100, status: 'SUCCESS', category };
           }
-
-          return { text, confidence: 100, status: 'SUCCESS', category };
+          
+          console.log(`[File Parsing] PDF has very little text (${pdfTextResult.length} chars) — likely scanned: ${fileName}. Trying AI Vision OCR...`);
         } catch (pdfErr) {
           console.error(`[File Parsing] PDFParse class failed for ${fileName}: ${pdfErr.message}`);
           console.error('[File Parsing] Stack:', pdfErr.stack);
-          // Fall through to Tesseract OCR image fallback below
+          // Fall through to AI Vision / Tesseract OCR fallback below
         }
       }
 
-      // Attempt 2: Tesseract OCR on PDF (for scanned PDFs where text extraction fails)
+      // Attempt 2: Gemini Vision API for scanned PDFs (sends the PDF as base64)
+      if (process.env.GEMINI_API_KEY) {
+        console.log(`[File Parsing] Using Gemini Vision API to OCR scanned PDF: ${fileName}`);
+        try {
+          const base64Pdf = buffer.toString('base64');
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+          const geminiPayload = {
+            contents: [{
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: 'application/pdf',
+                    data: base64Pdf
+                  }
+                },
+                {
+                  text: `Extract ALL text content from this scanned PDF document. This is a Request for Quotation (RFQ) or product specification document for industrial valves/piping.
+                  
+Return the COMPLETE text content exactly as it appears in the document, including:
+- All product names, descriptions, and specifications
+- All quantities, sizes, materials, pressure ratings
+- All table data, line items, and technical details
+- Company names, contact info, reference numbers
+- Any headers, footers, and notes
+
+Return ONLY the extracted text content. Do not add any commentary or formatting instructions.`
+                }
+              ]
+            }]
+          };
+
+          const geminiRes = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(geminiPayload)
+          });
+
+          if (geminiRes.ok) {
+            const geminiResult = await geminiRes.json();
+            const extractedText = geminiResult.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const trimmed = extractedText.trim();
+            
+            if (trimmed.length > 20) {
+              console.log(`[File Parsing] ✅ Gemini Vision OCR extracted ${trimmed.length} chars from scanned PDF: ${fileName}`);
+              return {
+                text: trimmed,
+                confidence: 90,
+                status: 'SUCCESS',
+                category
+              };
+            } else {
+              console.log(`[File Parsing] Gemini Vision returned too little text (${trimmed.length} chars) for: ${fileName}`);
+            }
+          } else {
+            const errBody = await geminiRes.text().catch(() => '');
+            console.error(`[File Parsing] Gemini Vision API error ${geminiRes.status} for ${fileName}: ${errBody.substring(0, 300)}`);
+          }
+        } catch (geminiErr) {
+          console.error(`[File Parsing] Gemini Vision OCR failed for ${fileName}: ${geminiErr.message}`);
+        }
+      }
+
+      // Attempt 3: Groq does not support vision for PDFs, skip to Tesseract
+
+      // Attempt 4: Tesseract OCR on PDF (limited — works only if Tesseract can interpret the buffer as image)
       console.log(`[File Parsing] Falling back to Tesseract OCR for PDF: ${fileName}`);
       try {
         const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
         const trimmedText = (text || '').trim();
         console.log(`[File Parsing] Tesseract OCR on PDF got ${trimmedText.length} chars (confidence: ${confidence})`);
-        return {
-          text: trimmedText || '[Scanned PDF - OCR Failed]',
-          confidence: confidence || 40,
-          status: 'SUCCESS',
-          category
-        };
+        if (trimmedText.length > 20) {
+          return {
+            text: trimmedText,
+            confidence: confidence || 40,
+            status: 'SUCCESS',
+            category
+          };
+        }
       } catch (ocrErr) {
         console.error(`[File Parsing] Tesseract OCR also failed for PDF ${fileName}: ${ocrErr.message}`);
-        return { text: '[PDF text extraction failed]', confidence: 0, status: 'FAILED', category };
       }
+
+      // Final fallback: return whatever we have
+      return {
+        text: pdfTextResult || '[Scanned PDF - OCR extraction unsuccessful]',
+        confidence: pdfTextResult.length > 0 ? 50 : 0,
+        status: pdfTextResult.length > 0 ? 'SUCCESS' : 'FAILED',
+        category
+      };
     }
 
     // 2. Excel Spreadsheets / CSV
@@ -156,13 +224,49 @@ async function extractTextFromFile(buffer, fileType, fileName) {
       };
     }
 
-    // 4. Images (OCR via Tesseract.js)
+    // 4. Images (OCR via Gemini Vision → Tesseract.js fallback)
     if (['png', 'jpg', 'jpeg', 'tiff', 'tif'].includes(ext) || fileType.startsWith('image/')) {
-      console.log(`[File Parsing] Running OCR via Tesseract on image: ${fileName}`);
+      // Attempt 1: Gemini Vision API (better quality for complex documents)
+      if (process.env.GEMINI_API_KEY) {
+        console.log(`[File Parsing] Running Gemini Vision OCR on image: ${fileName}`);
+        try {
+          const base64Img = buffer.toString('base64');
+          const mimeType = fileType.startsWith('image/') ? fileType : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+          const geminiPayload = {
+            contents: [{
+              parts: [
+                { inlineData: { mimeType, data: base64Img } },
+                { text: `Extract ALL text content from this image. This may be a product specification sheet, RFQ, or technical document for industrial valves/piping. Return the COMPLETE text content exactly as it appears, including all product names, quantities, sizes, materials, pressure ratings, table data, and technical details. Return ONLY the extracted text.` }
+              ]
+            }]
+          };
+
+          const geminiRes = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(geminiPayload)
+          });
+
+          if (geminiRes.ok) {
+            const geminiResult = await geminiRes.json();
+            const extractedText = (geminiResult.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+            if (extractedText.length > 10) {
+              console.log(`[File Parsing] ✅ Gemini Vision OCR extracted ${extractedText.length} chars from image: ${fileName}`);
+              return { text: extractedText, confidence: 90, status: 'SUCCESS', category };
+            }
+          }
+        } catch (geminiErr) {
+          console.error(`[File Parsing] Gemini Vision OCR failed for image ${fileName}: ${geminiErr.message}`);
+        }
+      }
+
+      // Attempt 2: Tesseract.js fallback
+      console.log(`[File Parsing] Running Tesseract OCR on image: ${fileName}`);
       const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
       return {
         text: (text || '').trim(),
-        confidence: confidence || 70, // Tesseract returns confidence out of 100
+        confidence: confidence || 70,
         status: 'SUCCESS',
         category
       };

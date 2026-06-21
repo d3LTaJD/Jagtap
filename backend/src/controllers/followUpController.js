@@ -52,22 +52,46 @@ exports.addFollowUp = async (req, res, next) => {
       return res.status(400).json({ status: 'fail', message: 'enquiryId and notes are required' });
     }
 
+    const finalFollowUpDate = followUpDate ? new Date(followUpDate) : new Date();
+    let finalNextFollowUpDate = nextFollowUpDate ? new Date(nextFollowUpDate) : null;
+
+    if (finalNextFollowUpDate && finalNextFollowUpDate < finalFollowUpDate) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Next follow-up reminder date cannot be before the follow-up date'
+      });
+    }
+
+    if (finalNextFollowUpDate && finalNextFollowUpDate < new Date(Date.now() - 60000)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Next follow-up reminder date cannot be in the past'
+      });
+    }
+
+    if (!finalNextFollowUpDate) {
+      // blank -> system sets D+3 reminder automatically
+      finalNextFollowUpDate = new Date(finalFollowUpDate);
+      finalNextFollowUpDate.setDate(finalNextFollowUpDate.getDate() + 3);
+    }
+
     const followUp = await FollowUp.create({
       enquiry: enquiryId,
       type: type || 'NOTE',
       notes,
       outcome,
       addedBy: req.user._id,
-      followUpDate: followUpDate || new Date(),
-      nextFollowUpDate,
+      followUpDate: finalFollowUpDate,
+      nextFollowUpDate: finalNextFollowUpDate,
       isEscalation: isEscalation || false,
       escalatedTo: escalatedTo || null,
     });
 
-    // Update nextFollowUpDate on the Enquiry itself for quick access
-    if (nextFollowUpDate) {
-      await Enquiry.findByIdAndUpdate(enquiryId, { nextFollowUpDate });
-    }
+    // Update nextFollowUpDate and lastFollowUpAt on the Enquiry itself for quick access
+    await Enquiry.findByIdAndUpdate(enquiryId, {
+      nextFollowUpDate: finalNextFollowUpDate,
+      lastFollowUpAt: finalFollowUpDate
+    });
 
     const populated = await followUp.populate('addedBy', 'name role');
     res.status(201).json({ status: 'success', data: { followUp: populated } });
@@ -79,7 +103,7 @@ exports.addFollowUp = async (req, res, next) => {
 // PATCH /api/follow-ups/:id — edit notes/outcome or override reminder
 exports.updateFollowUp = async (req, res, next) => {
   try {
-    const { notes, outcome, nextFollowUpDate, isOverridden, overrideNote } = req.body;
+    const { type, notes, outcome, nextFollowUpDate, isOverridden, overrideNote } = req.body;
 
     const followUp = await FollowUp.findById(req.params.id);
     if (!followUp) return res.status(404).json({ status: 'fail', message: 'Follow-up not found' });
@@ -91,11 +115,28 @@ exports.updateFollowUp = async (req, res, next) => {
       return res.status(403).json({ status: 'fail', message: 'Not authorized to edit this follow-up' });
     }
 
+    if (type !== undefined) followUp.type = type;
     if (notes !== undefined) followUp.notes = notes;
     if (outcome !== undefined) followUp.outcome = outcome;
     if (nextFollowUpDate !== undefined) {
-      followUp.nextFollowUpDate = nextFollowUpDate;
-      await Enquiry.findByIdAndUpdate(followUp.enquiry, { nextFollowUpDate });
+      if (nextFollowUpDate) {
+        const nextDate = new Date(nextFollowUpDate);
+        const refDate = followUp.followUpDate || new Date();
+        if (nextDate < refDate) {
+          return res.status(400).json({
+            status: 'fail',
+            message: 'Next follow-up reminder date cannot be before the follow-up date'
+          });
+        }
+        if (nextDate < new Date(Date.now() - 60000)) {
+          return res.status(400).json({
+            status: 'fail',
+            message: 'Next follow-up reminder date cannot be in the past'
+          });
+        }
+      }
+      followUp.nextFollowUpDate = nextFollowUpDate || null;
+      await Enquiry.findByIdAndUpdate(followUp.enquiry, { nextFollowUpDate: nextFollowUpDate || null });
     }
     if (isOverridden !== undefined && isHighAuth) {
       followUp.isOverridden = isOverridden;

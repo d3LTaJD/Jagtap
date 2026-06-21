@@ -36,6 +36,21 @@ const PriorityBadge = ({ priority }) => {
   );
 };
 
+const SourceTypeBadge = ({ sourceType }) => {
+  const config = {
+    'Tender': { bg: 'bg-amber-50', text: 'text-amber-800', ring: 'ring-amber-500/30', icon: '📋' },
+    'Direct Enquiry': { bg: 'bg-blue-50', text: 'text-blue-700', ring: 'ring-blue-500/20', icon: '📩' },
+    'Follow-up Reply': { bg: 'bg-violet-50', text: 'text-violet-700', ring: 'ring-violet-500/20', icon: '↩️' },
+    'Manual Entry': { bg: 'bg-slate-50', text: 'text-slate-600', ring: 'ring-slate-500/20', icon: '✏️' },
+  };
+  const c = config[sourceType] || config['Direct Enquiry'];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold ring-1 ring-inset ${c.bg} ${c.text} ${c.ring}`}>
+      {c.icon} {sourceType || 'Enquiry'}
+    </span>
+  );
+};
+
 const Enquiries = () => {
   const navigate = useNavigate();
   const [enquiries, setEnquiries] = useState([]);
@@ -43,9 +58,16 @@ const Enquiries = () => {
   const [showNewModal, setShowNewModal] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   
+  // AI Suggestions states
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
+  const [aiSuggested, setAiSuggested] = useState(false);
+
   const [formData, setFormData] = useState({
     companyName: '', primaryContactName: '', mobileNumber: '', emailAddress: '',
     sourceChannel: 'Email', emailAccount: 'info@', indiaMartLeadId: '', exhibitionName: '', gemTenderNo: '',
+    sourceType: 'Manual Entry', tenderNumber: '', tenderDeadline: '',
     productCategory: 'Pressure Vessel',
     productDescription: '', quantity: 1, unit: 'NOS', priority: 'Medium',
     requiredDeliveryWeeks: '', requiredDeliveryDate: '',
@@ -74,6 +96,77 @@ const Enquiries = () => {
     }
   };
 
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const res = await api.get('/customers');
+        if (res.data?.data?.customers) {
+          setCustomers(res.data.data.customers);
+        }
+      } catch (err) {
+        console.error('Failed to fetch customers', err);
+      }
+    };
+    if (showNewModal) {
+      fetchCustomers();
+    }
+  }, [showNewModal]);
+
+  const handleCustomerSelect = (customerId) => {
+    setSelectedCustomerId(customerId);
+    setAiSuggested(false);
+    const selected = customers.find(c => c._id === customerId);
+    if (selected) {
+      setFormData(prev => ({
+        ...prev,
+        companyName: selected.companyName || '',
+        primaryContactName: selected.primaryContactName || '',
+        mobileNumber: selected.mobileNumber || '',
+        emailAddress: selected.emailAddress || ''
+      }));
+    }
+  };
+
+  const handleAISuggest = async () => {
+    if (!formData.productDescription) {
+      alert('Please enter a Product Description first!');
+      return;
+    }
+    setAiSuggestLoading(true);
+    try {
+      const payload = {
+        customerId: selectedCustomerId || undefined,
+        productCategory: formData.productCategory,
+        productDescription: formData.productDescription,
+        mobileNumber: formData.mobileNumber || undefined,
+        emailAddress: formData.emailAddress || undefined
+      };
+      
+      const res = await api.post('/enquiries/suggest-fields', payload);
+      if (res.data?.data?.suggestions) {
+        const { suggestions } = res.data.data;
+        setFormData(prev => ({
+          ...prev,
+          standardCode: suggestions.standardCode || prev.standardCode,
+          quantity: suggestions.quantity || prev.quantity,
+          unit: suggestions.unit || prev.unit,
+          priority: suggestions.priority || prev.priority,
+          specialRequirements: suggestions.specialRequirements || prev.specialRequirements,
+          dynamicFields: {
+            ...prev.dynamicFields,
+            ...(suggestions.dynamicFields || {})
+          }
+        }));
+        setAiSuggested(true);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to fetch suggestions from AI.');
+    } finally {
+      setAiSuggestLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitLoading(true);
@@ -86,6 +179,9 @@ const Enquiries = () => {
         // EDIT mode — PATCH the existing enquiry
         await api.patch(`/enquiries/${editingEnquiry._id}`, {
           sourceChannel: formData.sourceChannel,
+          sourceType: formData.sourceType,
+          tenderNumber: formData.sourceType === 'Tender' ? formData.tenderNumber : undefined,
+          tenderDeadline: formData.sourceType === 'Tender' && formData.tenderDeadline ? formData.tenderDeadline : undefined,
           productCategory: formData.productCategory,
           productDescription: formData.productDescription,
           quantity: formData.quantity,
@@ -118,6 +214,9 @@ const Enquiries = () => {
           },
           enquiryData: {
             sourceChannel: formData.sourceChannel,
+            sourceType: formData.sourceType || 'Manual Entry',
+            tenderNumber: formData.sourceType === 'Tender' ? formData.tenderNumber : undefined,
+            tenderDeadline: formData.sourceType === 'Tender' && formData.tenderDeadline ? formData.tenderDeadline : undefined,
             emailAccount: formData.sourceChannel === 'Email' ? formData.emailAccount : undefined,
             indiaMartLeadId: formData.sourceChannel === 'IndiaMart' ? formData.indiaMartLeadId : undefined,
             leadGenuineness: formData.sourceChannel === 'IndiaMart' ? formData.leadGenuineness : undefined,
@@ -149,10 +248,13 @@ const Enquiries = () => {
       }
       setShowNewModal(false);
       setEditingEnquiry(null);
+      setSelectedCustomerId('');
+      setAiSuggested(false);
       fetchEnquiries();
       setFormData({
         companyName: '', primaryContactName: '', mobileNumber: '', emailAddress: '',
         sourceChannel: 'Email', emailAccount: 'info@', indiaMartLeadId: '', exhibitionName: '', gemTenderNo: '',
+        sourceType: 'Manual Entry', tenderNumber: '', tenderDeadline: '',
         productCategory: 'Pressure Vessel',
         productDescription: '', quantity: 1, unit: 'NOS', priority: 'Medium',
         requiredDeliveryWeeks: '', requiredDeliveryDate: '',
@@ -180,12 +282,17 @@ const Enquiries = () => {
   const openEdit = (e, enq) => {
     e.stopPropagation(); // don't navigate to detail
     setEditingEnquiry(enq);
+    setSelectedCustomerId(enq.customer?._id || '');
+    setAiSuggested(false);
     setFormData({
       companyName: enq.customer?.companyName || '',
       primaryContactName: enq.customer?.primaryContactName || '',
       mobileNumber: enq.customer?.mobileNumber || '',
       emailAddress: enq.customer?.emailAddress || '',
       sourceChannel: enq.sourceChannel || 'Email',
+      sourceType: enq.sourceType || 'Manual Entry',
+      tenderNumber: enq.tenderNumber || '',
+      tenderDeadline: enq.tenderDeadline ? new Date(enq.tenderDeadline).toISOString().split('T')[0] : '',
       emailAccount: enq.emailAccount || 'info@',
       indiaMartLeadId: enq.indiaMartLeadId || '',
       exhibitionName: enq.exhibitionName || '',
@@ -293,7 +400,7 @@ const Enquiries = () => {
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Status</label>
             <AutocompleteSelect
-              options={['New','Contacted','Technical Review','Quoted','Negotiating','Won','Lost','On Hold','Abandoned']}
+              options={['New','Confirmed','Technical Review','Quoted','Negotiating','Won','Lost','On Hold','Abandoned']}
               value={filterStatus}
               onChange={v => setFilterStatus(v)}
               placeholder="All Statuses"
@@ -335,8 +442,10 @@ const Enquiries = () => {
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Enquiry ID</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Customer</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Product Category</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Type</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Priority</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Confidence</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Follow-up</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date</th>
                   <th className="px-6 py-4 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
@@ -345,7 +454,7 @@ const Enquiries = () => {
               <tbody className="bg-white divide-y divide-slate-100">
                 {filteredEnquiries.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-8 text-center text-sm text-slate-500">
+                    <td colSpan="10" className="px-6 py-8 text-center text-sm text-slate-500">
                       {enquiries.length === 0 ? 'No enquiries found. Click "New Enquiry" to create one.' : 'No enquiries match the current filter.'}
                     </td>
                   </tr>
@@ -366,10 +475,26 @@ const Enquiries = () => {
                         {enq.productCategory || 'N/A'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                        <SourceTypeBadge sourceType={enq.sourceType} />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <StatusBadge status={enq.status} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <PriorityBadge priority={enq.priority} />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {enq.extractionConfidence !== undefined ? (
+                          <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-bold ring-1 ring-inset ${
+                            enq.extractionConfidence >= 80 ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20' :
+                            enq.extractionConfidence >= 50 ? 'bg-amber-50 text-amber-700 ring-amber-600/20' :
+                            'bg-rose-50 text-rose-700 ring-rose-600/20'
+                          }`}>
+                            🎯 {enq.extractionConfidence}%
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {enq.nextFollowUpDate ? (() => {
@@ -386,7 +511,7 @@ const Enquiries = () => {
                           );
                         })() : <span className="text-slate-300 text-xs">—</span>}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium font-mono">
                         {new Date(enq.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -417,7 +542,7 @@ const Enquiries = () => {
               <h2 className="text-lg font-bold text-slate-900">
                 {editingEnquiry ? `Edit Enquiry — ${editingEnquiry.enquiryId}` : 'Create New Enquiry'}
               </h2>
-              <button onClick={() => { setShowNewModal(false); setEditingEnquiry(null); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+              <button onClick={() => { setShowNewModal(false); setEditingEnquiry(null); setSelectedCustomerId(''); setAiSuggested(false); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -427,7 +552,25 @@ const Enquiries = () => {
                 
                 {/* Customer Section */}
                 <section>
-                  <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4">Customer Details</h3>
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
+                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Customer Details</h3>
+                    <div className="w-full sm:w-72">
+                      <AutocompleteSelect
+                        options={customers.map(c => ({ value: c._id, label: `${c.companyName} (${c.primaryContactName})` }))}
+                        value={selectedCustomerId}
+                        onChange={handleCustomerSelect}
+                        placeholder="Or select existing customer..."
+                        allowClear={true}
+                      />
+                    </div>
+                  </div>
+
+                  {aiSuggested && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2 mb-4 animate-in slide-in-from-top-2">
+                      <span>✨ AI suggestions applied successfully from this customer's previous history!</span>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Company Name</label>
@@ -452,7 +595,25 @@ const Enquiries = () => {
 
                 {/* Enquiry Details Section */}
                 <section>
-                  <h3 className="text-sm font-bold text-brand-600 uppercase tracking-wider mb-4">Request Information</h3>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-bold text-brand-600 uppercase tracking-wider">Request Information</h3>
+                    <button
+                      type="button"
+                      onClick={handleAISuggest}
+                      disabled={aiSuggestLoading || !formData.productDescription}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 border border-brand-200 text-brand-700 rounded-lg text-xs font-black hover:bg-brand-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      {aiSuggestLoading ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          ✨ Suggest Specs via AI
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Product Category</label>
@@ -474,6 +635,29 @@ const Enquiries = () => {
                         allowClear={false}
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Source Type</label>
+                      <AutocompleteSelect
+                        options={['Direct Enquiry', 'Tender', 'Follow-up Reply', 'Manual Entry']}
+                        value={formData.sourceType}
+                        onChange={v => setFormData({...formData, sourceType: v})}
+                        placeholder="Select source type..."
+                        allowClear={false}
+                      />
+                    </div>
+
+                    {formData.sourceType === 'Tender' && (
+                      <div className="md:col-span-2 p-3 bg-amber-50/50 rounded-lg border border-amber-100 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-amber-800 mb-1">Tender Number</label>
+                          <input type="text" value={formData.tenderNumber} onChange={e => setFormData({...formData, tenderNumber: e.target.value})} className="w-full px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-sm" placeholder="e.g. NIT-1234" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-amber-800 mb-1">Tender Deadline</label>
+                          <input type="date" value={formData.tenderDeadline} onChange={e => setFormData({...formData, tenderDeadline: e.target.value})} className="w-full px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-sm" />
+                        </div>
+                      </div>
+                    )}
 
                     {/* Conditional Source Fields */}
                     {formData.sourceChannel === 'Email' && (
@@ -644,7 +828,7 @@ const Enquiries = () => {
             </div>
             
             <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-              <button type="button" onClick={() => setShowNewModal(false)} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
+              <button type="button" onClick={() => { setShowNewModal(false); setEditingEnquiry(null); setSelectedCustomerId(''); setAiSuggested(false); }} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
               <button type="submit" form="new-enquiry-form" disabled={submitLoading} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed flex items-center">
                 {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 Save Enquiry

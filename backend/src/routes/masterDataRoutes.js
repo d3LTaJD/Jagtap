@@ -15,10 +15,10 @@ router.get('/slug/:slug', getMasterDataBySlug);
 router.get('/:id', getMasterData);
 
 // Write — admin only
-router.post('/', authorize('SUPER_ADMIN', 'DIRECTOR'), createMasterData);
-router.patch('/:id', authorize('SUPER_ADMIN', 'DIRECTOR'), updateMasterData);
-router.post('/:id/link-field', authorize('SUPER_ADMIN', 'DIRECTOR'), linkField);
-router.delete('/:id/link-field/:fieldId', authorize('SUPER_ADMIN', 'DIRECTOR'), unlinkField);
-router.delete('/:id', authorize('SUPER_ADMIN', 'DIRECTOR'), deleteMasterData);
+router.post('/', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), createMasterData);
+router.patch('/:id', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), updateMasterData);
+router.post('/:id/link-field', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), linkField);
+router.delete('/:id/link-field/:fieldId', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), unlinkField);
+router.delete('/:id', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), deleteMasterData);
 
 module.exports = router;

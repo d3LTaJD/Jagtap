@@ -269,7 +269,7 @@ exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescri
   // results because the prompt is too long. Score fields by relevance to the
   // text and keep the top MAX_FIELDS most relevant ones (always including
   // required fields so they are never silently dropped).
-  const MAX_FIELDS = 35;
+  const MAX_FIELDS = 100;
   let relevantFields = fieldDefinitions;
 
   if (fieldDefinitions.length > MAX_FIELDS) {
@@ -559,7 +559,390 @@ function runHeuristicExtraction(text, from, subject) {
   };
 }
 
+/**
+ * Email Classification Categories
+ */
+const EMAIL_CATEGORIES = ['Enquiry', 'Tender', 'Follow-up', 'Vendor Document', 'Spam/Other'];
+
+/**
+ * Classifies an incoming email into one of: Enquiry, Tender, Follow-up, Vendor Document, Spam/Other.
+ * Uses the same AI fallback chain (Groq → Gemini → OpenAI → Heuristic).
+ *
+ * @param {string} emailText The email body text
+ * @param {object} metadata { from, subject }
+ * @param {Array} attachmentNames List of attachment filenames
+ * @returns {Promise<object>} { category, confidence, reason }
+ */
+exports.classifyEmail = async (emailText, metadata = {}, attachmentNames = []) => {
+  const fromAddress = metadata.from || '';
+  const subjectText = metadata.subject || '';
+
+  console.log(`[AI Classification] Classifying email from "${fromAddress}" subject "${subjectText}"`);
+
+  const attachmentsList = attachmentNames.length > 0
+    ? `Attachment Filenames: ${attachmentNames.join(', ')}`
+    : 'No attachments';
+
+  const prompt = `You are an email classification bot for Petro Valve, an industrial valve and piping manufacturer.
+
+Classify this incoming email into EXACTLY ONE of these categories:
+
+1. "Enquiry" — A new commercial request, Request for Quotation (RFQ), product inquiry, or price request from a customer/buyer wanting to purchase valves, pipes, flanges, vessels, or related industrial products. The sender wants pricing or is asking about products.
+
+2. "Tender" — A formal government tender notice, bid invitation, tender document, NIT (Notice Inviting Tender), Expression of Interest (EOI), or GEM portal request. These often contain tender numbers, bid deadlines, EMD amounts, or formal procurement language. They may be from government bodies, PSUs, municipal corporations, or public sector entities.
+
+3. "Follow-up" — A reply to an existing conversation, a status check, a delivery update request, revision to an existing enquiry, or any email that references a previous interaction or enquiry ID (ENQ-XXXX). Also includes emails requesting modifications to previously submitted requirements.
+
+4. "Vendor Document" — An email from a supplier/vendor/sub-contractor sending material test certificates (MTC), inspection reports, delivery challans, invoices, purchase confirmations, material availability updates, or compliance documents. The sender is selling TO Petro Valve, not buying FROM them.
+
+5. "Spam/Other" — Newsletters, promotional emails, auto-responses, out-of-office replies, job applications, HR-related emails, or any email that does not fit the above categories.
+
+Email Details:
+From: ${fromAddress}
+Subject: ${subjectText}
+${attachmentsList}
+
+Email Body:
+"""
+${emailText.substring(0, 3000)}
+"""
+
+Return ONLY a JSON object with these keys:
+- "category" (string): One of "Enquiry", "Tender", "Follow-up", "Vendor Document", "Spam/Other"
+- "confidence" (number): 0-100 confidence score
+- "reason" (string): One-line explanation of why this category was chosen (max 150 chars)
+- "tenderNumber" (string or null): If category is "Tender", extract the tender/NIT number. Otherwise null.
+- "tenderDeadline" (string or null): If category is "Tender", extract the bid submission deadline as ISO date string. Otherwise null.
+- "referencedEnquiryIds" (array of strings): If category is "Follow-up", extract any ENQ-XXXX IDs mentioned. Otherwise empty array.
+
+Return ONLY raw JSON. No explanations.`;
+
+  const callAI = async (provider, url, buildPayload, parseResponse) => {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: buildPayload.headers,
+        body: JSON.stringify(buildPayload.body)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = parseResponse(result);
+        if (rawText) {
+          const parsed = JSON.parse(rawText.trim());
+          return normalizeClassification(parsed);
+        }
+      }
+    } catch (err) {
+      console.error(`[AI Classification] ${provider} failed:`, err.message);
+    }
+    return null;
+  };
+
+  // 1. Try Groq
+  if (process.env.GROQ_API_KEY) {
+    const result = await callAI('Groq', 'https://api.groq.com/openai/v1/chat/completions', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
+    }, r => r.choices?.[0]?.message?.content);
+    if (result) return result;
+  }
+
+  // 2. Try Gemini
+  if (process.env.GEMINI_API_KEY) {
+    const result = await callAI('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      headers: { 'Content-Type': 'application/json' },
+      body: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
+    }, r => r.candidates?.[0]?.content?.parts?.[0]?.text);
+    if (result) return result;
+  }
+
+  // 3. Try OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    const result = await callAI('OpenAI', 'https://api.openai.com/v1/chat/completions', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
+    }, r => r.choices?.[0]?.message?.content);
+    if (result) return result;
+  }
+
+  // 4. Heuristic fallback
+  console.log('[AI Classification] Using heuristic fallback.');
+  return heuristicClassify(emailText, subjectText, fromAddress, attachmentNames);
+};
+
+/**
+ * Normalizes AI classification output.
+ */
+function normalizeClassification(data) {
+  let category = data.category;
+  if (!EMAIL_CATEGORIES.includes(category)) {
+    // Fuzzy match
+    const lower = (category || '').toLowerCase();
+    if (lower.includes('tender') || lower.includes('nit') || lower.includes('bid')) category = 'Tender';
+    else if (lower.includes('follow') || lower.includes('reply') || lower.includes('update')) category = 'Follow-up';
+    else if (lower.includes('vendor') || lower.includes('supplier') || lower.includes('mtc')) category = 'Vendor Document';
+    else if (lower.includes('spam') || lower.includes('other') || lower.includes('junk')) category = 'Spam/Other';
+    else category = 'Enquiry'; // Default
+  }
+
+  let confidence = parseInt(data.confidence, 10);
+  if (isNaN(confidence) || confidence < 0 || confidence > 100) confidence = 80;
+
+  return {
+    category,
+    confidence,
+    reason: String(data.reason || '').substring(0, 150),
+    tenderNumber: category === 'Tender' ? (data.tenderNumber || null) : null,
+    tenderDeadline: category === 'Tender' ? (data.tenderDeadline || null) : null,
+    referencedEnquiryIds: Array.isArray(data.referencedEnquiryIds) ? data.referencedEnquiryIds : []
+  };
+}
+
+/**
+ * Keyword-based fallback classification when no AI API is available.
+ */
+function heuristicClassify(text, subject, from, attachmentNames) {
+  const combined = `${subject} ${text} ${from}`.toLowerCase();
+  const attStr = attachmentNames.join(' ').toLowerCase();
+
+  // Tender keywords
+  const tenderKeywords = ['tender', 'nit', 'notice inviting', 'bid invitation', 'eoi', 'expression of interest',
+    'gem portal', 'earnest money', 'emd', 'bid submission', 'corrigendum', 'addendum',
+    'procurement', 'rfp', 'request for proposal', 'municipal', 'public sector'];
+  if (tenderKeywords.some(k => combined.includes(k))) {
+    return { category: 'Tender', confidence: 75, reason: 'Tender keywords detected in subject/body', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [] };
+  }
+
+  // Follow-up (reply)
+  if (/^(re|fwd|fw)\s*:/i.test(subject.trim()) || /ENQ-\d{4}-\d{2}-\d{4}/i.test(combined)) {
+    const refs = (combined.match(/ENQ-\d{4}-\d{2}-\d{4}/gi) || []).map(r => r.toUpperCase());
+    return { category: 'Follow-up', confidence: 80, reason: 'Reply subject prefix or ENQ reference ID found', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [...new Set(refs)] };
+  }
+
+  // Vendor document
+  const vendorKeywords = ['mtc', 'material test certificate', 'inspection report', 'test report',
+    'challan', 'delivery note', 'dispatch', 'invoice', 'proforma', 'quotation from',
+    'material availability', 'stock available', 'rate list'];
+  if (vendorKeywords.some(k => combined.includes(k) || attStr.includes(k))) {
+    return { category: 'Vendor Document', confidence: 70, reason: 'Vendor/supplier document keywords detected', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [] };
+  }
+
+  // Default to Enquiry
+  return { category: 'Enquiry', confidence: 60, reason: 'Default classification — no specific category matched', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [] };
+}
+
+exports.EMAIL_CATEGORIES = EMAIL_CATEGORIES;
+
 function extractEmailFromString(str) {
   const match = str.match(/<([^>]+)>/) || str.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
   return match ? match[1].trim() : str.trim();
 }
+
+/**
+ * Extracts commercial terms and compliance details from tender/enquiry PDF or email context
+ * to pre-populate a Quotation.
+ * 
+ * @param {string} textContext Full parsed text of the email + attachments
+ * @returns {Promise<object>} Extracted quotation terms
+ */
+exports.extractQuotationTerms = async (textContext) => {
+  console.log(`[AI Term Extraction] Extracting commercial and compliance terms from context (${textContext.length} chars)`);
+
+  const prompt = `You are a contract compliance and estimation bot for Petro Valve.
+Read the tender document text and technical specifications below:
+"""
+${textContext.substring(0, 10000)}
+"""
+
+Extract the commercial terms, delivery period, and quality/inspection compliance requirements. 
+Return ONLY a JSON object containing the following keys (do not wrap in markdown quotes, return ONLY raw JSON):
+
+1. "paymentTerms" (string): Payment terms mentioned in the document (e.g. "10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch" or "100% within 30 days of delivery"). If not found, output null.
+2. "deliverySchedule" (string): The delivery timeline or completion schedule required (e.g., "Within 12 weeks from approval" or "As per tender schedule"). If not found, output null.
+3. "tpiTerms" (string): Third-party inspection (TPI) agency or inspection terms (e.g. "Inspection by LLOYDS/TPIA" or "CE/IBR certification required"). If not found, output null.
+4. "guaranteeTerms" (string): Guarantee/warranty period specified (e.g., "18 months from supply or 12 months from commissioning"). If not found, output null.
+5. "validityTerms" (string): Bid or quotation validity period (e.g. "120 days from bid opening"). If not found, output null.
+6. "priceBasis" (string): Price basis terms (e.g. "Ex-works", "FOR Destination", "FOB"). If not found, output null.
+7. "freightTerms" (string): Who pays for freight (e.g., "Freight paid by buyer", "Inclusive of freight"). If not found, output null.
+8. "packingForwardingTerms" (string): Packaging requirements (e.g. "Seaworthy wooden box packing required"). If not found, output null.
+9. "technicalDeviations" (string): Any special compliance requirements or deviations from standard design mentioned in the tender specifications (e.g., "Special dual-plate configuration required, compliance with NACE MR0175 required"). If not found, output null.
+
+Return ONLY raw JSON. No explanations.`;
+
+  const callAI = async (provider, url, buildPayload, parseResponse) => {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: buildPayload.headers,
+        body: JSON.stringify(buildPayload.body)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = parseResponse(result);
+        if (rawText) {
+          return JSON.parse(rawText.trim());
+        }
+      }
+    } catch (err) {
+      console.error(`[AI Term Extraction] ${provider} failed:`, err.message);
+    }
+    return null;
+  };
+
+  // 1. Try Groq
+  if (process.env.GROQ_API_KEY) {
+    const result = await callAI('Groq', 'https://api.groq.com/openai/v1/chat/completions', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
+    }, r => r.choices?.[0]?.message?.content);
+    if (result) return normalizeExtractedTerms(result);
+  }
+
+  // 2. Try Gemini
+  if (process.env.GEMINI_API_KEY) {
+    const result = await callAI('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      headers: { 'Content-Type': 'application/json' },
+      body: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
+    }, r => r.candidates?.[0]?.content?.parts?.[0]?.text);
+    if (result) return normalizeExtractedTerms(result);
+  }
+
+  // 3. Try OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    const result = await callAI('OpenAI', 'https://api.openai.com/v1/chat/completions', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
+    }, r => r.choices?.[0]?.message?.content);
+    if (result) return normalizeExtractedTerms(result);
+  }
+
+  return {};
+};
+
+function normalizeExtractedTerms(data) {
+  const cleaned = {};
+  const fields = ['paymentTerms', 'deliverySchedule', 'tpiTerms', 'guaranteeTerms', 'validityTerms', 'priceBasis', 'freightTerms', 'packingForwardingTerms', 'technicalDeviations'];
+  fields.forEach(f => {
+    if (data[f] && typeof data[f] === 'string' && data[f].trim().length > 0 && data[f] !== 'null') {
+      cleaned[f] = data[f].trim();
+    }
+  });
+  return cleaned;
+}
+
+/**
+ * Suggests fields and technical dynamic specifications for an enquiry based on customer purchase history.
+ */
+exports.suggestEnquiryFields = async (productCategory, productDescription, customerHistory = []) => {
+  console.log(`[AI Suggestion] Generating suggestions for category "${productCategory}" and description "${productDescription}". Past enquiries: ${customerHistory.length}`);
+
+  const historyText = customerHistory.map((item, idx) => {
+    return `Enquiry #${idx + 1}:
+Category: ${item.productCategory}
+Description: ${item.productDescription}
+Quantity: ${item.quantity} ${item.unit}
+Standard: ${item.standardCode || 'Not specified'}
+Special Requirements: ${item.specialRequirements || 'None'}
+Priority: ${item.priority || 'Medium'}
+Technical Specifications: ${JSON.stringify(item.dynamicFields || {})}
+---`;
+  }).join('\n');
+
+  const prompt = `You are an expert sales engineering assistant for Petro Valve.
+A sales agent is creating a new enquiry for a customer.
+
+Here is the customer's history of previous enquiries (most recent first):
+${historyText || 'No previous history available.'}
+
+The sales agent has entered the following minimal info for the new enquiry:
+- Product Category: ${productCategory}
+- Product Description: ${productDescription}
+
+Based on this customer's history (if any) and standard engineering specifications for "${productDescription}" under category "${productCategory}", suggest the most likely values for the remaining fields:
+1. "standardCode": Must match exactly one of: "ASME", "IS", "BS", "EN", "API", "IBR", "Custom", "Not specified".
+2. "quantity": A suggested quantity (number).
+3. "unit": Must match exactly one of: "NOS", "SET", "MT", "KG", "M", "M2", "Job".
+4. "priority": Must match exactly one of: "Low", "Medium", "High", "Urgent".
+5. "specialRequirements": Suggest a short summary of any special requirements or inspections (max 400 characters).
+6. "dynamicFields": Suggest technical specifications (key-value pairs) appropriate for this category and product. Suggest keys and values that are relevant. For example:
+   - For Piping: designTempC, designPressureBar, pipeSizeInch, pipeSchedule, materialGrade.
+   - For Pressure Vessel: shellMaterial, headMaterial, capacityLitres, workingPressureBar.
+   - For Heat Exchanger: tubeMaterial, shellMaterial, heatTransferAreaSqM, workingTempC.
+
+Return ONLY a JSON object containing the suggested fields and an explanation of why they were suggested (do not wrap in markdown code blocks, return ONLY raw JSON):
+{
+  "suggestions": {
+    "standardCode": "...",
+    "quantity": 1,
+    "unit": "...",
+    "priority": "...",
+    "specialRequirements": "...",
+    "dynamicFields": {
+      "key1": "value1",
+      "key2": "value2"
+    }
+  },
+  "explanation": "..."
+}
+Do not wrap the JSON in markdown code blocks. Return ONLY the raw JSON string.`;
+
+  const callAI = async (provider, url, buildPayload, parseResponse) => {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: buildPayload.headers,
+        body: JSON.stringify(buildPayload.body)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const rawText = parseResponse(result);
+        if (rawText) {
+          return JSON.parse(rawText.trim());
+        }
+      }
+    } catch (err) {
+      console.error(`[AI Suggestion] ${provider} failed:`, err.message);
+    }
+    return null;
+  };
+
+  // 1. Try Groq
+  if (process.env.GROQ_API_KEY) {
+    const result = await callAI('Groq', 'https://api.groq.com/openai/v1/chat/completions', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
+    }, r => r.choices?.[0]?.message?.content);
+    if (result) return result;
+  }
+
+  // 2. Try Gemini
+  if (process.env.GEMINI_API_KEY) {
+    const result = await callAI('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      headers: { 'Content-Type': 'application/json' },
+      body: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
+    }, r => r.candidates?.[0]?.content?.parts?.[0]?.text);
+    if (result) return result;
+  }
+
+  // 3. Try OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    const result = await callAI('OpenAI', 'https://api.openai.com/v1/chat/completions', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
+    }, r => r.choices?.[0]?.message?.content);
+    if (result) return result;
+  }
+
+  // Fallback default suggestions
+  return {
+    suggestions: {
+      standardCode: 'Not specified',
+      quantity: 1,
+      unit: 'NOS',
+      priority: 'Medium',
+      specialRequirements: '',
+      dynamicFields: {}
+    },
+    explanation: 'No AI service available. Returned default specifications.'
+  };
+};

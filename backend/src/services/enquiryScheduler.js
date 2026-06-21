@@ -10,6 +10,7 @@
 
 const cron = require('node-cron');
 const Enquiry = require('../models/Enquiry');
+const SystemSettings = require('../models/SystemSettings');
 const { createNotification, notifyRoles, sendEmail } = require('./notificationService');
 const { logActivity } = require('../utils/logger');
 
@@ -161,6 +162,65 @@ async function autoAbandon() {
   }
 }
 
+// ─── 5. Configurable D+1, D+3, D+7 Automated Reminders ─────────────────────────
+async function checkAutomatedReminders() {
+  try {
+    const settings = await SystemSettings.findOne({ _singleton: 'global' });
+    const intervals = settings?.followupIntervals || [1, 3, 7];
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const enquiries = await Enquiry.find({
+      status: { $nin: ['Won', 'Lost', 'Abandoned'] },
+      assignedTo: { $ne: null }
+    }).populate('customer', 'companyName');
+
+    let reminderCount = 0;
+
+    for (const enq of enquiries) {
+      const baseDate = enq.lastFollowUpAt || enq.createdAt;
+      const baseDateOnly = new Date(baseDate);
+      baseDateOnly.setHours(0, 0, 0, 0);
+
+      const diffTime = today - baseDateOnly;
+      if (diffTime < 0) continue; // Future activity? Skip.
+
+      const daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+      if (intervals.includes(daysElapsed)) {
+        // Automatically move nextFollowUpDate to today so it appears in the daily queue
+        enq.nextFollowUpDate = today;
+        await enq.save();
+
+        // Send push notification/in-app notification
+        await createNotification({
+          user_id: enq.assignedTo,
+          type: 'FOLLOWUP_REMINDER',
+          title: `⏰ D+${daysElapsed} Follow-up Due`,
+          message: `Automated Reminder: Enquiry ${enq.enquiryId} (${enq.customer?.companyName || 'Unknown'}) has been idle for ${daysElapsed} days since last activity/creation.`,
+          related_id: enq._id
+        });
+
+        // Send email notification
+        await sendEmail({
+          userId: enq.assignedTo,
+          subject: `Automated Follow-up Reminder (D+${daysElapsed}): ${enq.enquiryId}`,
+          text: `Hi,\n\nThis is an automated reminder that Enquiry ${enq.enquiryId} (${enq.customer?.companyName || 'Customer'}) is due for follow-up today (D+${daysElapsed} since last follow-up/creation).\n\nProduct: ${enq.productCategory}\nStatus: ${enq.status}\n\nPlease update the status or log a follow-up directly.\n\n— System Automation`
+        });
+
+        reminderCount++;
+      }
+    }
+
+    if (reminderCount > 0) {
+      console.log(`[Scheduler] Triggered ${reminderCount} automated follow-up reminder(s) based on intervals: [${intervals.join(', ')}].`);
+    }
+  } catch (err) {
+    console.error('[Scheduler] checkAutomatedReminders error:', err.message);
+  }
+}
+
 // ─── Start the scheduler ────────────────────────────────────────────────────
 function startEnquiryScheduler() {
   console.log('[Scheduler] Enquiry Alerts & Automation engine started.');
@@ -177,7 +237,8 @@ function startEnquiryScheduler() {
     console.log(`[Scheduler] Running daily checks at ${new Date().toISOString()}`);
     await checkIdleEscalation();
     await autoAbandon();
+    await checkAutomatedReminders();
   });
 }
 
-module.exports = { startEnquiryScheduler };
+module.exports = { startEnquiryScheduler, checkAutomatedReminders };

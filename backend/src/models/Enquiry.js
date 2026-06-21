@@ -12,6 +12,15 @@ const enquirySchema = new mongoose.Schema({
   exhibitionName: { type: String },
   gemTenderNo: { type: String },
 
+  // AI Classification Source Type
+  sourceType: { 
+    type: String, 
+    enum: ['Direct Enquiry', 'Tender', 'Follow-up Reply', 'Manual Entry'], 
+    default: 'Direct Enquiry' 
+  },
+  tenderNumber: { type: String },
+  tenderDeadline: { type: Date },
+
   contactPerson: { type: String, required: true },
   contactMobile: { type: String, required: true },
   contactEmail: { type: String },
@@ -35,7 +44,7 @@ const enquirySchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['New', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'Won', 'Lost', 'On Hold', 'Abandoned', 'Needs Review', 'Verified'],
+    enum: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'Won', 'Lost', 'On Hold', 'Abandoned', 'Needs Review', 'Verified'],
     default: 'New'
   },
   lostReason: { type: String, enum: ['Price', 'Delivery', 'Competition', 'No Response', 'Spec Mismatch', 'Budget', 'Project Cancelled', 'Other'] },

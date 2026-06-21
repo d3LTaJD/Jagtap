@@ -1,17 +1,17 @@
 const express = require('express');
 const followUpController = require('../controllers/followUpController');
-const { protect } = require('../middleware/auth');
+const { protect, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(protect);
 
 router.route('/')
-  .get(followUpController.getFollowUps)
-  .post(followUpController.addFollowUp);
+  .get(requirePermission('Enquiry', 'view'), followUpController.getFollowUps)
+  .post(requirePermission('Enquiry', 'edit'), followUpController.addFollowUp);
 
 router.route('/:id')
-  .patch(followUpController.updateFollowUp)
-  .delete(followUpController.deleteFollowUp);
+  .patch(requirePermission('Enquiry', 'edit'), followUpController.updateFollowUp)
+  .delete(requirePermission('Enquiry', 'edit'), followUpController.deleteFollowUp);
 
 module.exports = router;

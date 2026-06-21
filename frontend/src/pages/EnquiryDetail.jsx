@@ -21,6 +21,7 @@ const PRIORITY_CONFIG = {
 
 const STATUS_CONFIG = {
   'New':              { color: 'bg-blue-100 text-blue-700',       label: 'New'              },
+  'Confirmed':        { color: 'bg-violet-100 text-violet-700',   label: 'Confirmed'        },
   'Contacted':        { color: 'bg-violet-100 text-violet-700',   label: 'Contacted'        },
   'Technical Review': { color: 'bg-cyan-100 text-cyan-700',       label: 'Technical Review' },
   'Ready for Offer':  { color: 'bg-teal-100 text-teal-700',       label: 'Ready for Offer'  },
@@ -42,6 +43,21 @@ const Toast = ({ msg, type, onClose }) => (
     {msg}
   </div>
 );
+
+const SourceTypeBadge = ({ sourceType }) => {
+  const config = {
+    'Tender': { bg: 'bg-amber-50', text: 'text-amber-800', ring: 'ring-amber-500/30', icon: '📋' },
+    'Direct Enquiry': { bg: 'bg-blue-50', text: 'text-blue-700', ring: 'ring-blue-500/20', icon: '📩' },
+    'Follow-up Reply': { bg: 'bg-violet-50', text: 'text-violet-700', ring: 'ring-violet-500/20', icon: '↩️' },
+    'Manual Entry': { bg: 'bg-slate-50', text: 'text-slate-600', ring: 'ring-slate-500/20', icon: '✏️' },
+  };
+  const c = config[sourceType] || config['Direct Enquiry'];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${c.bg} ${c.text} ${c.ring}`}>
+      {c.icon} {sourceType || 'Direct Enquiry'}
+    </span>
+  );
+};
 
 const EnquiryDetail = () => {
   const { id } = useParams();
@@ -234,6 +250,9 @@ const EnquiryDetail = () => {
       quantity:           enquiry.quantity           || 1,
       unit:               enquiry.unit               || 'NOS',
       sourceChannel:      enquiry.sourceChannel      || 'Email',
+      sourceType:         enquiry.sourceType         || 'Direct Enquiry',
+      tenderNumber:       enquiry.tenderNumber       || '',
+      tenderDeadline:     enquiry.tenderDeadline ? new Date(enquiry.tenderDeadline).toISOString().split('T')[0] : '',
       indiaMartLeadId:    enquiry.indiaMartLeadId    || '',
       leadGenuineness:    enquiry.leadGenuineness    || 'Likely Genuine',
       indiaMartContactMethod: enquiry.indiaMartContactMethod || 'Call',
@@ -254,7 +273,14 @@ const EnquiryDetail = () => {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await api.patch(`/enquiries/${id}`, editForm);
+      const payload = { ...editForm };
+      if (payload.sourceType !== 'Tender') {
+        payload.tenderNumber = undefined;
+        payload.tenderDeadline = undefined;
+      } else if (!payload.tenderDeadline) {
+        payload.tenderDeadline = undefined;
+      }
+      const res = await api.patch(`/enquiries/${id}`, payload);
       setEnquiry(res.data.data.enquiry);
       setShowEditPanel(false);
       showToast('Enquiry updated!');
@@ -365,11 +391,9 @@ const EnquiryDetail = () => {
                 <div className="absolute top-full mt-1 left-0 z-20 bg-white rounded-xl shadow-xl border border-slate-200 w-44 py-1 animate-in slide-in-from-top-1">
                   {[
                     { v: 'Needs Review',     icon: AlertTriangle, label: 'Needs Review',   cls: 'text-rose-600' },
-                    { v: 'Verified',         icon: CheckCircle2,  label: 'Verified',       cls: 'text-emerald-600' },
                     { v: 'New',              icon: Tag,          label: 'New' },
-                    { v: 'Contacted',        icon: UserCheck,    label: 'Contacted' },
+                    { v: 'Confirmed',        icon: UserCheck,    label: 'Confirmed',     cls: 'text-violet-600' },
                     { v: 'Technical Review', icon: CheckCircle2, label: 'Technical Review' },
-                    { v: 'Ready for Offer',  icon: CheckCircle2, label: 'Ready for Offer',  cls: 'text-teal-600' },
                     { v: 'Quoted',           icon: Flag,         label: 'Quoted' },
                     { v: 'Negotiating',      icon: Flag,         label: 'Negotiating',  cls: 'text-indigo-600' },
                     { v: 'Won',              icon: Trophy,       label: 'Won ✓',        cls: 'text-emerald-600' },
@@ -407,62 +431,82 @@ const EnquiryDetail = () => {
                 </div>
               )}
             </div>
+
+            {/* Source Type Badge */}
+            <SourceTypeBadge sourceType={enquiry.sourceType} />
+
+            {/* Confidence Badge */}
+            {enquiry.extractionConfidence !== undefined && (
+              <span className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full border ${
+                enquiry.extractionConfidence >= 80 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                enquiry.extractionConfidence >= 50 ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                'bg-rose-50 text-rose-700 border-rose-200'
+              }`}>
+                🎯 AI Confidence: {enquiry.extractionConfidence}%
+              </span>
+            )}
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap justify-start sm:justify-end w-full sm:w-auto">
           {saving && <Loader2 className="w-4 h-4 animate-spin text-brand-600" />}
 
-          {/* Assign */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-visible">
-            <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-wider">Assign</div>
-            <AutocompleteSelect
-              disabled={!isHighAuth}
-              options={[
-                { value: '', label: 'Unassigned' },
-                ...users.map(u => ({
-                  value: u._id,
-                  label: `${u.fullName || u.name}`,
-                  group: u.department || 'Other'
-                }))
-              ]}
-              value={enquiry.assignedTo?._id || ''}
-              onChange={v => handleUpdate('assignedTo', v)}
-              placeholder="Assign to user..."
-              allowClear={false}
-              className="w-48"
-            />
+          {/* Group 1: Assignment & Creation */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Assign */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-visible">
+              <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-wider">Assign</div>
+              <AutocompleteSelect
+                disabled={!isHighAuth}
+                options={[
+                  { value: '', label: 'Unassigned' },
+                  ...users.map(u => ({
+                    value: u._id,
+                    label: `${u.fullName || u.name}`,
+                    group: u.department || 'Other'
+                  }))
+                ]}
+                value={enquiry.assignedTo?._id || ''}
+                onChange={v => handleUpdate('assignedTo', v)}
+                placeholder="Assign to user..."
+                allowClear={false}
+                className="w-48"
+              />
+            </div>
+
+            <button
+              onClick={() => navigate(`/app/quotations?createForEnquiry=${enquiry._id}`)}
+              disabled={!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
+                ['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)
+                  ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                  : 'bg-slate-300 cursor-not-allowed opacity-60'
+              }`}
+              title={!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status) ? "Quotation generation is blocked. Status must be 'Confirmed' or 'Technical Review'." : "Create Quotation"}
+            >
+              <FileCheck className="w-3.5 h-3.5" /> Create Quotation
+            </button>
           </div>
 
-          <button
-            onClick={() => navigate(`/app/quotations?createForEnquiry=${enquiry._id}`)}
-            disabled={enquiry.status !== 'Ready for Offer'}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
-              enquiry.status === 'Ready for Offer'
-                ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
-                : 'bg-slate-300 cursor-not-allowed opacity-60'
-            }`}
-            title={enquiry.status !== 'Ready for Offer' ? "Quotation generation is blocked. Status must be 'Ready for Offer'." : "Create Quotation"}
-          >
-            <FileCheck className="w-3.5 h-3.5" /> Create Quotation
-          </button>
+          {/* Group 2: Management Operations */}
+          <div className="flex items-center gap-2">
+            {canEdit && (
+              <button onClick={openEdit} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold transition-all">
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </button>
+            )}
 
-          {canEdit && (
-            <button onClick={openEdit} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold transition-all">
-              <Pencil className="w-3.5 h-3.5" /> Edit
+            <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold transition-all">
+              <Download className="w-3.5 h-3.5" /> Export
             </button>
-          )}
 
-          <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold transition-all">
-            <Download className="w-3.5 h-3.5" /> Export
-          </button>
-
-          {isHighAuth && (
-            <button onClick={handleDelete} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold transition-all">
-              <Trash2 className="w-3.5 h-3.5" /> Archive
-            </button>
-          )}
+            {isHighAuth && (
+              <button onClick={handleDelete} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold transition-all">
+                <Trash2 className="w-3.5 h-3.5" /> Archive
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -480,6 +524,16 @@ const EnquiryDetail = () => {
                 ['Description',       enquiry.productDescription],
                 ['Quantity',          `${enquiry.quantity} ${enquiry.unit || 'NOS'}`],
                 ['Source Channel',    enquiry.sourceChannel],
+                ['Source Type',       enquiry.sourceType || 'Direct Enquiry'],
+                ...(enquiry.sourceType === 'Tender' ? [
+                  ['Tender Number',   enquiry.tenderNumber || '—'],
+                  ['Tender Deadline', enquiry.tenderDeadline ? new Date(enquiry.tenderDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—']
+                ] : []),
+                ...(enquiry.productCategory === 'Piping' ? [
+                  ['Valve Type',      enquiry.dynamicFields?.valve_type || '—'],
+                  ['Valve Size',      enquiry.dynamicFields?.valve_size ? `${enquiry.dynamicFields.valve_size} mm` : '—'],
+                  ['Pressure Class',  enquiry.dynamicFields?.valve_class || '—']
+                ] : []),
                 ...(enquiry.sourceChannel === 'IndiaMart' ? [
                   ['IndiaMart Lead ID', enquiry.indiaMartLeadId || '—'],
                   ['Lead Genuineness', enquiry.leadGenuineness || '—'],
@@ -666,7 +720,7 @@ const EnquiryDetail = () => {
                           {email.attachments.map(att => (
                             <a
                               key={att._id}
-                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/files/download-local/${att.storagePath}`}
+                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/files/download-local/${att.storagePath}`}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 transition-all"
@@ -803,7 +857,7 @@ const EnquiryDetail = () => {
                           </div>
                           <div className="text-right">
                             <a
-                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/files/download-local/${att.storagePath}`}
+                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/files/download-local/${att.storagePath}`}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 font-bold"
@@ -871,6 +925,28 @@ const EnquiryDetail = () => {
                     allowClear={false}
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Source Type</label>
+                  <AutocompleteSelect
+                    options={['Direct Enquiry', 'Tender', 'Follow-up Reply', 'Manual Entry']}
+                    value={editForm.sourceType}
+                    onChange={v => setEditForm(prev => ({ ...prev, sourceType: v }))}
+                    placeholder="Select source type..."
+                    allowClear={false}
+                  />
+                </div>
+                {editForm.sourceType === 'Tender' && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Tender Number</label>
+                      <input type="text" value={editForm.tenderNumber || ''} onChange={e => setEditForm(prev => ({ ...prev, tenderNumber: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Tender Deadline</label>
+                      <input type="date" value={editForm.tenderDeadline || ''} onChange={e => setEditForm(prev => ({ ...prev, tenderDeadline: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                    </div>
+                  </>
+                )}
                 {editForm.sourceChannel === 'IndiaMart' && (
                   <>
                     <div>

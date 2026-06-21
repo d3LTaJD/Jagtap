@@ -13,6 +13,19 @@ const emailMessageSchema = new mongoose.Schema({
   attachments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Attachment' }],
   receivedAt: { type: Date, required: true },
   processedAt: { type: Date, default: Date.now },
+
+  // AI Email Classification
+  emailCategory: { 
+    type: String, 
+    enum: ['Enquiry', 'Tender', 'Follow-up', 'Vendor Document', 'Spam/Other', 'Unclassified'], 
+    default: 'Unclassified',
+    index: true
+  },
+  classificationConfidence: { type: Number },
+  classificationReason: { type: String },
+  tenderNumber: { type: String },
+  tenderDeadline: { type: Date },
+
   processingStatus: { type: String, enum: ['Pending', 'Processing', 'Completed', 'Failed'], default: 'Pending', index: true },
   processingMessage: { type: String },
   processingStartedAt: { type: Date },

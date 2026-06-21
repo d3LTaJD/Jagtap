@@ -182,58 +182,182 @@ async function handleAIExtraction({ emailMessageId }) {
   if (!emailMsg) throw new Error(`EmailMessage ${emailMessageId} not found`);
 
   emailMsg.processingStatus = 'Processing';
-  emailMsg.processingMessage = 'Extracting structured entities via AI';
+  emailMsg.processingMessage = 'Classifying email type via AI';
   await emailMsg.save();
 
   const customer = await Customer.findOne({ emailAddress: emailMsg.sender.toLowerCase() });
   if (!customer) throw new Error(`Customer record for ${emailMsg.sender} not found`);
 
-  // Thread matching
+  // ──────────────────────────────────────────────────────────────
+  // STEP 0: AI Email Classification
+  // ──────────────────────────────────────────────────────────────
+  const attachmentNames = (emailMsg.attachments || []).map(a => a.originalFileName || '').filter(Boolean);
+  const classification = await aiService.classifyEmail(
+    emailMsg.bodyText || '',
+    { from: emailMsg.sender, subject: emailMsg.subject },
+    attachmentNames
+  );
+
+  // Persist classification on the EmailMessage
+  emailMsg.emailCategory = classification.category;
+  emailMsg.classificationConfidence = classification.confidence;
+  emailMsg.classificationReason = classification.reason;
+  if (classification.tenderNumber) emailMsg.tenderNumber = classification.tenderNumber;
+  if (classification.tenderDeadline) emailMsg.tenderDeadline = new Date(classification.tenderDeadline);
+  await emailMsg.save();
+
+  console.log(`[AI Extraction] Email ${emailMessageId} classified as: ${classification.category} (${classification.confidence}%) — ${classification.reason}`);
+
+  await SystemAuditLog.create({
+    eventType: 'AI_EXTRACTION',
+    entityType: 'EmailMessage',
+    entityId: emailMsg._id,
+    action: `Email classified as "${classification.category}" with ${classification.confidence}% confidence`,
+    metadata: { category: classification.category, confidence: classification.confidence, reason: classification.reason }
+  });
+
+  // ──────────────────────────────────────────────────────────────
+  // ROUTE: Spam/Other → Terminate early
+  // ──────────────────────────────────────────────────────────────
+  if (classification.category === 'Spam/Other') {
+    console.log(`[AI Extraction] Email ${emailMessageId} classified as Spam/Other. Terminating pipeline.`);
+    emailMsg.processingStatus = 'Completed';
+    emailMsg.processingMessage = `Classified as Spam/Other: ${classification.reason}`;
+    emailMsg.processingCompletedAt = new Date();
+    await emailMsg.save();
+    return;
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // ROUTE: Vendor Document → Log, link to vendor, notify
+  // ──────────────────────────────────────────────────────────────
+  if (classification.category === 'Vendor Document') {
+    console.log(`[AI Extraction] Email ${emailMessageId} classified as Vendor Document. Routing to vendor handler.`);
+
+    // Try to match sender to existing vendor
+    const Vendor = require('../models/Vendor');
+    const vendor = await Vendor.findOne({
+      $or: [
+        { email: emailMsg.sender.toLowerCase() },
+        { email: { $regex: new RegExp(emailMsg.sender.split('@')[1] || 'NOMATCH', 'i') } }
+      ]
+    });
+
+    // Notify admins/directors about vendor document
+    const admins = await User.find({
+      is_active: true,
+      role: { $in: ['SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'] }
+    });
+
+    for (const admin of admins) {
+      await createNotification({
+        user_id: admin._id,
+        type: 'SYSTEM',
+        title: '📦 Vendor Document Received',
+        message: `Vendor document from ${vendor ? vendor.name : emailMsg.sender}: "${emailMsg.subject}". ${emailMsg.attachments.length} attachment(s).`,
+        related_id: emailMsg._id
+      });
+    }
+
+    emailMsg.processingStatus = 'Completed';
+    emailMsg.processingMessage = `Vendor document from ${vendor ? vendor.name : emailMsg.sender}. ${emailMsg.attachments.length} attachment(s) archived.`;
+    emailMsg.processingCompletedAt = new Date();
+    await emailMsg.save();
+
+    await SystemAuditLog.create({
+      eventType: 'INGESTION',
+      entityType: 'EmailMessage',
+      entityId: emailMsg._id,
+      action: `Vendor document received and archived. Vendor: ${vendor ? vendor.name : 'Unknown'}`,
+      metadata: { vendorId: vendor ? vendor._id : null, attachmentCount: emailMsg.attachments.length }
+    });
+    return;
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // ROUTE: Follow-up → Thread matching (existing logic)
+  // ──────────────────────────────────────────────────────────────
+  // Thread matching for Follow-up (AI classified) OR structural thread detection
   let matchedEnquiries = [];
-  const parentMessageIds = [];
-  if (emailMsg.messageId) {
-    // Look up references
-    const parsed = {
-      subject: emailMsg.subject,
-      bodyText: emailMsg.bodyText,
-      inReplyTo: emailMsg.messageId
-    };
-    // Match by reference ID in subject/body
-    const refMatch = (emailMsg.subject + ' ' + emailMsg.bodyText).match(/ENQ-\d{4}-\d{2}-\d{4}/gi);
-    if (refMatch) {
-      const matchedIds = [...new Set(refMatch.map(id => id.toUpperCase()))];
-      matchedEnquiries = await Enquiry.find({ enquiryId: { $in: matchedIds } }).populate('customer');
+
+  if (classification.category === 'Follow-up') {
+    // Use AI-extracted ENQ IDs first if available
+    if (classification.referencedEnquiryIds && classification.referencedEnquiryIds.length > 0) {
+      matchedEnquiries = await Enquiry.find({ enquiryId: { $in: classification.referencedEnquiryIds } }).populate('customer');
     }
   }
 
-  // Fallback to threadId
-  if (matchedEnquiries.length === 0 && emailMsg.threadId) {
-    matchedEnquiries = await Enquiry.find({ threadId: emailMsg.threadId }).populate('customer');
-  }
-
-  // Fallback to customer reply
+  // Fallback: structural thread matching (works for Follow-up and also Enquiry/Tender replies)
   if (matchedEnquiries.length === 0) {
-    const isReplySubject = /^(re|fwd|fw)\s*:/i.test(emailMsg.subject.trim());
-    if (isReplySubject) {
-      const activeEnquiries = await Enquiry.find({
+    const parentMessageIds = [];
+    if (emailMsg.messageId) {
+      // Match by reference ID in subject/body
+      const refMatch = (emailMsg.subject + ' ' + emailMsg.bodyText).match(/ENQ-\d{4}-\d{2}-\d{4}/gi);
+      if (refMatch) {
+        const matchedIds = [...new Set(refMatch.map(id => id.toUpperCase()))];
+        matchedEnquiries = await Enquiry.find({ enquiryId: { $in: matchedIds } }).populate('customer');
+      }
+    }
+
+    // Fallback to threadId
+    if (matchedEnquiries.length === 0 && emailMsg.threadId) {
+      matchedEnquiries = await Enquiry.find({ threadId: emailMsg.threadId }).populate('customer');
+    }
+
+    // Fallback to customer reply
+    if (matchedEnquiries.length === 0) {
+      const isReplySubject = /^(re|fwd|fw)\s*:/i.test(emailMsg.subject.trim());
+      if (isReplySubject) {
+        const activeEnquiries = await Enquiry.find({
+          customer: customer._id,
+          status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified'] }
+        }).populate('customer');
+        
+        if (activeEnquiries.length === 1) {
+          matchedEnquiries = [activeEnquiries[0]];
+        }
+      }
+    }
+
+    // Fallback: Same customer with an open enquiry in the same product category (Duplicate detection)
+    // IMPORTANT: Only do customer-level matching for Follow-up classified emails.
+    // For new Enquiry/Tender emails, we should always create new enquiries, not merge into existing ones.
+    if (matchedEnquiries.length === 0 && classification.category === 'Follow-up') {
+      const openEnquiries = await Enquiry.find({
         customer: customer._id,
-        status: { $in: ['New', 'Contacted', 'Technical Review', 'Needs Review', 'Verified'] }
+        status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified', 'Ready for Offer'] }
       }).populate('customer');
-      
-      if (activeEnquiries.length === 1) {
-        matchedEnquiries = [activeEnquiries[0]];
+
+      if (openEnquiries.length > 0) {
+        if (openEnquiries.length === 1) {
+          matchedEnquiries = [openEnquiries[0]];
+          console.log(`[AI Extraction] Single open enquiry found for customer (Follow-up). Routing email ${emailMessageId} as follow-up to ${openEnquiries[0].enquiryId}.`);
+        } else {
+          // Match by product category keywords in subject/body
+          const emailContent = (emailMsg.subject + ' ' + (emailMsg.bodyText || '')).toLowerCase();
+          const matched = openEnquiries.find(enq => {
+            const category = (enq.productCategory || '').toLowerCase();
+            return emailContent.includes(category) || category.split(' ').some(word => word.length > 3 && emailContent.includes(word));
+          });
+          if (matched) {
+            matchedEnquiries = [matched];
+            console.log(`[AI Extraction] Open enquiry with matching category "${matched.productCategory}" found (Follow-up). Routing email ${emailMessageId} as follow-up to ${matched.enquiryId}.`);
+          }
+        }
       }
     }
   }
 
-  // Re-fetch attachments fresh from DB — the initial populate captured empty extractedText
-  // before DocumentParsingQueue ran. We need the latest extractedText for AI context.
+  // Re-fetch attachments fresh from DB
   const freshAttachmentsForAI = await Attachment.find({ _id: { $in: emailMsg.attachments } });
   const bodyText = emailMsg.bodyText || '';
   const savedAttachments = freshAttachmentsForAI;
 
+  // ──────────────────────────────────────────────────────────────
+  // If thread matched → handle as reply (Follow-up path)
+  // ──────────────────────────────────────────────────────────────
   if (matchedEnquiries.length > 0) {
-    console.log(`[AI Extraction] Identified thread reply for ${matchedEnquiries.length} enquiry(ies).`);
+    console.log(`[AI Extraction] Identified thread reply for ${matchedEnquiries.length} enquiry(ies). Category: ${classification.category}`);
     
     // Set processing status on enquiries
     for (const enq of matchedEnquiries) {
@@ -247,16 +371,18 @@ async function handleAIExtraction({ emailMessageId }) {
       isReply: true,
       matchedEnquiryIds: matchedEnquiries.map(e => e._id)
     });
-  } else {
-    // New Enquiry Extraction
-    console.log('[AI Extraction] Calling AI extractEnquiries for new requirements...');
+  } else if (classification.category === 'Enquiry' || classification.category === 'Tender') {
+    // ──────────────────────────────────────────────────────────────
+    // ROUTE: Enquiry / Tender → New product extraction
+    // ──────────────────────────────────────────────────────────────
+    console.log(`[AI Extraction] Calling AI extractEnquiries for new ${classification.category}...`);
     const metadata = { from: emailMsg.sender, subject: emailMsg.subject };
     const extractedResult = await aiService.extractEnquiries(bodyText, savedAttachments, metadata);
 
     if (extractedResult.isEnquiry === false || !extractedResult.enquiries || extractedResult.enquiries.length === 0) {
-      console.log(`[AI Extraction] Email ${emailMessageId} is not an active business enquiry. Terminating.`);
+      console.log(`[AI Extraction] Email ${emailMessageId} classified as ${classification.category} but no products extracted. Terminating.`);
       emailMsg.processingStatus = 'Completed';
-      emailMsg.processingMessage = 'Not classified as enquiry';
+      emailMsg.processingMessage = `Classified as ${classification.category} but no extractable products found`;
       emailMsg.processingCompletedAt = new Date();
       await emailMsg.save();
       return;
@@ -391,12 +517,28 @@ async function handleAIExtraction({ emailMessageId }) {
       const seq = await getNextSequenceValue(prefix);
       const enquiryId = `${prefix}${String(seq).padStart(4, '0')}`;
 
+      // Determine targeted email account from recipients
+      let emailAccount = 'info@';
+      const allRecipients = [
+        ...(emailMsg.recipients || []),
+        ...(emailMsg.cc || [])
+      ].map(r => String(r).toLowerCase());
+
+      if (allRecipients.some(r => r.includes('sales@'))) {
+        emailAccount = 'sales@';
+      } else if (allRecipients.some(r => r.includes('support@'))) {
+        emailAccount = 'support@';
+      }
+
       // Create model
       const enquiry = await Enquiry.create({
         enquiryId,
         customer: customer._id,
         sourceChannel: 'Email',
-        emailAccount: 'info@',
+        emailAccount,
+        sourceType: classification.category === 'Tender' ? 'Tender' : 'Direct Enquiry',
+        tenderNumber: classification.tenderNumber || undefined,
+        tenderDeadline: classification.tenderDeadline ? new Date(classification.tenderDeadline) : undefined,
         contactPerson: customer.primaryContactName,
         contactMobile: customer.mobileNumber,
         contactEmail: emailMsg.sender.toLowerCase(),
@@ -406,7 +548,7 @@ async function handleAIExtraction({ emailMessageId }) {
         unit: mergedEnquiryItem.unit,
         standardCode: mergedEnquiryItem.standardCode,
         specialRequirements: mergedEnquiryItem.specialRequirements,
-        priority: mergedEnquiryItem.priority,
+        priority: classification.category === 'Tender' ? 'High' : mergedEnquiryItem.priority,
         assignedTo: agentId,
         createdBy: agentId,
         status: 'New',
@@ -418,7 +560,7 @@ async function handleAIExtraction({ emailMessageId }) {
         sourceEmailId: emailMsg.sourceEmailId || '',
         threadId: emailMsg.threadId,
         processingStatus: 'Pending',
-        processingMessage: 'Enquiry document initialized'
+        processingMessage: `${classification.category} document initialized`
       });
       enquiriesCreatedIds.push(enquiry._id);
     }
@@ -430,6 +572,12 @@ async function handleAIExtraction({ emailMessageId }) {
       enquiriesCreatedIds,
       aiExtractionResult: [mergedEnquiryItem]
     });
+  } else {
+    console.log(`[AI Extraction] Email ${emailMessageId} classified as ${classification.category} but could not be matched/routed.`);
+    emailMsg.processingStatus = 'Completed';
+    emailMsg.processingMessage = `Classified as ${classification.category} but no matched thread/enquiry found.`;
+    emailMsg.processingCompletedAt = new Date();
+    await emailMsg.save();
   }
 }
 
@@ -516,8 +664,8 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
 
       // Check completeness and promote
       const completion = await checkEnquiryCompletion(enquiry);
-      if (completion.isComplete && ['New', 'Contacted', 'Technical Review', 'Verified'].includes(enquiry.status)) {
-        enquiry.status = 'Ready for Offer';
+      if (completion.isComplete && ['New', 'Contacted', 'Verified'].includes(enquiry.status)) {
+        enquiry.status = 'Confirmed';
       }
 
       enquiry.processingStatus = 'Completed';
@@ -638,8 +786,8 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       // Check completeness
       const completion = await checkEnquiryCompletion(enquiry);
       if (completion.isComplete && status === 'New') {
-        enquiry.status = 'Ready for Offer';
-        status = 'Ready for Offer';
+        enquiry.status = 'Confirmed';
+        status = 'Confirmed';
       }
 
       enquiry.processingStatus = 'Completed';
@@ -717,7 +865,8 @@ async function handleNotificationProcessing({ emailMessageId, isReply, enquiryId
       quantity: enquiry.quantity,
       unit: enquiry.unit,
       status: enquiry.status,
-      missingFields: completion.missingFields
+      missingFields: completion.missingFields,
+      dynamicFields: enquiry.dynamicFields || {}
     });
 
     // Notify agents
@@ -730,11 +879,11 @@ async function handleNotificationProcessing({ emailMessageId, isReply, enquiryId
           message: `Enquiry ${enquiry.enquiryId} requires human review (Confidence: ${enquiry.extractionConfidence}%).`,
           related_id: enquiry._id
         });
-      } else if (enquiry.status === 'Ready for Offer') {
+      } else if (enquiry.status === 'Confirmed' || enquiry.status === 'Ready for Offer') {
         await createNotification({
           user_id: enquiry.assignedTo,
           type: 'SYSTEM',
-          title: '✅ Ready for Offer',
+          title: '✅ Enquiry Confirmed',
           message: `Enquiry ${enquiry.enquiryId} is complete and ready for quotation.`,
           related_id: enquiry._id
         });

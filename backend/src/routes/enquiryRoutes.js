@@ -7,7 +7,8 @@ const {
   updateEnquiry, 
   deleteEnquiry,
   verifyAndApproveEnquiry,
-  getEnquiryThreadEmails
+  getEnquiryThreadEmails,
+  suggestEnquiryFields
 } = require('../controllers/enquiryController');
 const followUpRouter = require('./followUpRoutes');
 
@@ -15,6 +16,8 @@ const router = express.Router();
 
 // Require login to access any enquiry routes
 router.use(protect);
+
+router.post('/suggest-fields', requirePermission('Enquiry', 'create'), suggestEnquiryFields);
 
 // Mount nested routers
 router.use('/:enquiryId/followups', followUpRouter);

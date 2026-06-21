@@ -24,6 +24,7 @@ const systemSettingsSchema = new mongoose.Schema({
   defaultGSTRate:    { type: Number, default: 18 },       // 0 / 5 / 12 / 18 / 28
   quotationValidity: { type: Number, default: 30 },       // days
   followupReminderDays:    { type: Number, default: 2 },  // days after enquiry creation
+  followupIntervals:       { type: [Number], default: [1, 3, 7] }, // D+1, D+3, D+7 days
   escalationThresholdDays: { type: Number, default: 5 },  // days of inactivity before alert
   quoteAbandonDays:        { type: Number, default: 60 }, // days — auto-flag as stale
 
@@ -40,6 +41,25 @@ const systemSettingsSchema = new mongoose.Schema({
     followupDue: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } },
     taskAssigned: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } },
     lowInventory: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } }
+  },
+
+  // ─── Auto-Acknowledgement Config per Email Account ──────────────
+  emailAccountsConfig: {
+    info: {
+      autoReply: { type: Boolean, default: true },
+      subjectTemplate: { type: String, default: 'Acknowledgement: Enquiries Registered [Ref: {refs}]' },
+      bodyTemplate: { type: String, default: 'Dear {contactName},\n\nThank you for your enquiry. We have successfully registered/updated your requests in our system:\n\n{itemsText}\n\nOur sales team is preparing your commercial quotation and will get in touch shortly.\n\nBest regards,\nPetro Valve AI Team' }
+    },
+    sales: {
+      autoReply: { type: Boolean, default: true },
+      subjectTemplate: { type: String, default: 'Acknowledgement: Enquiries Registered [Ref: {refs}]' },
+      bodyTemplate: { type: String, default: 'Dear {contactName},\n\nThank you for your enquiry. We have successfully registered/updated your requests in our system:\n\n{itemsText}\n\nOur sales team is preparing your commercial quotation and will get in touch shortly.\n\nBest regards,\nPetro Valve AI Team' }
+    },
+    support: {
+      autoReply: { type: Boolean, default: true },
+      subjectTemplate: { type: String, default: 'Acknowledgement: Enquiries Registered [Ref: {refs}]' },
+      bodyTemplate: { type: String, default: 'Dear {contactName},\n\nThank you for your enquiry. We have successfully registered/updated your requests in our system:\n\n{itemsText}\n\nOur sales team is preparing your commercial quotation and will get in touch shortly.\n\nBest regards,\nPetro Valve AI Team' }
+    }
   }
 
 }, { timestamps: true });

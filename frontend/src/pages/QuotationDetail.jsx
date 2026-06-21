@@ -61,7 +61,8 @@ const QuotationDetail = () => {
     tpiTerms: '',
     transitInsurance: '',
     guaranteeTerms: '',
-    paymentTerms: ''
+    paymentTerms: '',
+    deliverySchedule: ''
   });
 
   const showToast = (msg, type = 'success') => {
@@ -97,7 +98,8 @@ const QuotationDetail = () => {
             tpiTerms: q.tpiTerms || 'We will offer valves to your nominated TPIA agency. Charges towards TPIA fees will be to your account.',
             transitInsurance: q.transitInsurance || 'In your scope only.',
             guaranteeTerms: q.guaranteeTerms || '12 months from the date of commissioning or 18 months from the date of dispatch',
-            paymentTerms: q.paymentTerms || '10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch.'
+            paymentTerms: q.paymentTerms || '10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch.',
+            deliverySchedule: q.deliverySchedule || ''
           });
         }
         
@@ -684,6 +686,18 @@ const QuotationDetail = () => {
                     value={commFields.guaranteeTerms}
                     onChange={e => setCommFields({ ...commFields, guaranteeTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Delivery Schedule / Timeline</label>
+                  <textarea
+                    rows={2}
+                    disabled={isApproved}
+                    value={commFields.deliverySchedule}
+                    onChange={e => setCommFields({ ...commFields, deliverySchedule: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
+                    placeholder="e.g. Within 12 weeks from receipt of technically clear order..."
                   />
                 </div>
               </div>

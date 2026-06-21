@@ -6,7 +6,7 @@ const router = express.Router();
 
 // Only SUPER_ADMIN and DIRECTOR can manage roles
 router.use(protect);
-router.use(authorize('SUPER_ADMIN', 'DIRECTOR'));
+router.use(authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'));
 
 router.route('/')
   .get(roleController.getRoles)

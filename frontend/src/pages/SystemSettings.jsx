@@ -15,6 +15,7 @@ const TABS = [
 
 const SystemSettings = () => {
   const [activeTab, setActiveTab] = useState('company');
+  const [selectedEmailSubTab, setSelectedEmailSubTab] = useState('info');
   const [settings, setSettings] = useState({
     companyName: '', companyLogo: '', gstin: '', pan: '', registeredAddress: '',
     smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '', smtpFromName: '',
@@ -27,24 +28,64 @@ const SystemSettings = () => {
       followupDue: { email: true, whatsapp: false },
       taskAssigned: { email: true, whatsapp: false },
       lowInventory: { email: true, whatsapp: false }
+    },
+    emailAccountsConfig: {
+      info: { autoReply: true, subjectTemplate: '', bodyTemplate: '' },
+      sales: { autoReply: true, subjectTemplate: '', bodyTemplate: '' },
+      support: { autoReply: true, subjectTemplate: '', bodyTemplate: '' }
     }
   });
+  const [intervalsString, setIntervalsString] = useState('1, 3, 7');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+
+  const toggleAutoReply = (acc) => {
+    setSettings(s => ({
+      ...s,
+      emailAccountsConfig: {
+        ...s.emailAccountsConfig,
+        [acc]: {
+          ...s.emailAccountsConfig[acc],
+          autoReply: !s.emailAccountsConfig[acc].autoReply
+        }
+      }
+    }));
+  };
+
+  const handleTemplateChange = (acc, field, value) => {
+    setSettings(s => ({
+      ...s,
+      emailAccountsConfig: {
+        ...s.emailAccountsConfig,
+        [acc]: {
+          ...s.emailAccountsConfig[acc],
+          [field]: value
+        }
+      }
+    }));
+  };
 
   useEffect(() => {
     const fetchSettings = async () => {
       try {
         const res = await api.get('/settings');
         if (res.data.data.settings) {
+          const s = res.data.data.settings;
+          if (s.followupIntervals) {
+            setIntervalsString(s.followupIntervals.join(', '));
+          }
           // Merge with defaults to ensure nested objects like notificationRules exist
           setSettings(prev => ({
             ...prev,
-            ...res.data.data.settings,
+            ...s,
             notificationRules: {
               ...prev.notificationRules,
-              ...(res.data.data.settings.notificationRules || {})
+              ...(s.notificationRules || {})
+            },
+            emailAccountsConfig: {
+              ...prev.emailAccountsConfig,
+              ...(s.emailAccountsConfig || {})
             }
           }));
         }
@@ -258,6 +299,88 @@ const SystemSettings = () => {
                   </div>
                 </div>
 
+                <div className="border-t border-slate-100 pt-10 space-y-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
+                      <Mail className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-black text-slate-900">Auto-Acknowledgement Templates</h2>
+                      <p className="text-sm text-slate-500">Configure auto-acknowledgement emails sent on receipt per email address.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit">
+                    {['info', 'sales', 'support'].map(acc => (
+                      <button
+                        key={acc}
+                        type="button"
+                        onClick={() => setSelectedEmailSubTab(acc)}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all ${
+                          selectedEmailSubTab === acc
+                            ? 'bg-white text-brand-600 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-900'
+                        }`}
+                      >
+                        {acc}@petrovalves.co.in
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-6 bg-slate-50 p-6 rounded-[2rem] border border-slate-200">
+                    <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-150 shadow-sm">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900">Enable Auto-Acknowledgement</h4>
+                        <p className="text-xs text-slate-500">Automatically reply to incoming emails received on this inbox.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleAutoReply(selectedEmailSubTab)}
+                        className={`w-12 h-6 rounded-full transition-all flex items-center px-1 shadow-inner ${
+                          settings.emailAccountsConfig?.[selectedEmailSubTab]?.autoReply ? 'bg-brand-600' : 'bg-slate-300'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${
+                          settings.emailAccountsConfig?.[selectedEmailSubTab]?.autoReply ? 'translate-x-6' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-wider ml-1">Subject Template</label>
+                      <input 
+                        type="text" 
+                        value={settings.emailAccountsConfig?.[selectedEmailSubTab]?.subjectTemplate || ''} 
+                        onChange={e => handleTemplateChange(selectedEmailSubTab, 'subjectTemplate', e.target.value)}
+                        disabled={!settings.emailAccountsConfig?.[selectedEmailSubTab]?.autoReply}
+                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 outline-none disabled:opacity-50 disabled:cursor-not-allowed" 
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-wider ml-1">Body Template</label>
+                      <textarea 
+                        rows={6}
+                        value={settings.emailAccountsConfig?.[selectedEmailSubTab]?.bodyTemplate || ''} 
+                        onChange={e => handleTemplateChange(selectedEmailSubTab, 'bodyTemplate', e.target.value)}
+                        disabled={!settings.emailAccountsConfig?.[selectedEmailSubTab]?.autoReply}
+                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 outline-none resize-none disabled:opacity-50 disabled:cursor-not-allowed" 
+                      />
+                    </div>
+
+                    <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-xs text-blue-700 space-y-2">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <AlertCircle className="w-4 h-4" /> Available Placeholders
+                      </p>
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li><strong>{`{refs}`}</strong>: Replaced by the generated Enquiry ID(s) (e.g. <code>ENQ-2026-06-0001</code>). Only valid in Subject.</li>
+                        <li><strong>{`{contactName}`}</strong>: Replaced by the customer's contact name.</li>
+                        <li><strong>{`{itemsText}`}</strong>: Replaced by the list of registered products/items in the enquiry.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="border-t border-slate-100 pt-10">
                   <div className="flex items-center gap-4 mb-8">
                     <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
@@ -372,6 +495,23 @@ const SystemSettings = () => {
                   <div className="space-y-2">
                     <label className="text-xs font-black text-slate-500 uppercase tracking-wider ml-1">Follow-up Reminder (days)</label>
                     <input type="number" min="1" value={settings.followupReminderDays} onChange={e => setSettings({...settings, followupReminderDays: Number(e.target.value)})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 outline-none" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-500 uppercase tracking-wider ml-1">Follow-up Intervals (days)</label>
+                    <input 
+                      type="text" 
+                      value={intervalsString} 
+                      onChange={e => {
+                        const val = e.target.value;
+                        setIntervalsString(val);
+                        const arr = val.split(',')
+                          .map(v => parseInt(v.trim(), 10))
+                          .filter(v => !isNaN(v) && v >= 0);
+                        setSettings(prev => ({...prev, followupIntervals: arr}));
+                      }} 
+                      placeholder="e.g. 1, 3, 7" 
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 outline-none" 
+                    />
                   </div>
                 </div>
 

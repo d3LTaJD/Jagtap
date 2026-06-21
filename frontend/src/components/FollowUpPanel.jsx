@@ -69,6 +69,14 @@ const FollowUpPanel = ({ enquiryId, currentUserRole }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (form.nextFollowUpDate && new Date(form.nextFollowUpDate) < new Date(form.followUpDate)) {
+      showToast('Next follow-up reminder cannot be before the follow-up date', 'error');
+      return;
+    }
+    if (form.nextFollowUpDate && new Date(form.nextFollowUpDate) < new Date(Date.now() - 60000)) {
+      showToast('Next follow-up reminder date cannot be in the past', 'error');
+      return;
+    }
     setSaving(true);
     try {
       const payload = { ...form, enquiryId };

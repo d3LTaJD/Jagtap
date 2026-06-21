@@ -8,8 +8,8 @@ const Sidebar = ({ onClose }) => {
 
   const navItems = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/app', show: true },
-    { label: 'Calendar', icon: CalendarDays, path: '/app/tasks', show: true },
-    { label: 'To-Dos', icon: CheckSquare, path: '/app/todos', show: true },
+    { label: 'Calendar', icon: CalendarDays, path: '/app/tasks', show: ability.can('view', 'Enquiry') },
+    { label: 'To-Dos', icon: CheckSquare, path: '/app/todos', show: ability.can('view', 'Enquiry') },
     { label: 'Customers', icon: Database, path: '/app/customers', show: ability.can('view', 'Customers') },
     { label: 'Vendors', icon: Database, path: '/app/vendors', show: ability.can('view', 'Admin') },
     { label: 'Products', icon: Database, path: '/app/products', show: ability.can('view', 'Products') },
@@ -17,7 +17,7 @@ const Sidebar = ({ onClose }) => {
     { label: 'Enquiries', icon: Users, path: '/app/enquiries', show: ability.can('view', 'Enquiry') },
     { label: 'Quotations', icon: FileText, path: '/app/quotations', show: ability.can('view', 'Quotation') },
     { label: 'Quality Assurance', icon: CheckSquare, path: '/app/qaps', show: ability.can('view', 'QAP') },
-    { label: 'Follow-Up Board', icon: ClipboardList, path: '/app/follow-ups', show: true },
+    { label: 'Follow-Up Board', icon: ClipboardList, path: '/app/follow-ups', show: ability.can('view', 'Enquiry') },
   ];
 
   if (ability.can('view', 'Admin')) {

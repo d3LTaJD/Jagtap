@@ -79,7 +79,7 @@ const ProfileSettings = () => {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    window.location.href = '/login';
+    window.location.replace('/login');
   };
 
   const getInitials = (name) => {

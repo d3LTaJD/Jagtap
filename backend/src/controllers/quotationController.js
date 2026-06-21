@@ -17,41 +17,108 @@ exports.createQuotation = async (req, res, next) => {
     req.body.quotationId = `${prefix}${String(seq).padStart(4, '0')}`;
 
     // Set standard defaults for Technical & Commercial parameters
-    req.body.manufacturerName = req.body.manufacturerName || 'M/s. PETRO VALVES PVT LTD';
-    req.body.originOfGoods = req.body.originOfGoods || 'INDIA';
-    req.body.weightDimensions = req.body.weightDimensions || 'This details given at the time of dispatch';
-    req.body.technicalDocuments = req.body.technicalDocuments || 'This is share after receiving of techno-commercial order';
-    req.body.deliveryTimeHeader = req.body.deliveryTimeHeader || 'Provided in COMMERCIAL PART - III';
+    const defaultManufacturerName = 'M/s. PETRO VALVES PVT LTD';
+    const defaultOriginOfGoods = 'INDIA';
+    const defaultWeightDimensions = 'This details given at the time of dispatch';
+    const defaultTechnicalDocuments = 'This is share after receiving of techno-commercial order';
+    const defaultDeliveryTimeHeader = 'Provided in COMMERCIAL PART - III';
 
-    req.body.priceBasis = req.body.priceBasis || 'Ex Works Ahmedabad.';
-    req.body.packingForwardingTerms = req.body.packingForwardingTerms || 'Extra as given in Price Part - II, If required in wooden box then charge extra';
-    req.body.freightTerms = req.body.freightTerms || 'Extra at actual to your account.';
-    req.body.taxDutyTerms = req.body.taxDutyTerms || 'Extra at actual to your account (18% GST default)';
-    req.body.validityTerms = req.body.validityTerms || 'Three Month from the date of Quote';
-    req.body.tpiTerms = req.body.tpiTerms || 'We will offer valves to your nominated TPIA agency. Charges towards TPIA fees will be to your account.';
-    req.body.transitInsurance = req.body.transitInsurance || 'In your scope only.';
-    req.body.guaranteeTerms = req.body.guaranteeTerms || '12 months from the date of commissioning or 18 months from the date of dispatch';
-    req.body.paymentTerms = req.body.paymentTerms || '10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch.';
+    const defaultPriceBasis = 'Ex Works Ahmedabad.';
+    const defaultPackingForwardingTerms = 'Extra as given in Price Part - II, If required in wooden box then charge extra';
+    const defaultFreightTerms = 'Extra at actual to your account.';
+    const defaultTaxDutyTerms = 'Extra at actual to your account (18% GST default)';
+    const defaultValidityTerms = 'Three Month from the date of Quote';
+    const defaultTpiTerms = 'We will offer valves to your nominated TPIA agency. Charges towards TPIA fees will be to your account.';
+    const defaultTransitInsurance = 'In your scope only.';
+    const defaultGuaranteeTerms = '12 months from the date of commissioning or 18 months from the date of dispatch';
+    const defaultPaymentTerms = '10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch.';
+
+    let extractedTerms = {};
 
     if (req.body.enquiry) {
-      const enquiry = await Enquiry.findById(req.body.enquiry);
+      const Attachment = require('../models/Attachment');
+      const EmailMessage = require('../models/EmailMessage');
+      const aiService = require('../services/aiService');
+
+      const enquiry = await Enquiry.findById(req.body.enquiry).populate('attachmentsList');
       if (!enquiry) {
         return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
       }
-      if (enquiry.status !== 'Ready for Offer') {
+      if (!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)) {
         return res.status(400).json({
           status: 'error',
-          message: `Quotation generation is blocked. The associated enquiry is in '${enquiry.status}' status and must be promoted to 'Ready for Offer' before creating a quotation.`
+          message: `Quotation generation is blocked. The associated enquiry is in '${enquiry.status}' status and must be promoted to 'Confirmed' or 'Technical Review' before creating a quotation.`
         });
       }
+
       req.body.productCategory = enquiry.productCategory;
+      req.body.customer = enquiry.customer;
+
+      // Extract details if it is a Tender OR has attachments
+      if (enquiry.sourceType === 'Tender' || (enquiry.attachmentsList && enquiry.attachmentsList.length > 0)) {
+        // Build the context text
+        let contextText = `Enquiry ID: ${enquiry.enquiryId}\nDescription: ${enquiry.productDescription}\nSpecial Requirements: ${enquiry.specialRequirements}\n`;
+        
+        // Add attachment parsed text
+        if (enquiry.attachmentsList && enquiry.attachmentsList.length > 0) {
+          for (const att of enquiry.attachmentsList) {
+            if (att.extractedText) {
+              contextText += `\n--- Parse of File: ${att.originalFileName} ---\n${att.extractedText}\n`;
+            }
+          }
+        }
+
+        // Add thread emails
+        if (enquiry.threadId) {
+          const emails = await EmailMessage.find({ threadId: enquiry.threadId });
+          for (const email of emails) {
+            contextText += `\n--- Email Subject: ${email.subject} ---\n${email.bodyText || ''}\n`;
+          }
+        }
+
+        // Run AI term extraction
+        extractedTerms = await aiService.extractQuotationTerms(contextText).catch(err => {
+          console.error('[Quotation Controller] AI term extraction failed:', err.message);
+          return {};
+        });
+      }
+
       // Copy enquiry dynamicFields to parent and to each item
       req.body.dynamicFields = { ...enquiry.dynamicFields, ...req.body.dynamicFields };
       if (req.body.items && Array.isArray(req.body.items)) {
         req.body.items.forEach(item => {
           item.dynamicFields = { ...enquiry.dynamicFields, ...item.dynamicFields };
+          if (extractedTerms.technicalDeviations) {
+            item.technicalDeviations = item.technicalDeviations || extractedTerms.technicalDeviations;
+          }
+          if (enquiry.standardCode) {
+            item.applicableStandard = item.applicableStandard || enquiry.standardCode;
+          }
+          if (enquiry.requiredDeliveryWeeks) {
+            item.deliveryWeeks = item.deliveryWeeks || enquiry.requiredDeliveryWeeks;
+          }
         });
       }
+    }
+
+    // Set defaults or extracted terms
+    req.body.manufacturerName = req.body.manufacturerName || defaultManufacturerName;
+    req.body.originOfGoods = req.body.originOfGoods || defaultOriginOfGoods;
+    req.body.weightDimensions = req.body.weightDimensions || defaultWeightDimensions;
+    req.body.technicalDocuments = req.body.technicalDocuments || defaultTechnicalDocuments;
+    req.body.deliveryTimeHeader = req.body.deliveryTimeHeader || defaultDeliveryTimeHeader;
+
+    req.body.priceBasis = req.body.priceBasis || extractedTerms.priceBasis || defaultPriceBasis;
+    req.body.packingForwardingTerms = req.body.packingForwardingTerms || extractedTerms.packingForwardingTerms || defaultPackingForwardingTerms;
+    req.body.freightTerms = req.body.freightTerms || extractedTerms.freightTerms || defaultFreightTerms;
+    req.body.taxDutyTerms = req.body.taxDutyTerms || defaultTaxDutyTerms;
+    req.body.validityTerms = req.body.validityTerms || extractedTerms.validityTerms || defaultValidityTerms;
+    req.body.tpiTerms = req.body.tpiTerms || extractedTerms.tpiTerms || defaultTpiTerms;
+    req.body.transitInsurance = req.body.transitInsurance || defaultTransitInsurance;
+    req.body.guaranteeTerms = req.body.guaranteeTerms || extractedTerms.guaranteeTerms || defaultGuaranteeTerms;
+    req.body.paymentTerms = req.body.paymentTerms || extractedTerms.paymentTerms || defaultPaymentTerms;
+    if (extractedTerms.deliverySchedule) {
+      req.body.deliverySchedule = req.body.deliverySchedule || extractedTerms.deliverySchedule;
     }
 
     const quotation = await Quotation.create(req.body);

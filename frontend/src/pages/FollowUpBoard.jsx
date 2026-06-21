@@ -52,7 +52,7 @@ const FollowUpBoard = () => {
   
   // Form states
   const [formData, setFormData] = useState(defaultForm);
-  const [actionData, setActionData] = useState({ outcome: '', nextFollowUpDate: '' });
+  const [actionData, setActionData] = useState({ type: 'CALL', notes: '', outcome: '', nextFollowUpDate: '' });
   
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -89,6 +89,12 @@ const FollowUpBoard = () => {
     e.preventDefault();
     if (!formData.enquiryId) return showToast('Please select an Enquiry reference', 'error');
     if (!formData.notes) return showToast('Notes are required', 'error');
+    if (formData.nextFollowUpDate && new Date(formData.nextFollowUpDate) < new Date(formData.followUpDate)) {
+      return showToast('Next follow-up reminder cannot be before the activity date', 'error');
+    }
+    if (formData.nextFollowUpDate && new Date(formData.nextFollowUpDate) < new Date(Date.now() - 60000)) {
+      return showToast('Next follow-up reminder date cannot be in the past', 'error');
+    }
 
     setSaving(true);
     try {
@@ -107,10 +113,21 @@ const FollowUpBoard = () => {
   const handleActionSubmit = async (e) => {
     e.preventDefault();
     if (!selectedFollowUp) return;
+    if (actionData.nextFollowUpDate) {
+      const refDate = selectedFollowUp.followUpDate ? new Date(selectedFollowUp.followUpDate) : new Date();
+      if (new Date(actionData.nextFollowUpDate) < refDate) {
+        return showToast('Next follow-up reminder cannot be before the activity date', 'error');
+      }
+    }
+    if (actionData.nextFollowUpDate && new Date(actionData.nextFollowUpDate) < new Date(Date.now() - 60000)) {
+      return showToast('Next follow-up reminder date cannot be in the past', 'error');
+    }
 
     setSaving(true);
     try {
       const payload = {
+        type: actionData.type,
+        notes: actionData.notes,
         outcome: actionData.outcome || undefined,
         nextFollowUpDate: actionData.nextFollowUpDate || undefined
       };
@@ -204,6 +221,8 @@ const FollowUpBoard = () => {
           if (canManage) {
             setSelectedFollowUp(fu);
             setActionData({
+              type: fu.type || 'CALL',
+              notes: fu.notes || '',
               outcome: fu.outcome || '',
               nextFollowUpDate: fu.nextFollowUpDate ? fu.nextFollowUpDate.slice(0, 16) : ''
             });
@@ -543,16 +562,45 @@ const FollowUpBoard = () => {
             
             <form onSubmit={handleActionSubmit}>
               <div className="p-6 space-y-4">
-                {/* Reference Details */}
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Scheduled task</span>
-                    <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${TYPE_COLORS[selectedFollowUp.type]}`}>
-                      {selectedFollowUp.type}
-                    </span>
+                {/* Reference details/meta */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[10px] text-slate-400 font-medium flex justify-between items-center">
+                  <span>Scheduled by: {selectedFollowUp.addedBy?.name || 'System'}</span>
+                  <span>Enquiry ID: {selectedFollowUp.enquiry?.enquiryId}</span>
+                </div>
+
+                {/* Type Selection / Category */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Follow-up Mode / Category</label>
+                  <div className="flex flex-wrap gap-2">
+                    {FOLLOW_UP_TYPES.map(t => (
+                      <button
+                        key={t.value}
+                        type="button"
+                        onClick={() => setActionData(a => ({ ...a, type: t.value }))}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                          actionData.type === t.value
+                            ? TYPE_COLORS[t.value] + ' border-current'
+                            : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'
+                        }`}
+                      >
+                        <t.icon className="w-3 h-3" />
+                        {t.label}
+                      </button>
+                    ))}
                   </div>
-                  <p className="text-xs font-bold text-slate-800">{selectedFollowUp.notes}</p>
-                  <p className="text-[10px] text-slate-400 font-medium">Scheduled by: {selectedFollowUp.addedBy?.name || 'System'}</p>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Notes / Description *</label>
+                  <textarea
+                    required
+                    rows={2}
+                    value={actionData.notes}
+                    onChange={e => setActionData(a => ({ ...a, notes: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none resize-none"
+                    placeholder="State the objective of this reminder..."
+                  />
                 </div>
 
                 {/* Outcome Input */}

@@ -1,10 +1,82 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
+import { useAbility } from '../context/AbilityContext';
 
 const DashboardLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const location = useLocation();
+  const ability = useAbility();
+
+  const token = localStorage.getItem('token');
+
+  React.useEffect(() => {
+    const checkAuth = () => {
+      const currentToken = localStorage.getItem('token');
+      if (!currentToken) {
+        window.location.replace('/login');
+      }
+    };
+
+    checkAuth();
+    window.addEventListener('pageshow', checkAuth);
+    window.addEventListener('storage', checkAuth);
+
+    return () => {
+      window.removeEventListener('pageshow', checkAuth);
+      window.removeEventListener('storage', checkAuth);
+    };
+  }, []);
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Guard specific routes
+  const path = location.pathname.toLowerCase();
+
+  const adminPaths = [
+    '/app/admin',
+    '/app/field-builder',
+    '/app/role-builder',
+    '/app/settings',
+    '/app/master-data',
+    '/app/audit-logs',
+    '/app/system-logs'
+  ];
+
+  if (adminPaths.some(p => path.includes(p)) && !ability.can('view', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if ((path.includes('/app/tasks') || path.includes('/app/todos') || path.includes('/app/follow-ups')) && !ability.can('view', 'Enquiry')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/customers') && !ability.can('view', 'Customers')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/products') && !ability.can('view', 'Products')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/vendors') && !ability.can('view', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/enquiries') && !ability.can('view', 'Enquiry')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/quotations') && !ability.can('view', 'Quotation')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/qaps') && !ability.can('view', 'QAP')) {
+    return <Navigate to="/app" replace />;
+  }
 
   return (
     <div className="flex h-screen bg-[#ebf0f7] overflow-hidden text-slate-900 relative z-0">

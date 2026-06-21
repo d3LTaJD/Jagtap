@@ -26,7 +26,7 @@ Operation Manual (Lever Operated)
 Quantity 5 NOS`;
 
   const productDescription = 'CS Ball Valve 300# 100MM';
-  const MAX_FIELDS = 35;
+  const MAX_FIELDS = 100;
   const textLower = (emailText + ' ' + productDescription).toLowerCase();
 
   const scoreField = (f) => {
