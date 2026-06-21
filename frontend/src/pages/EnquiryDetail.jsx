@@ -509,6 +509,55 @@ const EnquiryDetail = () => {
             </div>
           </div>
 
+          {/* Individual Products List */}
+          {enquiry.products && enquiry.products.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <h2 className="text-base font-black text-slate-900 mb-4 tracking-tight flex items-center gap-2">
+                <Tag className="w-5 h-5 text-brand-500" />
+                Line Items ({enquiry.products.length})
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-400 text-xs font-bold uppercase tracking-wider">
+                      <th className="pb-3 pr-4 w-10">#</th>
+                      <th className="pb-3 pr-4">Product Description</th>
+                      <th className="pb-3 pr-4">Category</th>
+                      <th className="pb-3 pr-4">Quantity</th>
+                      <th className="pb-3 pr-4">Standard</th>
+                      {enquiry.isUnverified && <th className="pb-3 text-right">Confidence</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {enquiry.products.map((prod, idx) => (
+                      <tr key={prod._id || idx} className="text-slate-700 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3.5 font-bold pr-4 text-slate-400">{idx + 1}</td>
+                        <td className="py-3.5 font-semibold pr-4 text-slate-900">{prod.description}</td>
+                        <td className="py-3.5 pr-4">
+                          <span className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">
+                            {prod.category || enquiry.productCategory}
+                          </span>
+                        </td>
+                        <td className="py-3.5 font-black pr-4 text-brand-600">{prod.quantity} {prod.unit || 'NOS'}</td>
+                        <td className="py-3.5 pr-4 text-slate-500 font-semibold">{prod.standardCode || 'Not specified'}</td>
+                        {enquiry.isUnverified && (
+                          <td className="py-3.5 text-right font-bold pr-2">
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                              (prod.confidence || 100) >= 80 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                              (prod.confidence || 100) >= 50 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
+                            }`}>
+                              {prod.confidence || 100}%
+                            </span>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Customer Info */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h2 className="text-base font-bold mb-5 tracking-tight">Customer Information</h2>

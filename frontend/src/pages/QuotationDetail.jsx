@@ -40,7 +40,7 @@ const QuotationDetail = () => {
   const [revisionNote, setRevisionNote] = useState('');
   
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const [activeTab, setActiveTab] = useState('pricing'); // 'pricing' | 'technical' | 'commercial'
+  const [activeTab, setActiveTab] = useState('technical'); // 'technical' | 'pricing' | 'commercial'
   const [activeItemIndex, setActiveItemIndex] = useState(null); // for item specs drawer
 
   // Local state for editable parts
@@ -76,7 +76,11 @@ const QuotationDetail = () => {
         if (qRes.data.data?.quotation) {
           const q = qRes.data.data.quotation;
           setQuotation(q);
-          setItems(q.items || []);
+          const populatedItems = (q.items || []).map(item => ({
+            ...item,
+            productCategory: item.productCategory || q.enquiry?.productCategory || 'Piping'
+          }));
+          setItems(populatedItems);
           setTechFields({
             manufacturerName: q.manufacturerName || 'M/s. PETRO VALVES PVT LTD',
             originOfGoods: q.originOfGoods || 'INDIA',
@@ -331,18 +335,6 @@ const QuotationDetail = () => {
       {/* Tabs */}
       <div className="flex border-b border-slate-200 gap-6">
         <button
-          onClick={() => setActiveTab('pricing')}
-          className={`pb-4 text-sm font-bold border-b-2 transition-all ${
-            activeTab === 'pricing'
-              ? 'border-brand-600 text-brand-600'
-              : 'border-transparent text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <IndianRupee className="w-4 h-4" /> Price Part-II & Checklist
-          </div>
-        </button>
-        <button
           onClick={() => setActiveTab('technical')}
           className={`pb-4 text-sm font-bold border-b-2 transition-all ${
             activeTab === 'technical'
@@ -352,6 +344,18 @@ const QuotationDetail = () => {
         >
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4" /> Technical Part-I
+          </div>
+        </button>
+        <button
+          onClick={() => setActiveTab('pricing')}
+          className={`pb-4 text-sm font-bold border-b-2 transition-all ${
+            activeTab === 'pricing'
+              ? 'border-brand-600 text-brand-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <IndianRupee className="w-4 h-4" /> Price Part-II & Checklist
           </div>
         </button>
         <button
@@ -811,11 +815,14 @@ const QuotationDetail = () => {
               <DynamicFormRenderer
                 formContext="Quotation"
                 values={{
-                  productCategory: items[activeItemIndex]?.productCategory || '',
+                  productCategory: items[activeItemIndex]?.productCategory || quotation?.enquiry?.productCategory || 'Piping',
                   ...(items[activeItemIndex]?.dynamicFields || {})
                 }}
                 onChange={(fieldName, value) => {
                   const newItems = [...items];
+                  if (!newItems[activeItemIndex].productCategory) {
+                    newItems[activeItemIndex].productCategory = quotation?.enquiry?.productCategory || 'Piping';
+                  }
                   if (!newItems[activeItemIndex].dynamicFields) {
                     newItems[activeItemIndex].dynamicFields = {};
                   }

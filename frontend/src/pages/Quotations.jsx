@@ -99,12 +99,14 @@ const Quotations = () => {
       const defaultItems = selected.products && selected.products.length > 0
         ? selected.products.map(p => ({
             description: p.description || '',
+            productCategory: p.category || selected.productCategory || 'Piping',
             quantity: p.quantity || 1,
             unitPrice: 0,
             lineTotalExclGST: 0
           }))
         : [{
             description: selected.productDescription || '',
+            productCategory: selected.productCategory || 'Piping',
             quantity: selected.quantity || 1,
             unitPrice: 0,
             lineTotalExclGST: 0
@@ -121,7 +123,14 @@ const Quotations = () => {
     }
   };
 
-  const addItem = () => setFormData({...formData, items: [...formData.items, { description: '', quantity: 1, unitPrice: 0, lineTotalExclGST: 0 }]});
+  const addItem = () => {
+    const selectedEnq = enquiriesForSelect.find(eq => eq._id === formData.enquiry);
+    const category = selectedEnq?.productCategory || 'Piping';
+    setFormData({
+      ...formData,
+      items: [...formData.items, { description: '', productCategory: category, quantity: 1, unitPrice: 0, lineTotalExclGST: 0 }]
+    });
+  };
   const removeItem = (idx) => {
     const newItems = [...formData.items];
     newItems.splice(idx, 1);
@@ -191,12 +200,14 @@ const Quotations = () => {
         const defaultItems = selected.products && selected.products.length > 0
           ? selected.products.map(p => ({
               description: p.description || '',
+              productCategory: p.category || selected.productCategory || 'Piping',
               quantity: p.quantity || 1,
               unitPrice: 0,
               lineTotalExclGST: 0
             }))
           : [{
               description: selected.productDescription || '',
+              productCategory: selected.productCategory || 'Piping',
               quantity: selected.quantity || 1,
               unitPrice: 0,
               lineTotalExclGST: 0

@@ -132,12 +132,18 @@ exports.updateQuotationStatus = async (req, res, next) => {
       }
     });
 
-    const status = req.body.status;
+    const { status, assignedTo } = req.body;
     if (status === 'APPROVED') updateData.approvedBy = req.user._id;
     if (status === 'TECH_REVIEW') updateData.technicalReviewBy = req.user._id;
 
     const originalQuotation = await Quotation.findById(req.params.id);
-    const quotation = await Quotation.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    const quotation = await Quotation.findByIdAndUpdate(req.params.id, updateData, { new: true })
+      .populate('customer')
+      .populate('enquiry')
+      .populate('preparedBy', 'fullName')
+      .populate('technicalReviewBy', 'fullName')
+      .populate('approvedBy', 'fullName')
+      .populate('files');
 
     await logActivity({
       req,
