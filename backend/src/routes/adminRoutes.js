@@ -9,38 +9,41 @@ const {
   retryQueueJob,
   getQueueHealth
 } = require('../controllers/adminController');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(protect);
-router.use(authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'));
 
-router.route('/users')
-  .post(createUser)
-  .get(getUsers);
+// SOW: User management — SA write, DIR read-only
+// Read operations — SA + DIR
+router.get('/users', requirePermission('Admin', 'userManageRead'), getUsers);
+router.get('/users/:id/logs', requirePermission('Admin', 'userManageRead'), require('../controllers/adminController').getUserActivityLogs);
 
-router.route('/users/:id')
-  .patch(toggleUserStatus)
-  .put(editUser)
-  .delete(require('../controllers/adminController').deleteUser);
-router.post('/users/:id/reset-password', resetUserPassword);
-router.get('/users/:id/logs', require('../controllers/adminController').getUserActivityLogs);
+// Write operations — SA only
+router.post('/users', requirePermission('Admin', 'userManageWrite'), createUser);
+router.patch('/users/:id', requirePermission('Admin', 'userManageWrite'), toggleUserStatus);
+router.put('/users/:id', requirePermission('Admin', 'userManageWrite'), editUser);
+router.delete('/users/:id', requirePermission('Admin', 'userManageWrite'), require('../controllers/adminController').deleteUser);
+router.post('/users/:id/reset-password', requirePermission('Admin', 'userManageWrite'), resetUserPassword);
+
+// SOW: Audit log view — SA + DIR
 router.route('/logs')
-  .get(require('../controllers/adminController').getAllActivityLogs)
-  .delete(require('../controllers/adminController').deleteActivityLogs);
+  .get(requirePermission('Admin', 'auditLogView'), require('../controllers/adminController').getAllActivityLogs)
+  .delete(requirePermission('Admin', 'userManageWrite'), require('../controllers/adminController').deleteActivityLogs);
 router.route('/system-logs')
-  .get(require('../controllers/adminController').getSystemAuditLogs)
-  .delete(require('../controllers/adminController').clearSystemAuditLogs);
+  .get(requirePermission('Admin', 'auditLogView'), require('../controllers/adminController').getSystemAuditLogs)
+  .delete(requirePermission('Admin', 'userManageWrite'), require('../controllers/adminController').clearSystemAuditLogs);
 
+// Queue management — SA only
 router.route('/queue-jobs')
-  .get(getQueueJobs)
-  .delete(require('../controllers/adminController').clearAllFailedQueueJobs);
+  .get(requirePermission('Admin', 'userManageWrite'), getQueueJobs)
+  .delete(requirePermission('Admin', 'userManageWrite'), require('../controllers/adminController').clearAllFailedQueueJobs);
 
 router.route('/queue-jobs/:id')
-  .post(retryQueueJob)
-  .delete(require('../controllers/adminController').deleteQueueJob);
+  .post(requirePermission('Admin', 'userManageWrite'), retryQueueJob)
+  .delete(requirePermission('Admin', 'userManageWrite'), require('../controllers/adminController').deleteQueueJob);
 
-router.get('/queue-health', getQueueHealth);
+router.get('/queue-health', requirePermission('Admin', 'userManageWrite'), getQueueHealth);
 
 module.exports = router;

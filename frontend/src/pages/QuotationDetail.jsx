@@ -7,6 +7,7 @@ import {
   Edit, Sliders, Shield, FileSpreadsheet, Settings, HelpCircle
 } from 'lucide-react';
 import api from '../api/client';
+import { getRoleCode, useAbility } from '../context/AbilityContext';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 import AttachmentManager from '../components/AttachmentManager';
@@ -30,6 +31,7 @@ const StatusBadge = ({ status }) => {
 const QuotationDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const ability = useAbility();
   const [quotation, setQuotation] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +41,7 @@ const QuotationDetail = () => {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [revisionNote, setRevisionNote] = useState('');
   
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
   const [activeTab, setActiveTab] = useState('technical'); // 'technical' | 'pricing' | 'commercial'
   const [activeItemIndex, setActiveItemIndex] = useState(null); // for item specs drawer
 
@@ -245,8 +247,11 @@ const QuotationDetail = () => {
 
   if (!quotation) return <div className="p-8 text-center text-slate-500 font-medium">Quotation not found.</div>;
 
-  const isDirector = ['DIRECTOR', 'SUPER_ADMIN', 'SA', 'DIR'].includes(currentUser.role);
-  const canSeePricing = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR', 'ACC', 'ACCOUNTS', 'SALES'].includes(currentUser.role);
+  const userRoleCode = getRoleCode(currentUser.role);
+  const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
+  const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+  const isDirector = ability.can('approve', 'Quotation');
+  const canSeePricing = ability.can('viewPricing', 'Quotation');
   const isApproved = quotation.status === 'APPROVED';
   
   const { subtotal, gst, grand } = calculateTotals();
@@ -272,7 +277,7 @@ const QuotationDetail = () => {
         <div className="flex items-center gap-3 flex-wrap">
           {updateLoading && <Loader2 className="w-4 h-4 animate-spin text-brand-600" />}
           
-          <button onClick={saveAllDetails} disabled={updateLoading || isApproved}
+          <button onClick={saveAllDetails} disabled={updateLoading || isApproved || (!ability.can('editTechnical', 'Quotation') && !ability.can('editCommercial', 'Quotation'))}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-50">
             <Save className="w-4 h-4" /> Save Quotation
           </button>
@@ -415,97 +420,101 @@ const QuotationDetail = () => {
                             onClick={() => setActiveItemIndex(idx)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all shadow-sm"
                           >
-                            <Sliders className="w-3.5 h-3.5 text-brand-600" /> Edit Checklist Specs
+                            <Sliders className="w-3.5 h-3.5 text-brand-600" /> {ability.can('editTechnical', 'Quotation') ? 'Edit Checklist Specs' : 'View Checklist Specs'}
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Quantity</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.quantity}
-                              onChange={e => handleItemPricingChange(idx, 'quantity', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Base Unit Price</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.unitPrice}
-                              onChange={e => handleItemPricingChange(idx, 'unitPrice', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">NDT Charges</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.ndtCharges}
-                              onChange={e => handleItemPricingChange(idx, 'ndtCharges', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Special Testing</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.specialTestingCharges}
-                              onChange={e => handleItemPricingChange(idx, 'specialTestingCharges', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Spares Charges</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.sparesCharges}
-                              onChange={e => handleItemPricingChange(idx, 'sparesCharges', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">P&F Charges</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.pfCharges}
-                              onChange={e => handleItemPricingChange(idx, 'pfCharges', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">TPIA Charges</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.tpiCharges}
-                              onChange={e => handleItemPricingChange(idx, 'tpiCharges', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Discount %</label>
-                            <input
-                              type="number"
-                              disabled={isApproved}
-                              value={item.discountPercent}
-                              onChange={e => handleItemPricingChange(idx, 'discountPercent', e.target.value)}
-                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            />
-                          </div>
-                        </div>
+                        {canSeePricing && (
+                          <>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Quantity</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.quantity}
+                                  onChange={e => handleItemPricingChange(idx, 'quantity', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Base Unit Price</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.unitPrice}
+                                  onChange={e => handleItemPricingChange(idx, 'unitPrice', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">NDT Charges</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.ndtCharges}
+                                  onChange={e => handleItemPricingChange(idx, 'ndtCharges', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Special Testing</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.specialTestingCharges}
+                                  onChange={e => handleItemPricingChange(idx, 'specialTestingCharges', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Spares Charges</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.sparesCharges}
+                                  onChange={e => handleItemPricingChange(idx, 'sparesCharges', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">P&F Charges</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.pfCharges}
+                                  onChange={e => handleItemPricingChange(idx, 'pfCharges', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">TPIA Charges</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.tpiCharges}
+                                  onChange={e => handleItemPricingChange(idx, 'tpiCharges', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Discount %</label>
+                                <input
+                                  type="number"
+                                  disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
+                                  value={item.discountPercent}
+                                  onChange={e => handleItemPricingChange(idx, 'discountPercent', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                />
+                              </div>
+                            </div>
 
-                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
-                          <span className="text-slate-500 font-medium">Calculated Unit Rate: <strong>₹{Math.round(unitRate).toLocaleString()}</strong></span>
-                          <span className="font-bold text-slate-900">Line Total: ₹{Math.round(totalRate).toLocaleString()}</span>
-                        </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
+                              <span className="text-slate-500 font-medium">Calculated Unit Rate: <strong>₹{Math.round(unitRate).toLocaleString()}</strong></span>
+                              <span className="font-bold text-slate-900">Line Total: ₹{Math.round(totalRate).toLocaleString()}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -527,7 +536,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Manufacturer Name</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editTechnical', 'Quotation')}
                     value={techFields.manufacturerName}
                     onChange={e => setTechFields({ ...techFields, manufacturerName: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -538,7 +547,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Origin of Goods</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editTechnical', 'Quotation')}
                     value={techFields.originOfGoods}
                     onChange={e => setTechFields({ ...techFields, originOfGoods: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -549,7 +558,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Estimated Weight & Dimensions</label>
                   <textarea
                     rows={2}
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editTechnical', 'Quotation')}
                     value={techFields.weightDimensions}
                     onChange={e => setTechFields({ ...techFields, weightDimensions: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
@@ -560,7 +569,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Technical Documents & Drawings Rules</label>
                   <textarea
                     rows={2}
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editTechnical', 'Quotation')}
                     value={techFields.technicalDocuments}
                     onChange={e => setTechFields({ ...techFields, technicalDocuments: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
@@ -571,7 +580,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Delivery Basis Header Summary</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editTechnical', 'Quotation')}
                     value={techFields.deliveryTimeHeader}
                     onChange={e => setTechFields({ ...techFields, deliveryTimeHeader: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -594,7 +603,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Price Basis</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.priceBasis}
                     onChange={e => setCommFields({ ...commFields, priceBasis: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -605,7 +614,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Packing & Forwarding Terms</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.packingForwardingTerms}
                     onChange={e => setCommFields({ ...commFields, packingForwardingTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -616,7 +625,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Freight Terms</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.freightTerms}
                     onChange={e => setCommFields({ ...commFields, freightTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -627,7 +636,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Tax & Duty Terms</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.taxDutyTerms}
                     onChange={e => setCommFields({ ...commFields, taxDutyTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -638,7 +647,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Payment Terms</label>
                   <textarea
                     rows={2}
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.paymentTerms}
                     onChange={e => setCommFields({ ...commFields, paymentTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
@@ -649,7 +658,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Validity Terms</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.validityTerms}
                     onChange={e => setCommFields({ ...commFields, validityTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -660,7 +669,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Third Party Inspection (TPIA) Terms</label>
                   <textarea
                     rows={2}
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.tpiTerms}
                     onChange={e => setCommFields({ ...commFields, tpiTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
@@ -671,7 +680,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Transit Insurance</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.transitInsurance}
                     onChange={e => setCommFields({ ...commFields, transitInsurance: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -682,7 +691,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Guarantee / Warranty Period</label>
                   <input
                     type="text"
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.guaranteeTerms}
                     onChange={e => setCommFields({ ...commFields, guaranteeTerms: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
@@ -693,7 +702,7 @@ const QuotationDetail = () => {
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Delivery Schedule / Timeline</label>
                   <textarea
                     rows={2}
-                    disabled={isApproved}
+                    disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                     value={commFields.deliverySchedule}
                     onChange={e => setCommFields({ ...commFields, deliverySchedule: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none resize-none"
@@ -843,7 +852,7 @@ const QuotationDetail = () => {
                   newItems[activeItemIndex].dynamicFields[fieldName] = value;
                   setItems(newItems);
                 }}
-                readOnly={isApproved}
+                readOnly={isApproved || !ability.can('editTechnical', 'Quotation')}
                 currentUserRole={currentUser.role}
               />
             </div>

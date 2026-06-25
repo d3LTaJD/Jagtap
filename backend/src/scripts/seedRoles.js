@@ -7,141 +7,243 @@ const mongoose = require('mongoose');
 const Role = require('../models/Role');
 
 const ROLES = [
+  // Super Admin / SA / SUPER_ADMIN / superadmin
   {
-    name: 'Super Admin',
-    code: 'SA',
-    description: 'Full system access. Manage roles, fields, users, settings, audit log. Cannot be deleted or impersonated.',
-    department: 'Admin',
+    name: 'Super Admin', code: 'SA', department: 'Admin', description: 'System Administrator - Full system access',
     permissions: {
-      Enquiry:   { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      Quotation: { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      QAP:       { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      Inventory: { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      Customers: { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      Products:  { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      Admin:     { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
+      Enquiry:   { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Quotation: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      QAP:       { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Inventory: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Customers: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Products:  { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Admin:     { view: true, create: true, edit: true, delete: true, approve: true, assign: true }
     }
   },
   {
-    name: 'Director / Owner',
-    code: 'DIR',
-    description: 'Full view of all records. Approve quotations, finalise QAP. Override any record. All dashboards.',
-    department: 'Management',
+    name: 'SUPER_ADMIN', code: 'SUPER_ADMIN', department: 'Admin', description: 'System Administrator - Full system access',
     permissions: {
-      Enquiry:   { view: true,  create: true,  edit: true,  delete: true,  approve: true,  assign: true  },
-      Quotation: { view: true,  create: true,  edit: true,  delete: false, approve: true,  assign: true  },
-      QAP:       { view: true,  create: false, edit: true,  delete: false, approve: true,  assign: true  },
-      Inventory: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Customers: { view: true,  create: true,  edit: true,  delete: false, approve: false, assign: false },
-      Products:  { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Quotation: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      QAP:       { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Inventory: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Customers: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Products:  { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Admin:     { view: true, create: true, edit: true, delete: true, approve: true, assign: true }
     }
   },
   {
-    name: 'Technical Authority',
-    code: 'TA',
-    description: 'Create/edit technical section of all enquiries and quotations. Approve technical specification. Manage product field config.',
-    department: 'Design',
+    name: 'superadmin', code: 'superadmin', department: 'Admin', description: 'System Administrator - Full system access',
     permissions: {
-      Enquiry:   { view: true,  create: true,  edit: true,  delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: true,  edit: true,  delete: false, approve: true,  assign: false },
-      QAP:       { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Inventory: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Customers: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Products:  { view: true,  create: true,  edit: true,  delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Quotation: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      QAP:       { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Inventory: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Customers: { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Products:  { view: true, create: true, edit: true, delete: true, approve: true, assign: true },
+      Admin:     { view: true, create: true, edit: true, delete: true, approve: true, assign: true }
+    }
+  },
+  // Director / Owner / DIR / DIRECTOR
+  {
+    name: 'Director / Owner', code: 'DIR', department: 'Management', description: 'Owner / MD - Full view and final approvals',
+    permissions: {
+      Enquiry:   { view: true, create: true, edit: true, delete: false, approve: true, assign: true },
+      Quotation: { view: true, create: true, edit: true, delete: false, approve: true, assign: true },
+      QAP:       { view: true, create: false, edit: true, delete: false, approve: true, assign: true },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: true, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
   {
-    name: 'Sales Executive',
-    code: 'SALES',
-    description: 'Create enquiries, manage follow-ups, create quotation drafts. Cannot approve own quotations. Cannot edit pricing.',
-    department: 'Sales',
+    name: 'DIRECTOR', code: 'DIRECTOR', department: 'Management', description: 'Owner / MD - Full view and final approvals',
     permissions: {
-      Enquiry:   { view: true,  create: true,  edit: true,  delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: true,  edit: false, delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: true, edit: true, delete: false, approve: true, assign: true },
+      Quotation: { view: true, create: true, edit: true, delete: false, approve: true, assign: true },
+      QAP:       { view: true, create: false, edit: true, delete: false, approve: true, assign: true },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: true, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  // Technical Authority / TA / TECHNICAL_AUTHORITY
+  {
+    name: 'Technical Authority', code: 'TA', department: 'Design', description: 'Technical expert - Technical specifications and field config',
+    permissions: {
+      Enquiry:   { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: true, edit: true, delete: false, approve: true, assign: false },
+      QAP:       { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  {
+    name: 'TECHNICAL_AUTHORITY', code: 'TECHNICAL_AUTHORITY', department: 'Design', description: 'Technical expert - Technical specifications and field config',
+    permissions: {
+      Enquiry:   { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: true, edit: true, delete: false, approve: true, assign: false },
+      QAP:       { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  // Sales Executive / SALES / SALES_EXECUTIVE
+  {
+    name: 'Sales Executive', code: 'SALES', department: 'Sales', description: 'Sales team - Enquiries and drafts',
+    permissions: {
+      Enquiry:   { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: true, edit: false, delete: false, approve: false, assign: false },
       QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
-      Customers: { view: true,  create: true,  edit: true,  delete: false, approve: false, assign: false },
-      Products:  { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
   {
-    name: 'Design Engineer',
-    code: 'DE',
-    description: 'View enquiries and quotations. Upload/manage drawings linked to enquiries. Create design notes on quotations.',
-    department: 'Design',
+    name: 'SALES_EXECUTIVE', code: 'SALES_EXECUTIVE', department: 'Sales', description: 'Sales team - Enquiries and drafts',
     permissions: {
-      Enquiry:   { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: false, edit: true,  delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: true, edit: false, delete: false, approve: false, assign: false },
       QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
-      Customers: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Products:  { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: true, edit: true, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  // Design Engineer / DE / DESIGN_ENGINEER
+  {
+    name: 'Design Engineer', code: 'DE', department: 'Design', description: 'Design team - Drawings and technical notes',
+    permissions: {
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: true,  delete: false, approve: false, assign: false },
+      QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
   {
-    name: 'QC Engineer',
-    code: 'QCE',
-    description: 'View quotations linked to their jobs. Create and edit QAP. Upload inspection records. Cannot approve QAP.',
-    department: 'QC',
+    name: 'DESIGN_ENGINEER', code: 'DESIGN_ENGINEER', department: 'Design', description: 'Design team - Drawings and technical notes',
     permissions: {
-      Enquiry:   { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      QAP:       { view: true,  create: true,  edit: true,  delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: true,  delete: false, approve: false, assign: false },
+      QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  // QC Engineer / QCE / QC_ENGINEER
+  {
+    name: 'QC Engineer', code: 'QCE', department: 'QC', description: 'QC team - Create and edit QAP',
+    permissions: {
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: true, create: true, edit: true,  delete: false, approve: false, assign: false },
       Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Customers: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Products:  { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
   {
-    name: 'QC Supervisor',
-    code: 'QCS',
-    description: 'All QC Engineer access + approve QAP checklist items. Sign MTC entries. Assign QC jobs.',
-    department: 'QC',
+    name: 'QC_ENGINEER', code: 'QC_ENGINEER', department: 'QC', description: 'QC team - Create and edit QAP',
     permissions: {
-      Enquiry:   { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      QAP:       { view: true,  create: true,  edit: true,  delete: false, approve: true,  assign: true  },
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: true, create: true, edit: true,  delete: false, approve: false, assign: false },
       Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Customers: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Products:  { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
+  // QC Supervisor / QCS / QC_SUPERVISOR
   {
-    name: 'Accounts',
-    code: 'ACC',
-    description: 'View quotation commercial section, payment terms. Track invoices. No technical or QC access.',
-    department: 'Accounts',
+    name: 'QC Supervisor', code: 'QCS', department: 'QC', description: 'QC Supervisor - Approve QAP and assign jobs',
     permissions: {
-      Enquiry:   { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
-      Inventory: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Customers: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: true, create: true, edit: true,  delete: false, approve: true,  assign: true  },
+      Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
       Products:  { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
   {
-    name: 'Management Viewer',
-    code: 'MGR',
-    description: 'Read-only dashboards and reports across all modules. Cannot create or edit any record.',
-    department: 'Management',
+    name: 'QC_SUPERVISOR', code: 'QC_SUPERVISOR', department: 'QC', description: 'QC Supervisor - Approve QAP and assign jobs',
     permissions: {
-      Enquiry:   { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Quotation: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      QAP:       { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Inventory: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Customers: { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Products:  { view: true,  create: false, edit: false, delete: false, approve: false, assign: false },
-      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: true, create: true, edit: true,  delete: false, approve: true,  assign: true  },
+      Inventory: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
     }
   },
+  // Accounts / ACC / ACCOUNTS
+  {
+    name: 'Accounts', code: 'ACC', department: 'Accounts', description: 'Accounts team - Commercial and payment terms',
+    permissions: {
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  {
+    name: 'ACCOUNTS', code: 'ACCOUNTS', department: 'Accounts', description: 'Accounts team - Commercial and payment terms',
+    permissions: {
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: false, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  // Management Viewer / MGR / MANAGEMENT_VIEWER
+  {
+    name: 'Management Viewer', code: 'MGR', department: 'Management', description: 'Management read-only dashboards',
+    permissions: {
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  },
+  {
+    name: 'MANAGEMENT_VIEWER', code: 'MANAGEMENT_VIEWER', department: 'Management', description: 'Management read-only dashboards',
+    permissions: {
+      Enquiry:   { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Quotation: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      QAP:       { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Inventory: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Customers: { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Products:  { view: true, create: false, edit: false, delete: false, approve: false, assign: false },
+      Admin:     { view: false, create: false, edit: false, delete: false, approve: false, assign: false }
+    }
+  }
 ];
 
 const seed = async () => {

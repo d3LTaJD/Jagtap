@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const Role = require('../models/Role');
+const { PERMISSION_MATRIX, normalizeRole, getUserRoles, hasPermission } = require('../config/permissions');
 
 exports.protect = async (req, res, next) => {
   let token;
@@ -24,49 +24,57 @@ exports.protect = async (req, res, next) => {
   }
 };
 
-// Legacy role-based check
+// Re-export normalizeRole as getRoleCode for backward compatibility
+const getRoleCode = normalizeRole;
+
+const getEquivalentRoles = (role) => {
+  if (!role) return [];
+  const { ROLE_ALIASES } = require('../config/permissions');
+  const normalized = role.toUpperCase().trim();
+  for (const [shortCode, aliases] of Object.entries(ROLE_ALIASES)) {
+    if (shortCode === normalized || aliases.some(a => a.toUpperCase() === normalized)) {
+      return [shortCode, ...aliases, shortCode.toLowerCase(), ...aliases.map(a => a.toLowerCase())];
+    }
+  }
+  return [role, role.toUpperCase(), role.toLowerCase()];
+};
+
+exports.getRoleCode = getRoleCode;
+exports.getEquivalentRoles = getEquivalentRoles;
+
+/**
+ * Role-based route guard using the centralized RBAC matrix.
+ * Checks if ANY of the user's roles (primary + secondary) is in the allowed list.
+ */
 exports.authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const userRoles = getUserRoles(req.user);
+
+    const isAuthorized = roles.some(r => {
+      const normalizedR = normalizeRole(r);
+      return userRoles.includes(normalizedR);
+    });
+
+    if (!isAuthorized) {
       return res.status(403).json({ status: 'error', message: `User role ${req.user.role} is not authorized` });
     }
     next();
   };
 };
 
-// Dynamic permission check
+/**
+ * Permission-based route guard using the centralized RBAC matrix.
+ * Checks the PERMISSION_MATRIX directly — no database lookup needed.
+ */
 exports.requirePermission = (moduleName, action) => {
-  return async (req, res, next) => {
-    // SUPER_ADMIN (SA code) implicitly has all permissions
-    if (req.user.role === 'SA' || req.user.role === 'SUPER_ADMIN') {
+  return (req, res, next) => {
+    if (hasPermission(req.user, moduleName, action)) {
       return next();
     }
 
-    try {
-      const roleDoc = await Role.findOne({ code: req.user.role });
-
-      // Check primary role
-      let hasPermission = false;
-      if (roleDoc?.permissions) {
-        const perms = roleDoc.permissions.get(moduleName);
-        if (perms && perms[action] === true) hasPermission = true;
-      }
-
-      // Check secondary role (additive)
-      if (!hasPermission && req.user.secondaryRole) {
-        const secRole = await Role.findOne({ code: req.user.secondaryRole });
-        if (secRole?.permissions) {
-          const secPerms = secRole.permissions.get(moduleName);
-          if (secPerms && secPerms[action] === true) hasPermission = true;
-        }
-      }
-
-      if (hasPermission) return next();
-
-      return res.status(403).json({ status: 'error', message: `Not authorized to perform ${action} on ${moduleName}` });
-    } catch (err) {
-      console.error('Permission check error:', err);
-      return res.status(500).json({ status: 'error', message: 'Server error during permission check' });
-    }
+    return res.status(403).json({
+      status: 'error',
+      message: `Not authorized to perform ${action} on ${moduleName}`
+    });
   };
 };

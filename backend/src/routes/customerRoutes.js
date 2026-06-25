@@ -5,6 +5,7 @@ const { protect, requirePermission } = require('../middleware/auth');
 
 router.use(protect);
 
+// SOW: Customers — view: all, create/edit/delete: SA, DIR, TA
 router.get('/', requirePermission('Customers', 'view'), c.getCustomers);
 router.get('/:id', requirePermission('Customers', 'view'), c.getCustomer);
 router.post('/', requirePermission('Customers', 'create'), c.createCustomer);

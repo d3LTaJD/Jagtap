@@ -16,7 +16,7 @@ const seedAdmin = async () => {
       mobile_number: '9876543210',
       email: 'admin@petrovalve.com',
       password: 'adminpassword123',
-      role: 'SUPER_ADMIN',
+      role: 'SA',
       department: 'Admin',
       is_active: true,
       is_verified: true

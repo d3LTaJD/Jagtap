@@ -4,6 +4,7 @@ const puppeteer = require('puppeteer');
 const { createNotification, notifyRoles, sendEmail } = require('../services/notificationService');
 const { logActivity } = require('../utils/logger');
 const { getNextSequenceValue } = require('../utils/counter');
+const { hasPermission } = require('../config/permissions');
 
 exports.createQuotation = async (req, res, next) => {
   try {
@@ -158,11 +159,42 @@ exports.createQuotation = async (req, res, next) => {
       metadata: { quotationId: quotation._id, enquiryId: req.body.enquiry }
     }).catch(err => console.error('[Quotation Controller] Failed to log quotation metric:', err.message));
 
-    res.status(201).json({ status: 'success', data: { quotation } });
+    res.status(201).json({ status: 'success', data: { quotation: stripQuotationPricing(quotation, req.user) } });
   } catch (err) {
     next(err);
   }
 };
+
+const stripQuotationPricing = (quot, user) => {
+  if (!quot) return quot;
+  const hasPricing = hasPermission(user, 'Quotation', 'viewPricing');
+  if (hasPricing) return quot;
+  
+  const obj = quot.toObject ? quot.toObject() : quot;
+  delete obj.costSummary;
+  delete obj.commercialTotals;
+  if (obj.items) {
+    obj.items = obj.items.map(item => {
+      const itemObj = item.toObject ? item.toObject() : item;
+      delete itemObj.unitPrice;
+      delete itemObj.testingCharges;
+      delete itemObj.inspectionCharges;
+      delete itemObj.ndtCharges;
+      delete itemObj.specialTestingCharges;
+      delete itemObj.sparesCharges;
+      delete itemObj.cert32Charges;
+      delete itemObj.pfCharges;
+      delete itemObj.tpiCharges;
+      delete itemObj.discountPercent;
+      delete itemObj.lineTotalExclGST;
+      delete itemObj.gstAmount;
+      delete itemObj.lineTotalInclGST;
+      return itemObj;
+    });
+  }
+  return obj;
+};
+exports.stripQuotationPricing = stripQuotationPricing;
 
 exports.getQuotations = async (req, res, next) => {
   try {
@@ -172,7 +204,8 @@ exports.getQuotations = async (req, res, next) => {
       .populate('preparedBy', 'fullName')
       .populate('files')
       .sort('-createdAt');
-    res.status(200).json({ status: 'success', results: quotations.length, data: { quotations } });
+    const cleaned = quotations.map(q => stripQuotationPricing(q, req.user));
+    res.status(200).json({ status: 'success', results: cleaned.length, data: { quotations: cleaned } });
   } catch (err) {
     next(err);
   }
@@ -189,7 +222,8 @@ exports.getQuotation = async (req, res, next) => {
       .populate('files');
       
     if (!quotation) return res.status(404).json({ status: 'error', message: 'Not found' });
-    res.status(200).json({ status: 'success', data: { quotation } });
+    const cleaned = stripQuotationPricing(quotation, req.user);
+    res.status(200).json({ status: 'success', data: { quotation: cleaned } });
   } catch (err) {
     next(err);
   }
@@ -199,6 +233,92 @@ exports.getQuotation = async (req, res, next) => {
 
 exports.updateQuotationStatus = async (req, res, next) => {
   try {
+    const originalQuotation = await Quotation.findById(req.params.id);
+    if (!originalQuotation) {
+      return res.status(404).json({ status: 'error', message: 'Quotation not found' });
+    }
+
+    const isChanged = (val1, val2) => {
+      if (val1 === undefined) return false;
+      if (typeof val1 === 'object' && val1 !== null) {
+        return JSON.stringify(val1) !== JSON.stringify(val2);
+      }
+      return val1 != val2;
+    };
+
+    let technicalChanged = false;
+    let commercialChanged = false;
+    let isApproveAttempt = false;
+
+    if (req.body.status !== undefined && req.body.status !== originalQuotation.status) {
+      if (req.body.status === 'APPROVED' || req.body.status === 'Accepted') {
+        isApproveAttempt = true;
+      }
+    }
+
+    const TECHNICAL_FIELDS = [
+      'manufacturerName', 'originOfGoods', 'weightDimensions', 'technicalDocuments',
+      'deliveryTimeHeader', 'scopeOfSupply', 'exclusions'
+    ];
+
+    const COMMERCIAL_FIELDS = [
+      'priceBasis', 'packingForwardingTerms', 'freightTerms', 'taxDutyTerms',
+      'validityTerms', 'tpiTerms', 'transitInsurance', 'guaranteeTerms',
+      'paymentTerms', 'commercialTotals', 'costSummary', 'validUntil', 'deliverySchedule'
+    ];
+
+    TECHNICAL_FIELDS.forEach(f => {
+      if (req.body[f] !== undefined && isChanged(req.body[f], originalQuotation[f])) {
+        technicalChanged = true;
+      }
+    });
+
+    COMMERCIAL_FIELDS.forEach(f => {
+      if (req.body[f] !== undefined && isChanged(req.body[f], originalQuotation[f])) {
+        commercialChanged = true;
+      }
+    });
+
+    if (req.body.items && Array.isArray(req.body.items)) {
+      const origItems = originalQuotation.items || [];
+      req.body.items.forEach((item, index) => {
+        const origItem = origItems[index] || {};
+        
+        const commercialItemKeys = [
+          'unitPrice', 'testingCharges', 'inspectionCharges', 'ndtCharges', 
+          'specialTestingCharges', 'sparesCharges', 'cert32Charges', 'pfCharges', 
+          'tpiCharges', 'discountPercent', 'lineTotalExclGST', 'gstRate', 
+          'gstAmount', 'lineTotalInclGST'
+        ];
+        commercialItemKeys.forEach(k => {
+          if (item[k] !== undefined && isChanged(item[k], origItem[k])) {
+            commercialChanged = true;
+          }
+        });
+
+        const technicalItemKeys = [
+          'itemNo', 'description', 'productCategory', 'materialGrade', 
+          'applicableStandard', 'quantity', 'unit', 'testsRequired', 
+          'manufacturingProcess', 'deliveryWeeks', 'technicalDeviations', 'dynamicFields'
+        ];
+        technicalItemKeys.forEach(k => {
+          if (item[k] !== undefined && isChanged(item[k], origItem[k])) {
+            technicalChanged = true;
+          }
+        });
+      });
+    }
+
+    if (isApproveAttempt && !hasPermission(req.user, 'Quotation', 'approve')) {
+      return res.status(403).json({ status: 'error', message: 'Not authorized to approve quotations' });
+    }
+    if (technicalChanged && !hasPermission(req.user, 'Quotation', 'editTechnical')) {
+      return res.status(403).json({ status: 'error', message: 'Not authorized to edit technical parameters of quotations' });
+    }
+    if (commercialChanged && !hasPermission(req.user, 'Quotation', 'editCommercial')) {
+      return res.status(403).json({ status: 'error', message: 'Not authorized to edit commercial parameters of quotations' });
+    }
+
     const fields = [
       'status', 'comments', 'assignedTo', 'files', 'dynamicFields', 'items',
       'manufacturerName', 'originOfGoods', 'weightDimensions', 'technicalDocuments', 'deliveryTimeHeader',
@@ -216,7 +336,6 @@ exports.updateQuotationStatus = async (req, res, next) => {
     if (status === 'APPROVED') updateData.approvedBy = req.user._id;
     if (status === 'TECH_REVIEW') updateData.technicalReviewBy = req.user._id;
 
-    const originalQuotation = await Quotation.findById(req.params.id);
     const quotation = await Quotation.findByIdAndUpdate(req.params.id, updateData, { new: true })
       .populate('customer')
       .populate('enquiry')
@@ -240,9 +359,9 @@ exports.updateQuotationStatus = async (req, res, next) => {
       if (status === 'TECH_REVIEW') {
         await notifyRoles({ roles: ['DESIGN'], type: 'QUOTE_APPROVAL', title: 'Quotation Tech Review', message: `Quotation ${quotation.quotationId} needs technical review.`, related_id: quotation._id });
       } else if (status === 'PENDING_APPROVAL') {
-        await notifyRoles({ roles: ['DIRECTOR'], type: 'QUOTE_APPROVAL', title: 'Quotation Approval', message: `Quotation ${quotation.quotationId} needs director approval.`, related_id: quotation._id });
+        await notifyRoles({ roles: ['DIRECTOR', 'DIR'], type: 'QUOTE_APPROVAL', title: 'Quotation Approval', message: `Quotation ${quotation.quotationId} needs director approval.`, related_id: quotation._id });
         // Send email mock for testing via dummy user array
-        const adminUsers = await require('../models/User').find({ role: 'DIRECTOR' });
+        const adminUsers = await require('../models/User').find({ role: { $in: ['DIRECTOR', 'DIR'] } });
         adminUsers.forEach(u => {
           sendEmail({ userId: u._id, subject: 'Quote Approval Required', text: `Please approve quote ${quotation.quotationId}` });
         });
@@ -257,7 +376,7 @@ exports.updateQuotationStatus = async (req, res, next) => {
        await createNotification({ user_id: assignedTo, type: 'QUOTE_APPROVAL', title: 'Quotation Assigned', message: `Quotation ${quotation.quotationId} was assigned to you.`, related_id: quotation._id });
     }
 
-    res.status(200).json({ status: 'success', data: { quotation } });
+    res.status(200).json({ status: 'success', data: { quotation: stripQuotationPricing(quotation, req.user) } });
   } catch (err) {
     next(err);
   }
@@ -387,7 +506,7 @@ exports.generatePdf = async (req, res, next) => {
       .populate('approvedBy', 'fullName')
       .populate('files');
 
-    res.status(201).json({ status: 'success', data: { quotation: populatedQuotation, newFile: fileMeta } });
+    res.status(201).json({ status: 'success', data: { quotation: stripQuotationPricing(populatedQuotation, req.user), newFile: fileMeta } });
   } catch (err) {
     next(err);
   }

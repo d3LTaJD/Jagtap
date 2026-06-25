@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Menu, Bell, Search, Check, Loader2, FileText, Users, ClipboardList, X, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { getRoleDisplayName } from '../context/AbilityContext';
 
 const TYPE_ICON = {
   Enquiry:   FileText,
@@ -29,7 +30,7 @@ const Navbar = ({ onMenuClick }) => {
   const searchTimeout = useRef(null);
 
   const navigate = useNavigate();
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
 
   const getInitials = (name) => {
     if (!name) return 'U';
@@ -248,7 +249,7 @@ const Navbar = ({ onMenuClick }) => {
           <div className="flex items-center gap-3 ml-2 pl-4 border-l border-slate-200">
             <div className="hidden md:block text-right">
               <p className="text-sm font-bold text-slate-900 leading-tight">{currentUser.fullName || 'My Profile'}</p>
-              <p className="text-[10px] text-slate-500 font-medium mt-0.5 uppercase tracking-wider">{currentUser.role === 'SUPER_ADMIN' ? 'Administrator' : currentUser.role || 'User'}</p>
+              <p className="text-[10px] text-slate-500 font-medium mt-0.5 uppercase tracking-wider">{getRoleDisplayName(currentUser.role)}</p>
             </div>
             <div className="relative p-[2px] rounded-full bg-gradient-to-tr from-brand-500 to-violet-500 hover:shadow-lg hover:shadow-brand-500/20 transition-all cursor-pointer group">
               <div

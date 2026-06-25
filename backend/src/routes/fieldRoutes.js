@@ -1,9 +1,9 @@
 const express = require('express');
+const { protect, requirePermission, authorize } = require('../middleware/auth');
 const {
   getFields, getField, createField, updateField,
   reorderFields, deleteField, restoreField
 } = require('../controllers/fieldController');
-const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -14,11 +14,11 @@ router.use(protect);
 router.get('/', getFields);
 router.get('/:id', getField);
 
-// Write — only Super Admin and Director can create/modify/delete fields
-router.post('/', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), createField);
-router.patch('/reorder', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), reorderFields);
-router.patch('/:id', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), updateField);
-router.patch('/:id/restore', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), restoreField);
-router.delete('/:id', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), deleteField);
+// Write — only SA (SOW: Dynamic field builder = SA only)
+router.post('/', requirePermission('Admin', 'fieldBuilder'), createField);
+router.patch('/reorder', requirePermission('Admin', 'fieldBuilder'), reorderFields);
+router.patch('/:id', requirePermission('Admin', 'fieldBuilder'), updateField);
+router.patch('/:id/restore', requirePermission('Admin', 'fieldBuilder'), restoreField);
+router.delete('/:id', requirePermission('Admin', 'fieldBuilder'), deleteField);
 
 module.exports = router;

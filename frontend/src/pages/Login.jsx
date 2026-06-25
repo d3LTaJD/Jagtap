@@ -2,13 +2,21 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Database, Lock, Mail, Loader2, AlertCircle } from 'lucide-react';
 import api from '../api/client';
+import logoImg from '../logo.png';
 
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('password123');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  React.useEffect(() => {
+    const token = sessionStorage.getItem('token');
+    if (token) {
+      navigate('/app', { replace: true });
+    }
+  }, [navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -19,8 +27,8 @@ const Login = () => {
       const response = await api.post('/auth/login', { email, password });
       
       if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user || {}));
+        sessionStorage.setItem('token', response.data.token);
+        sessionStorage.setItem('user', JSON.stringify(response.data.user || {}));
         window.location.href = '/app';
       }
     } catch (err) {
@@ -38,8 +46,8 @@ const Login = () => {
       
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl ring-1 ring-slate-900/5 p-8 relative z-10">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-brand-100 rounded-2xl mb-4">
-            <Database className="w-7 h-7 text-brand-600" />
+          <div className="flex items-center justify-center mb-4">
+            <img src={logoImg} alt="Logo" className="h-16 w-auto max-w-[240px] object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Welcome Back</h1>
           <p className="text-sm text-slate-500 mt-2">Sign in to your workflow dashboard</p>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, FileText, CheckSquare, TrendingUp, IndianRupee, Loader2, Activity, ClipboardList, AlertCircle, RefreshCw, Download, BarChart3, Trophy, TrendingDown, Sparkles, MoreVertical, Phone, Mail, MessageSquare, X, Save, CheckCircle2, Calendar } from 'lucide-react';
 import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, CartesianGrid } from 'recharts';
 import api from '../api/client';
+import { getRoleCode, useAbility } from '../context/AbilityContext';
 
 const StatCard = ({ title, value, icon: Icon, trend, colorClass = "brand", loading = false }) => {
   const styles = {
@@ -66,9 +67,12 @@ const Dashboard = () => {
   const [myTasks, setMyTasks] = useState({ enquiries: [], followUps: [], approvals: [] });
   const [pipeline, setPipeline] = useState([]);
   const [loading, setLoading] = useState(true);
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  // mock data removed, using real data from backend
-  const canSeeFinancials = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR', 'ACC', 'ACCOUNTS'].includes(currentUser.role);
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const ability = useAbility();
+  const userRoleCode = getRoleCode(currentUser.role);
+  const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
+  const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+  const canSeeFinancials = ability.can('viewFinancials', 'Dashboard');
 
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [selectedEnquiry, setSelectedEnquiry] = useState(null);
@@ -231,7 +235,9 @@ const Dashboard = () => {
         <StatCard loading={loading} title="Total Leads" value={stats.activeEnquiries ?? 0} icon={Users} trend="12.5" colorClass="brand" />
         <StatCard loading={loading} title="Active Clients" value={stats.activeClients ?? 0} icon={Users} trend="8.2" colorClass="teal" />
         <StatCard loading={loading} title="Deals in Pipeline" value={stats.pendingQaps ?? 0} icon={Activity} trend="15.3" colorClass="purple" />
-        <StatCard loading={loading} title="Total Revenue" value={formatCurrency(stats.pipelineValue ?? 0)} icon={IndianRupee} trend="18.7" colorClass="orange" />
+        {canSeeFinancials && (
+          <StatCard loading={loading} title="Total Revenue" value={formatCurrency(stats.pipelineValue ?? 0)} icon={IndianRupee} trend="18.7" colorClass="orange" />
+        )}
       </div>
 
       {/* ── KPI Visualizations ── */}

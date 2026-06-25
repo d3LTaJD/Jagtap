@@ -5,6 +5,7 @@ import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import SignatureCanvas from 'react-signature-canvas';
 import { MapPin, Eraser } from 'lucide-react';
+import { getRoleCode } from '../context/AbilityContext';
 
 /**
  * DynamicFormRenderer
@@ -22,6 +23,16 @@ import { MapPin, Eraser } from 'lucide-react';
 const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = false, currentUserRole }) => {
   const [fields, setFields] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Retrieve primary and secondary roles dynamically
+  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const primaryRole = currentUserRole || user.role;
+  const secondaryRole = user.secondaryRole;
+  
+  const userRoles = [
+    getRoleCode(primaryRole),
+    getRoleCode(secondaryRole)
+  ].filter(Boolean);
 
   useEffect(() => {
     const fetch = async () => {
@@ -44,8 +55,8 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
   const isVisible = (field) => {
     // Role-based visibility check
     if (field.visibleToRoles?.length) {
-      if (!currentUserRole) return false; // Safety: if restricted but no role, hide
-      if (!field.visibleToRoles.includes(currentUserRole)) return false;
+      if (!userRoles.length) return false; // Safety: if restricted but no role, hide
+      if (!userRoles.some(r => field.visibleToRoles.includes(r))) return false;
     }
     // Conditional logic
     if (field.conditionalLogic?.dependsOnField) {
@@ -62,8 +73,8 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
     
     // If specific roles are defined, current user MUST have one of them
     if (field.editableByRoles?.length) {
-      if (!currentUserRole) return false;
-      return field.editableByRoles.includes(currentUserRole);
+      if (!userRoles.length) return false;
+      return userRoles.some(r => field.editableByRoles.includes(r));
     }
     
     // Default: everyone can edit if form is not read-only

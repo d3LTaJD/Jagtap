@@ -5,6 +5,7 @@ import {
   CalendarDays, Send, Trash2, Pencil, CheckCircle2, X, UserCheck
 } from 'lucide-react';
 import api from '../api/client';
+import { getRoleCode } from '../context/AbilityContext';
 
 const FOLLOW_UP_TYPES = [
   { value: 'CALL',       label: 'Phone Call',    icon: Phone },
@@ -36,7 +37,7 @@ const defaultForm = {
   nextFollowUpDate: '',
 };
 
-const FollowUpPanel = ({ enquiryId, currentUserRole }) => {
+const FollowUpPanel = ({ enquiryId, currentUserRole, readOnly = false }) => {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -45,8 +46,8 @@ const FollowUpPanel = ({ enquiryId, currentUserRole }) => {
   const [editingId, setEditingId] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const isHighAuth = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(currentUserRole);
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const isHighAuth = ['SA', 'DIR'].includes(getRoleCode(currentUserRole));
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -161,6 +162,7 @@ const FollowUpPanel = ({ enquiryId, currentUserRole }) => {
             </span>
           )}
         </div>
+        {!readOnly && (
         <button
           onClick={() => { setShowForm(!showForm); if (editingId) cancelForm(); }}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-xl transition-all"
@@ -168,6 +170,7 @@ const FollowUpPanel = ({ enquiryId, currentUserRole }) => {
           <Plus className="w-3.5 h-3.5" />
           Add Entry
         </button>
+        )}
       </div>
 
       {/* Add / Edit Form */}
@@ -273,7 +276,7 @@ const FollowUpPanel = ({ enquiryId, currentUserRole }) => {
           {entries.map((entry, idx) => {
             const TypeObj = FOLLOW_UP_TYPES.find(t => t.value === entry.type) || FOLLOW_UP_TYPES[5];
             const isOwn = entry.addedBy?._id === currentUser.id || entry.addedBy?._id === currentUser._id;
-            const canEdit = isOwn || isHighAuth;
+            const canEdit = !readOnly && (isOwn || isHighAuth);
             const isOverdue = entry.nextFollowUpDate && new Date(entry.nextFollowUpDate) < new Date();
 
             return (

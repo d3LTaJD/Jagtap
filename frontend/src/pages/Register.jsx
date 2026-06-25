@@ -27,8 +27,8 @@ const Register = () => {
       const response = await api.post('/auth/register', formData);
       
       if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.data.user || {}));
+        sessionStorage.setItem('token', response.data.token);
+        sessionStorage.setItem('user', JSON.stringify(response.data.data.user || {}));
         navigate('/app');
       }
     } catch (err) {

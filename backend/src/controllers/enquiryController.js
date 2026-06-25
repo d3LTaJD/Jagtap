@@ -5,6 +5,7 @@ const FieldDefinition = require('../models/FieldDefinition');
 const { createNotification, notifyRoles } = require('../services/notificationService');
 const { logActivity } = require('../utils/logger');
 const { getNextSequenceValue } = require('../utils/counter');
+const { hasPermission } = require('../config/permissions');
 
 async function checkEnquiryCompletion(enquiry) {
   try {
@@ -238,6 +239,16 @@ exports.updateEnquiry = async (req, res, next) => {
     const originalEnquiry = await Enquiry.findById(req.params.id);
     if (!originalEnquiry) {
       return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+    }
+
+    // Guard assignment
+    if (req.body.assignedTo !== undefined && req.body.assignedTo?.toString() !== originalEnquiry.assignedTo?.toString()) {
+      if (!hasPermission(req.user, 'Enquiry', 'assign')) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Not authorized to assign enquiries to users'
+        });
+      }
     }
 
     // Combine dynamicFields with existing to prevent wiping out unprovided keys
@@ -574,3 +585,101 @@ exports.suggestEnquiryFields = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.importTender = async (req, res, next) => {
+  try {
+    const boqFile = req.files?.boqFile?.[0];
+    const specFile = req.files?.specFile?.[0];
+
+    if (!boqFile && !specFile) {
+      return res.status(400).json({ status: 'fail', message: 'Please upload at least a BOQ file or a Specification PDF file.' });
+    }
+
+    let products = [];
+    let specifications = {};
+    let parsedText = '';
+
+    // 1. Process BOQ File (XLSX, XLS, CSV)
+    if (boqFile) {
+      const XLSX = require('xlsx');
+      const workbook = XLSX.read(boqFile.buffer, { type: 'buffer' });
+      const firstSheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+
+      // Map rows to product items
+      products = rows.map((row, index) => {
+        const titleKey = Object.keys(row).find(k => /title|name|product/i.test(k)) || Object.keys(row).find(k => /item/i.test(k) && !/number|no|qty/i.test(k));
+        const descKey = Object.keys(row).find(k => /desc/i.test(k) || /specification/i.test(k));
+        const qtyKey = Object.keys(row).find(k => /qty|quantity/i.test(k));
+        const unitKey = Object.keys(row).find(k => /unit|uom/i.test(k));
+
+        const title = titleKey ? String(row[titleKey]).trim() : '';
+        const desc = descKey ? String(row[descKey]).trim() : '';
+        const fullDesc = title && desc ? `${title}: ${desc}` : title || desc || `Item ${index + 1}`;
+
+        let quantity = qtyKey ? Number(row[qtyKey]) : 1;
+        if (isNaN(quantity)) quantity = 1;
+
+        let unit = 'NOS';
+        if (unitKey) {
+          const rawUnit = String(row[unitKey]).trim().toUpperCase();
+          if (['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'].includes(rawUnit)) {
+            unit = rawUnit;
+          } else if (rawUnit.startsWith('NO')) {
+            unit = 'NOS';
+          }
+        }
+
+        return {
+          description: fullDesc,
+          quantity,
+          unit,
+          category: 'Piping', // Default to Piping for valves in tenders
+          dynamicFields: {}
+        };
+      });
+    }
+
+    // 2. Process Technical Specification PDF
+    if (specFile) {
+      const fileParsingService = require('../services/fileParsingService');
+      const parseResult = await fileParsingService.extractTextFromFile(specFile.buffer, specFile.mimetype, specFile.originalname);
+      if (parseResult.status === 'SUCCESS') {
+        parsedText = parseResult.text;
+
+        // Query active 'Piping' Category field definitions (since tenders are generally for Piping/valves)
+        const fields = await FieldDefinition.find({
+          productCategory: 'Piping',
+          formContext: 'Enquiry',
+          isDeleted: false,
+          isActive: true
+        });
+
+        if (fields.length > 0 && parsedText.length > 0) {
+          const aiService = require('../services/aiService');
+          // Use Gemini to extract dynamic fields
+          specifications = await aiService.extractDynamicFields(
+            parsedText,
+            fields,
+            products.length > 0 ? products[0].description : 'Valves Tender'
+          );
+        }
+      } else {
+        console.warn(`[Tender Import] PDF text extraction status: ${parseResult.status}`);
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        products,
+        specifications,
+        textSnippet: parsedText ? parsedText.substring(0, 500) : ''
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+

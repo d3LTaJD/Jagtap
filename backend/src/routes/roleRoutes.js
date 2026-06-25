@@ -1,19 +1,17 @@
 const express = require('express');
 const roleController = require('../controllers/roleController');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Only SUPER_ADMIN and DIRECTOR can manage roles
 router.use(protect);
-router.use(authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'));
 
-router.route('/')
-  .get(roleController.getRoles)
-  .post(roleController.createRole);
+// SOW: Role management — SA write, SA+DIR read
+router.get('/', requirePermission('Admin', 'roleManageRead'), roleController.getRoles);
+router.post('/', requirePermission('Admin', 'roleManageWrite'), roleController.createRole);
 
 router.route('/:id')
-  .patch(roleController.updateRole)
-  .delete(roleController.deleteRole);
+  .patch(requirePermission('Admin', 'roleManageWrite'), roleController.updateRole)
+  .delete(requirePermission('Admin', 'roleManageWrite'), roleController.deleteRole);
 
 module.exports = router;

@@ -4,6 +4,7 @@ import {
   X, Loader2, CheckCircle2, AlertTriangle, UserCircle2 
 } from 'lucide-react';
 import api from '../api/client';
+import { getRoleCode } from '../context/AbilityContext';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 
 const DEPARTMENTS = ['Sales', 'Design', 'QC', 'Purchase', 'Accounts', 'Production', 'Management', 'Admin'];
@@ -224,7 +225,7 @@ const RoleBuilder = () => {
                   <button onClick={() => openEdit(role)} className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg" title="Edit Role">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  {role.code !== 'SUPER_ADMIN' && (
+                  {getRoleCode(role.code) !== 'SA' && (
                     <button onClick={() => handleDelete(role)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete Role">
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -290,8 +291,8 @@ const RoleBuilder = () => {
                       type="text" required value={form.code}
                       onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '') }))}
                       placeholder="e.g. RS_MANAGER"
-                      readOnly={!!editingRole && editingRole.code === 'SUPER_ADMIN'}
-                      className={`w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none ${!!editingRole && editingRole.code === 'SUPER_ADMIN' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      readOnly={!!editingRole && getRoleCode(editingRole.code) === 'SA'}
+                      className={`w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none ${!!editingRole && getRoleCode(editingRole.code) === 'SA' ? 'opacity-60 cursor-not-allowed' : ''}`}
                     />
                   </div>
                 </div>

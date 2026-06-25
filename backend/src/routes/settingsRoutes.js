@@ -3,8 +3,8 @@ const router = express.Router();
 const { getSettings, updateSettings } = require('../controllers/settingsController');
 const { protect, requirePermission } = require('../middleware/auth');
 
-// Only SA (Super Admin) can read/update system settings
-router.get('/', protect, getSettings);
-router.patch('/', protect, requirePermission('Admin', 'edit'), updateSettings);
+// SOW: Settings / Notification templates — SA + DIR
+router.get('/', protect, requirePermission('Admin', 'settingsRead'), getSettings);
+router.patch('/', protect, requirePermission('Admin', 'settingsWrite'), updateSettings);
 
 module.exports = router;

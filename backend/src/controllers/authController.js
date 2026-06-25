@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const otpUtils = require('../utils/otp');
 const ActivityLog = require('../models/ActivityLog');
 const Role = require('../models/Role');
+const { buildPermissionsForUser, normalizeRole } = require('../config/permissions');
 
 const signToken = (userId, role) => {
   return jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '30d' });
@@ -25,21 +26,8 @@ const buildUserQuery = (identifier) => {
 };
 
 const buildLoginResponse = async (user) => {
-  const roleDoc = await Role.findOne({ code: user.role });
-  let permissions = roleDoc ? Object.fromEntries(roleDoc.permissions || new Map()) : {};
-
-  if (user.secondaryRole) {
-    const secRoleDoc = await Role.findOne({ code: user.secondaryRole });
-    if (secRoleDoc) {
-      const secPerms = Object.fromEntries(secRoleDoc.permissions || new Map());
-      for (const module of Object.keys(secPerms)) {
-        if (!permissions[module]) permissions[module] = {};
-        for (const action of Object.keys(secPerms[module])) {
-          permissions[module][action] = permissions[module][action] || secPerms[module][action];
-        }
-      }
-    }
-  }
+  // Use centralized RBAC matrix — no database Role lookup needed
+  const permissions = buildPermissionsForUser(user);
 
   const token = signToken(user._id, user.role);
   return { 

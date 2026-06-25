@@ -20,6 +20,8 @@ const Customers = () => {
     creditLimit: 0, sourceChannel: '', tags: [], notes: '', isActive: true
   });
 
+  const isFormReadOnly = editingCustomer ? !ability.can('edit', 'Customers') : !ability.can('create', 'Customers');
+
   const fetchCustomers = async (searchQuery = '') => {
     try {
       const res = await api.get(`/customers?search=${searchQuery}`);
@@ -201,12 +203,13 @@ const Customers = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="sm:col-span-2">
                     <label className="block text-sm font-medium text-slate-700 mb-1">Company / Organisation Name *</label>
-                    <input type="text" required value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="Acme Corp" />
+                    <input type="text" required disabled={isFormReadOnly} value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="Acme Corp" />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Customer Type *</label>
                     <AutocompleteSelect
+                      disabled={isFormReadOnly}
                       options={['Government', 'Private', 'Export', 'Trader', 'EPC', 'End User']}
                       value={formData.customerType}
                       onChange={v => setFormData({...formData, customerType: v})}
@@ -217,6 +220,7 @@ const Customers = () => {
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Source Channel *</label>
                     <AutocompleteSelect
+                      disabled={isFormReadOnly}
                       options={['IndiaMart', 'OEM', 'Exhibition', 'Reference', 'Email', 'Cold Call', 'Walk-in']}
                       value={formData.sourceChannel}
                       onChange={v => setFormData({...formData, sourceChannel: v})}
@@ -231,29 +235,29 @@ const Customers = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Primary Contact Name *</label>
-                    <input type="text" required value={formData.primaryContactName} onChange={e => setFormData({...formData, primaryContactName: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="John Doe" />
+                    <input type="text" required disabled={isFormReadOnly} value={formData.primaryContactName} onChange={e => setFormData({...formData, primaryContactName: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="John Doe" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Designation</label>
-                    <input type="text" value={formData.designation} onChange={e => setFormData({...formData, designation: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="Purchase Manager" />
+                    <input type="text" disabled={isFormReadOnly} value={formData.designation} onChange={e => setFormData({...formData, designation: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="Purchase Manager" />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Mobile Number *</label>
-                    <input type="text" required value={formData.mobileNumber} onChange={e => setFormData({...formData, mobileNumber: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="9876543210" />
+                    <input type="text" required disabled={isFormReadOnly} value={formData.mobileNumber} onChange={e => setFormData({...formData, mobileNumber: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="9876543210" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Alternate Mobile</label>
-                    <input type="text" value={formData.alternateMobile} onChange={e => setFormData({...formData, alternateMobile: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="Optional" />
+                    <input type="text" disabled={isFormReadOnly} value={formData.alternateMobile} onChange={e => setFormData({...formData, alternateMobile: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="Optional" />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-                    <input type="email" value={formData.emailAddress} onChange={e => setFormData({...formData, emailAddress: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="john@acme.com" />
+                    <input type="email" disabled={isFormReadOnly} value={formData.emailAddress} onChange={e => setFormData({...formData, emailAddress: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="john@acme.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Alternate Email</label>
-                    <input type="email" value={formData.alternateEmail} onChange={e => setFormData({...formData, alternateEmail: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="backup@acme.com" />
+                    <input type="email" disabled={isFormReadOnly} value={formData.alternateEmail} onChange={e => setFormData({...formData, alternateEmail: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="backup@acme.com" />
                   </div>
                 </div>
 
@@ -262,11 +266,12 @@ const Customers = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
-                    <input type="text" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                    <input type="text" disabled={isFormReadOnly} value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
                     <AutocompleteSelect
+                      disabled={isFormReadOnly}
                       options={['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Chandigarh','Delhi','Jammu & Kashmir','Ladakh','Puducherry']}
                       value={formData.state}
                       onChange={v => setFormData({...formData, state: v})}
@@ -276,15 +281,15 @@ const Customers = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                    <input type="text" value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                    <input type="text" disabled={isFormReadOnly} value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">GSTIN <span className="text-slate-400 font-normal">(15-char)</span></label>
-                    <input type="text" maxLength={15} value={formData.gstin} onChange={e => setFormData({...formData, gstin: e.target.value.toUpperCase()})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="27AAACR5055K1ZN" />
+                    <input type="text" maxLength={15} disabled={isFormReadOnly} value={formData.gstin} onChange={e => setFormData({...formData, gstin: e.target.value.toUpperCase()})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="27AAACR5055K1ZN" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">PAN <span className="text-slate-400 font-normal">(10-char)</span></label>
-                    <input type="text" maxLength={10} value={formData.pan} onChange={e => setFormData({...formData, pan: e.target.value.toUpperCase()})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="AAACR5055K" />
+                    <input type="text" maxLength={10} disabled={isFormReadOnly} value={formData.pan} onChange={e => setFormData({...formData, pan: e.target.value.toUpperCase()})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="AAACR5055K" />
                   </div>
                 </div>
 
@@ -294,6 +299,7 @@ const Customers = () => {
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Payment Terms (Default)</label>
                     <AutocompleteSelect
+                      disabled={isFormReadOnly}
                       options={['Advance', '30 days', '45 days', '60 days', 'LC', 'Against Delivery']}
                       value={formData.paymentTerms}
                       onChange={v => setFormData({...formData, paymentTerms: v})}
@@ -303,7 +309,7 @@ const Customers = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Credit Limit (INR)</label>
-                    <input type="number" value={formData.creditLimit} onChange={e => setFormData({...formData, creditLimit: Number(e.target.value)})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="0" />
+                    <input type="number" disabled={isFormReadOnly} value={formData.creditLimit} onChange={e => setFormData({...formData, creditLimit: Number(e.target.value)})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" placeholder="0" />
                   </div>
                 </div>
 
@@ -313,6 +319,7 @@ const Customers = () => {
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Tags <span className="text-slate-400 font-normal">(for CRM filtering)</span></label>
                     <AutocompleteSelect
+                      disabled={isFormReadOnly}
                       options={['Hot', 'Strategic', 'Government', 'Export', 'Key Account', 'New Lead']}
                       value={formData.tags?.[0] || ''}
                       onChange={v => {
@@ -327,7 +334,7 @@ const Customers = () => {
                         {formData.tags.map(tag => (
                           <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-50 text-brand-700 text-xs font-bold rounded-md border border-brand-200">
                             {tag}
-                            <button type="button" onClick={() => setFormData({...formData, tags: formData.tags.filter(t => t !== tag)})} className="text-brand-400 hover:text-red-500">&times;</button>
+                            {!isFormReadOnly && <button type="button" onClick={() => setFormData({...formData, tags: formData.tags.filter(t => t !== tag)})} className="text-brand-400 hover:text-red-500">&times;</button>}
                           </span>
                         ))}
                       </div>
@@ -335,12 +342,12 @@ const Customers = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Internal Notes</label>
-                    <textarea rows={3} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 resize-none" placeholder="Internal notes only..." />
+                    <textarea rows={3} disabled={isFormReadOnly} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 resize-none" placeholder="Internal notes only..." />
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 mt-4">
-                  <input type="checkbox" id="isActive" checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="rounded text-brand-600 focus:ring-brand-500 border-slate-300 w-4 h-4" />
+                  <input type="checkbox" id="isActive" disabled={isFormReadOnly} checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="rounded text-brand-600 focus:ring-brand-500 border-slate-300 w-4 h-4" />
                   <label htmlFor="isActive" className="text-sm font-medium text-slate-700">Account is Active</label>
                 </div>
               </form>
@@ -348,7 +355,7 @@ const Customers = () => {
             
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-between">
               <div>
-                {editingCustomer && (
+                {editingCustomer && ability.can('delete', 'Customers') && (
                   <button 
                     type="button" 
                     onClick={(e) => { handleDelete(e, editingCustomer); setShowModal(false); }} 
@@ -360,10 +367,12 @@ const Customers = () => {
               </div>
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
-                <button type="submit" form="customer-form" disabled={submitLoading} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed flex items-center">
-                  {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Save Customer
-                </button>
+                {!isFormReadOnly && (
+                  <button type="submit" form="customer-form" disabled={submitLoading} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed flex items-center">
+                    {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    Save Customer
+                  </button>
+                )}
               </div>
             </div>
           </div>

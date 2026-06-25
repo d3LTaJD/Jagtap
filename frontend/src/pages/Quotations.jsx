@@ -3,7 +3,7 @@ import { FileCheck, Filter, Plus, ChevronRight, CheckCircle2, Loader2, X, Trash2
 import api from '../api/client';
 import { useNavigate } from 'react-router-dom';
 import AutocompleteSelect from '../components/AutocompleteSelect';
-import { Can } from '../context/AbilityContext';
+import { Can, useAbility } from '../context/AbilityContext';
 
 const QuoteStatusBadge = ({ status }) => {
   const colors = {
@@ -34,6 +34,7 @@ const QuoteStatusBadge = ({ status }) => {
 };
 
 const Quotations = () => {
+  const ability = useAbility();
   const navigate = useNavigate();
   const [quotations, setQuotations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -317,7 +318,12 @@ const Quotations = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-brand-600">{qt.quotationId || 'QT-PENDING'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium">{qt.enquiry?.enquiryId || 'Unknown'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-semibold">{qt.customer?.companyName || 'Unknown'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-700">{formatCurrency(qt.commercialTotals?.grandTotal || 0)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-700">
+                        {ability.can('viewPricing', 'Quotation') 
+                          ? formatCurrency(qt.commercialTotals?.grandTotal || 0)
+                          : '—'
+                        }
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap"><QuoteStatusBadge status={qt.status} /></td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium">
                         {new Date(qt.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -325,6 +331,8 @@ const Quotations = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                         <Can I="edit" a="Quotation">
                           {qt.status === 'DRAFT' && <button onClick={(e) => handleUpdateStatus(e, qt._id, 'TECH_REVIEW')} className="text-brand-600 font-bold hover:underline">Submit Review</button>}
+                        </Can>
+                        <Can I="approve" a="Quotation">
                           {(qt.status === 'TECH_REVIEW' || qt.status === 'PENDING_APPROVAL') && <button onClick={(e) => handleUpdateStatus(e, qt._id, 'APPROVED')} className="text-emerald-600 font-bold hover:underline">Approve</button>}
                         </Can>
                         <button onClick={(e) => handleDownloadPdf(e, qt._id, qt.quotationId || 'QT')} className="text-slate-400 hover:text-blue-600 p-1 rounded transition-colors inline-block" title="Download PDF">

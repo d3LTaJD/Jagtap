@@ -259,6 +259,96 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
 }
 
 /**
+ * Helper to select the most relevant text chunks from a large specification file.
+ */
+function getRelevantContext(text, productDescription, relevantFields, maxChars = 35000) {
+  if (!text || text.length <= maxChars) return text;
+
+  console.log(`[AI Context Filter] Original text size: ${text.length} chars. Filtering down to ${maxChars} chars...`);
+
+  // Split into chunks of 3000 characters with 500 characters overlap
+  const chunkSize = 3000;
+  const overlap = 500;
+  const chunks = [];
+  
+  for (let i = 0; i < text.length; i += (chunkSize - overlap)) {
+    const chunk = text.substring(i, i + chunkSize);
+    chunks.push({
+      text: chunk,
+      index: i,
+      score: 0
+    });
+  }
+
+  // Pre-compile search terms from fields and product description
+  const searchTerms = new Set();
+  
+  // Add product description terms
+  if (productDescription) {
+    productDescription.toLowerCase().split(/\s+/).forEach(word => {
+      if (word.length > 2) searchTerms.add(word);
+    });
+  }
+
+  // Add field terms
+  for (const f of relevantFields) {
+    f.fieldLabel.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).forEach(word => {
+      if (word.length > 2) searchTerms.add(word);
+    });
+    f.fieldName.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).forEach(word => {
+      if (word.length > 2) searchTerms.add(word);
+    });
+    if (f.options && f.options.length) {
+      f.options.forEach(opt => {
+        String(opt).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).forEach(word => {
+          if (word.length > 2) searchTerms.add(word);
+        });
+      });
+    }
+  }
+
+  const termsArr = Array.from(searchTerms);
+
+  // Score each chunk
+  for (const chunk of chunks) {
+    const chunkLower = chunk.text.toLowerCase();
+    
+    // Product description matches are very important
+    if (productDescription && chunkLower.includes(productDescription.toLowerCase())) {
+      chunk.score += 200;
+    }
+
+    // Match keywords
+    for (const term of termsArr) {
+      if (chunkLower.includes(term)) {
+        chunk.score += 10;
+      }
+    }
+  }
+
+  // Sort by score descending, keep top chunks that fit within maxChars
+  const sortedChunks = [...chunks].sort((a, b) => b.score - a.score);
+  const selectedChunks = [];
+  let currentLength = 0;
+
+  for (const chunk of sortedChunks) {
+    if (currentLength + chunk.text.length > maxChars) {
+      if (selectedChunks.length > 0) break;
+    }
+    selectedChunks.push(chunk);
+    currentLength += chunk.text.length;
+  }
+
+  // Sort selected chunks back to original order to maintain document flow
+  selectedChunks.sort((a, b) => a.index - b.index);
+
+  const filteredText = selectedChunks.map(c => c.text).join('\n... [section skipped] ...\n');
+  console.log(`[AI Context Filter] Selected ${selectedChunks.length} chunks. Filtered text size: ${filteredText.length} chars. Total score: ${selectedChunks.reduce((sum, c) => sum + c.score, 0)}`);
+  
+  return filteredText;
+}
+
+/**
  * Dynamic Field Extractor from emails focusing on a target product description.
  */
 exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescription = '') => {
@@ -304,6 +394,9 @@ exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescri
     console.log(`[AI Dynamic Extraction] Filtered ${fieldDefinitions.length} fields → ${relevantFields.length} relevant fields for: "${productDescription}"`);
   }
 
+  // Filter text to fit within limits
+  const filteredContextText = getRelevantContext(emailText, productDescription, relevantFields);
+
   const fieldListStr = relevantFields.map(f => {
     return `- "${f.fieldName}" (type: ${f.fieldType}, label: "${f.fieldLabel}"): ${f.placeholder || ''} ${f.options && f.options.length ? '(Options: ' + JSON.stringify(f.options) + ')' : ''}`;
   }).join('\n');
@@ -320,7 +413,7 @@ Ignore specifications that belong to other product items mentioned in the text. 
   const prompt = `You are a data extraction bot.
 Read the email text below:
 """
-${emailText}
+${filteredContextText}
 """
 ${itemContextFocus}
 
@@ -373,27 +466,48 @@ Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanati
 
   // 2. Try Gemini
   if (process.env.GEMINI_API_KEY) {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" }
-      };
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          return normalizeExtractedFields(JSON.parse(rawText.trim()), fieldDefinitions);
+    const apiKey = process.env.GEMINI_API_KEY;
+    const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+    
+    for (const modelName of geminiModels) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.warn(`[AI Dynamic Extraction] Gemini model ${modelName} timed out (15s). Aborting...`);
+        controller.abort();
+      }, 15000);
+
+      try {
+        console.log(`[AI Dynamic Extraction] Trying Gemini model: ${modelName}...`);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+        const payload = {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        };
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const result = await res.json();
+          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+          console.log(`[AI Dynamic Extraction] Gemini (${modelName}) raw text:`, rawText);
+          if (rawText) {
+            const parsed = JSON.parse(rawText.trim());
+            console.log(`[AI Dynamic Extraction] Gemini (${modelName}) extracted ${Object.keys(parsed).length} field(s):`, JSON.stringify(parsed));
+            return normalizeExtractedFields(parsed, fieldDefinitions);
+          }
+        } else {
+          const errBody = await res.json().catch(() => ({}));
+          console.error(`[AI Dynamic Extraction] Gemini (${modelName}) API error ${res.status}:`, JSON.stringify(errBody));
         }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        console.error(`[AI Dynamic Extraction] Gemini (${modelName}) API failed:`, err.message);
       }
-    } catch (err) {
-      console.error('[AI Dynamic Extraction] Gemini API failed:', err.message);
     }
   }
 

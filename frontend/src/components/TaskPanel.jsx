@@ -20,7 +20,7 @@ const STATUS_COLORS = {
   'Cancelled': 'bg-red-100 text-red-700'
 };
 
-const TaskPanel = ({ enquiryId }) => {
+const TaskPanel = ({ enquiryId, readOnly = false }) => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -148,12 +148,14 @@ const TaskPanel = ({ enquiryId }) => {
           Related Tasks
           <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs">{tasks.length}</span>
         </h3>
+        {!readOnly && (
         <button
           onClick={() => { setShowForm(!showForm); if(editingId) cancelForm(); }}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm"
         >
           <Plus className="w-3.5 h-3.5" /> New Task
         </button>
+        )}
       </div>
 
       {showForm && (
@@ -239,6 +241,7 @@ const TaskPanel = ({ enquiryId }) => {
                   </div>
                 </div>
 
+                {!readOnly && (
                 <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-100">
                   {task.status !== 'Done' && (
                     <button onClick={() => markStatus(task._id, 'Done')} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors" title="Mark as Done">
@@ -252,6 +255,7 @@ const TaskPanel = ({ enquiryId }) => {
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+                )}
               </div>
             </div>
           ))}

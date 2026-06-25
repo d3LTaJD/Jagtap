@@ -11,6 +11,8 @@
 const cron = require('node-cron');
 const Enquiry = require('../models/Enquiry');
 const SystemSettings = require('../models/SystemSettings');
+const EmailMessage = require('../models/EmailMessage');
+const { checkEnquiryCompletion } = require('../controllers/enquiryController');
 const { createNotification, notifyRoles, sendEmail } = require('./notificationService');
 const { logActivity } = require('../utils/logger');
 
@@ -174,7 +176,7 @@ async function checkAutomatedReminders() {
     const enquiries = await Enquiry.find({
       status: { $nin: ['Won', 'Lost', 'Abandoned'] },
       assignedTo: { $ne: null }
-    }).populate('customer', 'companyName');
+    }).populate('customer', 'companyName emailAddress primaryContactName');
 
     let reminderCount = 0;
 
@@ -208,6 +210,45 @@ async function checkAutomatedReminders() {
           subject: `Automated Follow-up Reminder (D+${daysElapsed}): ${enq.enquiryId}`,
           text: `Hi,\n\nThis is an automated reminder that Enquiry ${enq.enquiryId} (${enq.customer?.companyName || 'Customer'}) is due for follow-up today (D+${daysElapsed} since last follow-up/creation).\n\nProduct: ${enq.productCategory}\nStatus: ${enq.status}\n\nPlease update the status or log a follow-up directly.\n\n— System Automation`
         });
+
+        // ─── Customer Follow-Up Reminder ───
+        // If the enquiry has missing specs, automatically email the customer/user in the same thread.
+        const completion = await checkEnquiryCompletion(enq);
+        if (!completion.isComplete && completion.missingFields.length > 0) {
+          const recipientEmail = enq.contactEmail || enq.customer?.emailAddress;
+          const contactName = enq.contactPerson || enq.customer?.primaryContactName || 'Customer';
+
+          if (recipientEmail) {
+            // Find latest email message in thread to keep thread grouped
+            const latestMsg = await EmailMessage.findOne({
+              $or: [
+                { threadId: enq.threadId },
+                { messageId: enq.originalMessageId }
+              ]
+            }).sort({ receivedAt: -1, processedAt: -1 });
+
+            // Prepare enquiriesData for sendAutomatedRepliesUnified
+            const enquiriesData = [{
+              enquiryId: enq.enquiryId,
+              productDescription: enq.productDescription,
+              productCategory: enq.productCategory,
+              quantity: enq.quantity,
+              unit: enq.unit,
+              status: enq.status,
+              missingFields: completion.missingFields,
+              dynamicFields: enq.dynamicFields || {},
+              products: enq.products || []
+            }];
+
+            const { sendAutomatedRepliesUnified } = require('./emailBotService');
+            try {
+              console.log(`[Scheduler] Triggering automated follow-up reminder email to customer ${recipientEmail} for Enquiry ${enq.enquiryId}`);
+              await sendAutomatedRepliesUnified(recipientEmail, contactName, enquiriesData, latestMsg, true);
+            } catch (emailErr) {
+              console.error(`[Scheduler] Failed to send automated customer follow-up email:`, emailErr.message);
+            }
+          }
+        }
 
         reminderCount++;
       }

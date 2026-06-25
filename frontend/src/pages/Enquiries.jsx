@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Filter, FileText, ChevronRight, Loader2, X, Trash2, RefreshCw, Pencil, XCircle, Download, CalendarDays } from 'lucide-react';
+import { Plus, Filter, FileText, ChevronRight, Loader2, X, Trash2, RefreshCw, Pencil, XCircle, Download, CalendarDays, Upload, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
@@ -64,6 +64,11 @@ const Enquiries = () => {
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
   const [aiSuggested, setAiSuggested] = useState(false);
 
+  // Tender Import states
+  const [importLoading, setImportLoading] = useState(false);
+  const [boqFile, setBoqFile] = useState(null);
+  const [specFile, setSpecFile] = useState(null);
+
   const [formData, setFormData] = useState({
     companyName: '', primaryContactName: '', mobileNumber: '', emailAddress: '',
     sourceChannel: 'Email', emailAccount: 'info@', indiaMartLeadId: '', exhibitionName: '', gemTenderNo: '',
@@ -75,7 +80,8 @@ const Enquiries = () => {
     standardCode: '', thirdPartyInspection: false, specialRequirements: '',
     leadGenuineness: 'Likely Genuine', detailsSharedByLead: false, indiaMartContactMethod: 'Call',
     internalNotes: '',
-    dynamicFields: {}
+    dynamicFields: {},
+    products: []
   });
   const [editingEnquiry, setEditingEnquiry] = useState(null); // null = create mode; enquiry object = edit mode
   const [showFilter, setShowFilter] = useState(false);
@@ -167,6 +173,54 @@ const Enquiries = () => {
     }
   };
 
+  const handleTenderImport = async () => {
+    if (!boqFile && !specFile) {
+      alert('Please select at least a BOQ file or a Spec PDF file to import.');
+      return;
+    }
+    setImportLoading(true);
+    try {
+      const formDataPayload = new FormData();
+      if (boqFile) formDataPayload.append('boqFile', boqFile);
+      if (specFile) formDataPayload.append('specFile', specFile);
+
+      const res = await api.post('/enquiries/import-tender', formDataPayload, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      if (res.data.status === 'success') {
+        const { products, specifications } = res.data.data;
+        
+        setFormData(prev => {
+          const updated = { ...prev };
+          updated.sourceType = 'Tender';
+          updated.sourceChannel = 'GEM Portal'; // default to GEM
+          
+          if (products && products.length > 0) {
+            updated.productDescription = products[0].description;
+            updated.quantity = products[0].quantity;
+            updated.unit = products[0].unit;
+            updated.productCategory = 'Piping'; // Default to Piping for valves
+            updated.products = products;
+          }
+          
+          if (specifications && Object.keys(specifications).length > 0) {
+            updated.dynamicFields = { ...prev.dynamicFields, ...specifications };
+          }
+          
+          return updated;
+        });
+
+        alert('✨ Tender files imported and parsed successfully! Products and specifications have been auto-filled.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || 'Failed to import tender files.');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitLoading(true);
@@ -197,11 +251,12 @@ const Enquiries = () => {
           budgetFrom: formData.budgetFrom,
           budgetTo: formData.budgetTo,
           estimatedValue: formData.estimatedValue,
-          standardCode: formData.standardCode,
+          standardCode: formData.standardCode || undefined,
           thirdPartyInspection: formData.thirdPartyInspection,
           specialRequirements: formData.specialRequirements,
           internalNotes: formData.internalNotes,
-          dynamicFields: dynamicObj
+          dynamicFields: dynamicObj,
+          products: formData.products || []
         });
       } else {
         // CREATE mode
@@ -236,12 +291,13 @@ const Enquiries = () => {
             budgetFrom: formData.budgetFrom,
             budgetTo: formData.budgetTo,
             estimatedValue: formData.estimatedValue,
-            standardCode: formData.standardCode,
+            standardCode: formData.standardCode || undefined,
             thirdPartyInspection: formData.thirdPartyInspection,
             specialRequirements: formData.specialRequirements,
             internalNotes: formData.internalNotes,
             priority: formData.priority,
-            dynamicFields: dynamicObj
+            dynamicFields: dynamicObj,
+            products: formData.products || []
           }
         };
         await api.post('/enquiries', payload);
@@ -250,6 +306,8 @@ const Enquiries = () => {
       setEditingEnquiry(null);
       setSelectedCustomerId('');
       setAiSuggested(false);
+      setBoqFile(null);
+      setSpecFile(null);
       fetchEnquiries();
       setFormData({
         companyName: '', primaryContactName: '', mobileNumber: '', emailAddress: '',
@@ -262,7 +320,8 @@ const Enquiries = () => {
         standardCode: '', thirdPartyInspection: false, specialRequirements: '',
         leadGenuineness: 'Likely Genuine', detailsSharedByLead: false, indiaMartContactMethod: 'Call',
         internalNotes: '',
-        dynamicFields: {}
+        dynamicFields: {},
+        products: []
       });
     } catch(err) {
       console.error(err);
@@ -315,6 +374,7 @@ const Enquiries = () => {
       indiaMartContactMethod: enq.indiaMartContactMethod || 'Call',
       internalNotes: enq.internalNotes || '',
       dynamicFields: enq.dynamicFields || {},
+      products: enq.products || []
     });
     setShowNewModal(true);
   };
@@ -368,12 +428,14 @@ const Enquiries = () => {
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-brand-500' : ''}`} />
           </button>
-          <button onClick={exportAllCSV}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all shadow-sm"
-            title="Export to CSV"
-          >
-            <Download className="w-4 h-4" /> Export
-          </button>
+          <Can I="export" a="Enquiry">
+            <button onClick={exportAllCSV}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all shadow-sm"
+              title="Export to CSV"
+            >
+              <Download className="w-4 h-4" /> Export
+            </button>
+          </Can>
           <button
             onClick={() => setShowFilter(f => !f)}
             className={`inline-flex items-center justify-center px-4 py-2 border rounded-xl text-sm font-medium transition-all shadow-sm ${
@@ -542,13 +604,87 @@ const Enquiries = () => {
               <h2 className="text-lg font-bold text-slate-900">
                 {editingEnquiry ? `Edit Enquiry — ${editingEnquiry.enquiryId}` : 'Create New Enquiry'}
               </h2>
-              <button onClick={() => { setShowNewModal(false); setEditingEnquiry(null); setSelectedCustomerId(''); setAiSuggested(false); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+              <button onClick={() => { setShowNewModal(false); setEditingEnquiry(null); setSelectedCustomerId(''); setAiSuggested(false); setBoqFile(null); setSpecFile(null); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-6">
               <form id="new-enquiry-form" onSubmit={handleSubmit} className="space-y-8">
+                
+                {!editingEnquiry && (
+                  <div className="p-5 bg-brand-50/40 border border-brand-100 rounded-2xl shadow-sm mb-6 animate-in slide-in-from-top-3 duration-300">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                      <div>
+                        <h4 className="text-sm font-black text-brand-900 flex items-center gap-1.5">
+                          <span>⚡</span> AI Tender & BOQ Importer
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5">Upload tender files to automatically extract and populate the enquiry.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTenderImport}
+                        disabled={importLoading || (!boqFile && !specFile)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-brand-500/20 hover:shadow-brand-500/30 transition-all cursor-pointer"
+                      >
+                        {importLoading ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Importing...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-3.5 h-3.5" />
+                            Run AI Import
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="p-4 bg-white border border-slate-200 hover:border-brand-200 rounded-xl transition-all relative flex flex-col justify-center items-center text-center group">
+                        <input
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          onChange={e => setBoqFile(e.target.files[0])}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                        {boqFile ? (
+                          <div className="flex items-center gap-2 text-emerald-600">
+                            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                            <span className="text-xs font-semibold truncate max-w-[200px]">{boqFile.name}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center">
+                            <span className="text-slate-400 font-medium text-xs mb-1 group-hover:text-brand-600 transition-colors">Select BOQ File (Excel/CSV)</span>
+                            <span className="text-[10px] text-slate-400">Drag & drop or browse</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-4 bg-white border border-slate-200 hover:border-brand-200 rounded-xl transition-all relative flex flex-col justify-center items-center text-center group">
+                        <input
+                          type="file"
+                          accept=".pdf"
+                          onChange={e => setSpecFile(e.target.files[0])}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                        {specFile ? (
+                          <div className="flex items-center gap-2 text-emerald-600">
+                            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                            <span className="text-xs font-semibold truncate max-w-[200px]">{specFile.name}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center">
+                            <span className="text-slate-400 font-medium text-xs mb-1 group-hover:text-brand-600 transition-colors">Select Specs PDF</span>
+                            <span className="text-[10px] text-slate-400">Drag & drop or browse</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 
                 {/* Customer Section */}
                 <section>
@@ -820,7 +956,7 @@ const Enquiries = () => {
                         ...formData.dynamicFields 
                       }}
                       onChange={handleDynamicChange}
-                      currentUserRole={JSON.parse(localStorage.getItem('user') || '{}').role}
+                      currentUserRole={JSON.parse(sessionStorage.getItem('user') || '{}').role}
                     />
                   </div>
                 </section>
@@ -828,7 +964,7 @@ const Enquiries = () => {
             </div>
             
             <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-              <button type="button" onClick={() => { setShowNewModal(false); setEditingEnquiry(null); setSelectedCustomerId(''); setAiSuggested(false); }} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
+              <button type="button" onClick={() => { setShowNewModal(false); setEditingEnquiry(null); setSelectedCustomerId(''); setAiSuggested(false); setBoqFile(null); setSpecFile(null); }} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
               <button type="submit" form="new-enquiry-form" disabled={submitLoading} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed flex items-center">
                 {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 Save Enquiry

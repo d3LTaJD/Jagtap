@@ -2,29 +2,44 @@ import React, { useState } from 'react';
 import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
-import { useAbility } from '../context/AbilityContext';
+import { useAbility, getRoleCode } from '../context/AbilityContext';
 
 const DashboardLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation();
+  const path = location.pathname;
   const ability = useAbility();
 
-  const token = localStorage.getItem('token');
+  const token = sessionStorage.getItem('token');
 
   React.useEffect(() => {
     const checkAuth = () => {
-      const currentToken = localStorage.getItem('token');
+      const currentToken = sessionStorage.getItem('token');
       if (!currentToken) {
         window.location.replace('/login');
       }
     };
 
     checkAuth();
-    window.addEventListener('pageshow', checkAuth);
+
+    const handlePageShow = (event) => {
+      const isBackForward = event.persisted || 
+        (window.performance && window.performance.getEntriesByType && 
+         window.performance.getEntriesByType('navigation')[0]?.type === 'back_forward') ||
+        (window.performance && window.performance.navigation && window.performance.navigation.type === 2);
+      
+      if (isBackForward) {
+        window.location.reload();
+      } else {
+        checkAuth();
+      }
+    };
+
+    window.addEventListener('pageshow', handlePageShow);
     window.addEventListener('storage', checkAuth);
 
     return () => {
-      window.removeEventListener('pageshow', checkAuth);
+      window.removeEventListener('pageshow', handlePageShow);
       window.removeEventListener('storage', checkAuth);
     };
   }, []);
@@ -33,20 +48,32 @@ const DashboardLayout = () => {
     return <Navigate to="/login" replace />;
   }
 
-  // Guard specific routes
-  const path = location.pathname.toLowerCase();
+  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const userRoleCode = getRoleCode(user.role);
+  const userSecRoleCode = getRoleCode(user.secondaryRole);
+  const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
 
-  const adminPaths = [
-    '/app/admin',
-    '/app/field-builder',
-    '/app/role-builder',
-    '/app/settings',
-    '/app/master-data',
-    '/app/audit-logs',
-    '/app/system-logs'
-  ];
+  const isSA = userRoles.includes('SA');
+  const isDIR = userRoles.includes('DIR');
+  const isTA = userRoles.includes('TA');
 
-  if (adminPaths.some(p => path.includes(p)) && !ability.can('view', 'Admin')) {
+  // Guard specific routes based on the SOW matrix
+  if (path.includes('/app/field-builder') && !ability.can('fieldBuilder', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+  if (path.includes('/app/role-builder') && !ability.can('roleManageWrite', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+  if (path.includes('/app/admin') && !ability.can('userManageRead', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+  if ((path.includes('/app/audit-logs') || path.includes('/app/system-logs')) && !ability.can('auditLogView', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+  if (path.includes('/app/settings') && !ability.can('settingsRead', 'Admin')) {
+    return <Navigate to="/app" replace />;
+  }
+  if (path.includes('/app/master-data') && !ability.can('masterDataWrite', 'Admin')) {
     return <Navigate to="/app" replace />;
   }
 

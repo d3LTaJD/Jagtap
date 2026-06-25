@@ -3,21 +3,55 @@ const Quotation = require('../models/Quotation');
 const Qap = require('../models/Qap');
 const FollowUp = require('../models/FollowUp');
 const Customer = require('../models/Customer');
+const { hasPermission } = require('../config/permissions');
 
 // All statuses that mean the enquiry is still alive / active
 const ACTIVE_STATUSES = ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Ready for Offer', 'Quoted', 'Negotiating', 'On Hold'];
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
+    const hasFullPipeline = hasPermission(req.user, 'Dashboard', 'viewFullPipeline');
+    const hasFinancials = hasPermission(req.user, 'Dashboard', 'viewFinancials');
+
+    // Build filters
+    const enquiryFilter = {};
+    const quotationFilter = {};
+    const qapFilter = {};
+    const activityFilter = {};
+
+    if (!hasFullPipeline) {
+      enquiryFilter.$or = [
+        { assignedTo: req.user._id },
+        { createdBy: req.user._id }
+      ];
+      quotationFilter.$or = [
+        { preparedBy: req.user._id },
+        { createdBy: req.user._id },
+        { assignedTo: req.user._id }
+      ];
+      qapFilter.$or = [
+        { preparedBy: req.user._id },
+        { assignedTo: req.user._id }
+      ];
+
+      const userEnquiries = await Enquiry.find(enquiryFilter).select('_id');
+      const eqIds = userEnquiries.map(e => e._id);
+      activityFilter.$or = [
+        { addedBy: req.user._id },
+        { enquiry: { $in: eqIds } }
+      ];
+    }
+
     // ── Core counts ─────────────────────────────────────────────
-    const totalEnquiries  = await Enquiry.countDocuments();
-    const activeEnquiries = await Enquiry.countDocuments({ status: { $in: ACTIVE_STATUSES } });
-    const wonEnquiries    = await Enquiry.countDocuments({ status: 'Won' });
-    const lostEnquiries   = await Enquiry.countDocuments({ status: 'Lost' });
+    const totalEnquiries  = await Enquiry.countDocuments(enquiryFilter);
+    const activeEnquiries = await Enquiry.countDocuments({ ...enquiryFilter, status: { $in: ACTIVE_STATUSES } });
+    const wonEnquiries    = await Enquiry.countDocuments({ ...enquiryFilter, status: 'Won' });
+    const lostEnquiries   = await Enquiry.countDocuments({ ...enquiryFilter, status: 'Lost' });
     const activeClients   = await Customer.countDocuments({ isActive: true });
 
     // Pipeline breakdown by status (for funnel chart)
     const statusGroups = await Enquiry.aggregate([
+      { $match: enquiryFilter },
       { $group: { _id: '$status', count: { $sum: 1 } } }
     ]);
     const byStatus = {};
@@ -25,7 +59,7 @@ exports.getDashboardStats = async (req, res, next) => {
 
     // Category breakdown (for doughnut chart)
     const categoryGroups = await Enquiry.aggregate([
-      { $match: { status: { $in: ACTIVE_STATUSES } } },
+      { $match: { ...enquiryFilter, status: { $in: ACTIVE_STATUSES } } },
       { $group: { _id: '$productCategory', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ]);
@@ -35,29 +69,36 @@ exports.getDashboardStats = async (req, res, next) => {
     }));
 
     // ── Quotation & QAP counts ────────────────────────────────────
-    const sentStatusList = ['Sent to Customer', 'Under Negotiation', 'Accepted', 'Rejected', 'Draft'];
-    const wonQuotations     = await Quotation.countDocuments({ status: 'Accepted' });
-    const pendingQuotations = await Quotation.countDocuments({ status: { $in: ['Draft', 'Pending Technical Review', 'Pending Commercial Review', 'Pending Approval', 'PENDING_APPROVAL', 'TECH_REVIEW', 'Sent to Customer'] } });
-    const pendingQaps       = await Qap.countDocuments({ status: { $in: ['Pending Director Approval', 'UNDER_REVIEW'] } });
+    const wonQuotations     = await Quotation.countDocuments({ ...quotationFilter, status: 'Accepted' });
+    const pendingQuotations = await Quotation.countDocuments({ ...quotationFilter, status: { $in: ['Draft', 'Pending Technical Review', 'Pending Commercial Review', 'Pending Approval', 'PENDING_APPROVAL', 'TECH_REVIEW', 'Sent to Customer'] } });
+    const pendingQaps       = await Qap.countDocuments({ ...qapFilter, status: { $in: ['Pending Director Approval', 'UNDER_REVIEW'] } });
 
     // ── Pipeline value ────────────────────────────────────────────
-    const pipelineData = await Quotation.aggregate([
-      { $match: { status: { $in: ['Pending Technical Review', 'Pending Commercial Review', 'Pending Approval', 'Accepted', 'Sent to Customer'] } } },
-      { $group: { _id: null, totalValue: { $sum: '$commercialTotals.grandTotal' } } }
-    ]);
-    const pipelineValue = pipelineData.length > 0 ? pipelineData[0].totalValue : 0;
+    let pipelineValue = 0;
+    if (hasFinancials) {
+      const pipelineData = await Quotation.aggregate([
+        { $match: { ...quotationFilter, status: { $in: ['Pending Technical Review', 'Pending Commercial Review', 'Pending Approval', 'Accepted', 'Sent to Customer'] } } },
+        { $group: { _id: null, totalValue: { $sum: '$commercialTotals.grandTotal' } } }
+      ]);
+      pipelineValue = pipelineData.length > 0 ? pipelineData[0].totalValue : 0;
+    }
 
     // Won value this month
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    let wonValue = 0;
+    let wonCount = 0;
+
     const wonValueData = await Enquiry.aggregate([
-      { $match: { status: 'Won', updatedAt: { $gte: startOfMonth } } },
+      { $match: { ...enquiryFilter, status: 'Won', updatedAt: { $gte: startOfMonth } } },
       { $group: { _id: null, total: { $sum: '$winPoValue' }, count: { $sum: 1 } } }
     ]);
-    const wonValue = wonValueData[0]?.total || 0;
-    const wonCount = wonValueData[0]?.count || 0;
+    if (hasFinancials) {
+      wonValue = wonValueData[0]?.total || 0;
+    }
+    wonCount = wonValueData[0]?.count || 0;
 
     const lostValueData = await Enquiry.aggregate([
-      { $match: { status: 'Lost', updatedAt: { $gte: startOfMonth } } },
+      { $match: { ...enquiryFilter, status: 'Lost', updatedAt: { $gte: startOfMonth } } },
       { $group: { _id: null, count: { $sum: 1 } } }
     ]);
     const lostCount = lostValueData[0]?.count || 0;
@@ -71,7 +112,7 @@ exports.getDashboardStats = async (req, res, next) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
     const timeSeriesAggregation = await Enquiry.aggregate([
-      { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+      { $match: { ...enquiryFilter, createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
           _id: {
@@ -90,20 +131,18 @@ exports.getDashboardStats = async (req, res, next) => {
     }));
 
     // ── Recent Activity ────────────────────────────────────────────
-    const recentActivity = await FollowUp.find()
+    const recentActivity = await FollowUp.find(activityFilter)
       .populate('enquiry', 'enquiryId')
       .populate('addedBy', 'name')
       .sort('-createdAt')
       .limit(5);
 
     // ── My Tasks (role-aware) ──────────────────────────────────────
-    // Enquiries assigned to me needing action (New, Confirmed, or Contacted)
     const myEnquiries = await Enquiry.find({
       assignedTo: req.user._id,
       status: { $in: ['New', 'Confirmed', 'Contacted'] }
     }).populate('customer', 'companyName').limit(5).select('enquiryId productCategory status customer');
 
-    // Overdue or due today follow-ups on enquiries assigned to me
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
@@ -116,7 +155,7 @@ exports.getDashboardStats = async (req, res, next) => {
     .sort({ nextFollowUpDate: 1, priority: -1 });
 
     const myDueFollowUps = myDueEnquiries.map(enq => ({
-      _id: enq._id, // use the enquiry ID so we can reference it easily
+      _id: enq._id,
       enquiry: {
         _id: enq._id,
         enquiryId: enq.enquiryId,
@@ -133,16 +172,25 @@ exports.getDashboardStats = async (req, res, next) => {
 
     // Approvals (role-specific)
     let myApprovals = [];
-    if (['DIR', 'DIRECTOR', 'SA', 'SUPER_ADMIN'].includes(req.user.role)) {
+    const { getRoleCode } = require('../middleware/auth');
+    const userRoleCode = getRoleCode(req.user.role);
+    const userSecRoleCode = getRoleCode(req.user.secondaryRole);
+    const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+
+    const canApproveQuotation = hasPermission(req.user, 'Quotation', 'approve');
+    const canApproveQap = hasPermission(req.user, 'QAP', 'finalSignOff');
+    const canTechReview = userRoles.includes('DE') || userRoles.includes('TA');
+
+    if (canApproveQuotation || canApproveQap) {
       const qQuotes = await Quotation.find({ status: { $in: ['Pending Approval', 'PENDING_APPROVAL'] } }).populate('customer', 'companyName').limit(3);
-      const qQaps   = await Qap.find({ status: { $in: ['Pending Director Approval', 'UNDER_REVIEW'] } }).populate('customer', 'companyName').limit(3);
+      const qQaps = await Qap.find({ status: { $in: ['Pending Director Approval', 'UNDER_REVIEW'] } }).populate('customer', 'companyName').limit(3);
       myApprovals = [
         ...qQuotes.map(q => ({ type: 'Quote', id: q.quotationId, _id: q._id })),
-        ...qQaps.map(q  => ({ type: 'QAP',   id: q.qapId,       _id: q._id }))
+        ...qQaps.map(q => ({ type: 'QAP', id: q.qapId, _id: q._id }))
       ];
-    } else if (['DESIGN', 'DESIGN_ENGINEER', 'DE'].includes(req.user.role)) {
+    } else if (canTechReview) {
       const dQuotes = await Quotation.find({ status: { $in: ['Pending Technical Review', 'TECH_REVIEW'] } }).limit(5);
-      myApprovals   = dQuotes.map(q => ({ type: 'Quote (Tech)', id: q.quotationId, _id: q._id }));
+      myApprovals = dQuotes.map(q => ({ type: 'Quote (Tech)', id: q.quotationId, _id: q._id }));
     }
 
     res.status(200).json({
@@ -155,10 +203,10 @@ exports.getDashboardStats = async (req, res, next) => {
           wonQuotations,
           pendingQuotations,
           pendingQaps,
-          pipelineValue,
+          pipelineValue: hasFinancials ? pipelineValue : null,
           wonCount,
           lostCount,
-          wonValue,
+          wonValue: hasFinancials ? wonValue : null,
           conversionRate,
           byStatus,
           byCategory,

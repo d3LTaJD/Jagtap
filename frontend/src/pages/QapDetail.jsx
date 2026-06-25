@@ -6,6 +6,7 @@ import {
   Printer, Send, X, AlertTriangle, Stamp
 } from 'lucide-react';
 import api from '../api/client';
+import { getRoleCode, useAbility } from '../context/AbilityContext';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 
@@ -26,12 +27,13 @@ const StatusBadge = ({ status }) => {
 const QapDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const ability = useAbility();
   const [qap, setQap] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updateLoading, setUpdateLoading] = useState(false);
   
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
   const [dynamicValues, setDynamicValues] = useState({});
   const [toast, setToast] = useState(null);
 
@@ -115,9 +117,11 @@ const QapDetail = () => {
 
   if (!qap) return <div className="p-8 text-center text-slate-500 font-medium">QAP not found.</div>;
 
-  const isDirector = ['DIRECTOR', 'SUPER_ADMIN', 'SA', 'DIR'].includes(currentUser.role);
-  const isQCS = ['QCS', 'QC_SUPERVISOR'].includes(currentUser.role);  // Approve QAP checklist items
-  const canApproveChecklist = isDirector || isQCS;
+  const userRoleCode = getRoleCode(currentUser.role);
+  const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
+  const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+  const canFinalSignOff = ability.can('finalSignOff', 'QAP');
+  const canApproveChecklist = ability.can('approveChecklist', 'QAP');
   
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -145,7 +149,7 @@ const QapDetail = () => {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-visible">
              <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-xs font-bold text-slate-500">Assign</div>
              <AutocompleteSelect
-               disabled={!isDirector}
+               disabled={!canFinalSignOff}
                options={[
                  { value: '', label: 'Unassigned' },
                  ...users.map(u => ({
@@ -165,10 +169,11 @@ const QapDetail = () => {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-visible">
              <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-xs font-bold text-slate-500">Status</div>
              <AutocompleteSelect
+               disabled={!ability.can('editActivities', 'QAP')}
                options={[
                  { value: 'GENERATED', label: 'GENERATED' },
                  { value: 'UNDER_REVIEW', label: 'UNDER REVIEW' },
-                 ...(isDirector ? [
+                 ...(canFinalSignOff ? [
                    { value: 'APPROVED', label: 'APPROVED' },
                    { value: 'REJECTED', label: 'REJECTED' },
                  ] : []),
@@ -182,24 +187,28 @@ const QapDetail = () => {
           </div>
 
           {/* Final Approve & Sign — Director only */}
-          {isDirector && qap.status === 'UNDER_REVIEW' && (
+          {canFinalSignOff && qap.status === 'UNDER_REVIEW' && (
             <button onClick={handleFinalApprove}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all">
               <Stamp className="w-4 h-4" /> Final Approve & Sign
             </button>
           )}
 
-          <button onClick={handleSendToClient}
-            disabled={qap.status !== 'APPROVED'}
-            title={qap.status !== 'APPROVED' ? 'QAP must be approved before sending' : ''}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-all">
-            <Send className="w-4 h-4" /> Send to Client
-          </button>
+          {ability.can('sendToClient', 'QAP') && (
+            <button onClick={handleSendToClient}
+              disabled={qap.status !== 'APPROVED'}
+              title={qap.status !== 'APPROVED' ? 'QAP must be approved before sending' : ''}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-all">
+              <Send className="w-4 h-4" /> Send to Client
+            </button>
+          )}
 
-          <button onClick={handlePrint}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all">
-            <Printer className="w-4 h-4" /> Print PDF
-          </button>
+          {ability.can('downloadPdf', 'QAP') && (
+            <button onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all">
+              <Printer className="w-4 h-4" /> Print PDF
+            </button>
+          )}
         </div>
       </div>
 
@@ -272,7 +281,7 @@ const QapDetail = () => {
               <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <ClipboardCheck className="w-5 h-5 text-brand-600" /> Custom QC Fields
               </h2>
-              <button onClick={saveDynamicFields} disabled={updateLoading} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition-all">
+              <button onClick={saveDynamicFields} disabled={updateLoading || !ability.can('editActivities', 'QAP')} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition-all">
                 {updateLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                 Save Fields
               </button>
@@ -281,7 +290,7 @@ const QapDetail = () => {
               formContext="QAP"
               values={dynamicValues}
               onChange={handleDynamicFieldChange}
-              readOnly={false}
+              readOnly={!ability.can('editActivities', 'QAP')}
               currentUserRole={currentUser.role}
             />
           </div>

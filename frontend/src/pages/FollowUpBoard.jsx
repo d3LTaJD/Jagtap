@@ -5,6 +5,7 @@ import {
   Trash2, Pencil, CheckCircle2, X, UserCheck, Search, RefreshCw, Clock
 } from 'lucide-react';
 import api from '../api/client';
+import { getRoleCode, useAbility } from '../context/AbilityContext';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 
 const FOLLOW_UP_TYPES = [
@@ -57,8 +58,17 @@ const FollowUpBoard = () => {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const isHighAuth = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(currentUser.role);
+  const ability = useAbility();
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const userRoleCode = getRoleCode(currentUser.role);
+  const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
+  const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+  const isHighAuth = ability.can('overrideReminder', 'FollowUp');
+  const isReadOnly = !ability.can('create', 'FollowUp') && !ability.can('edit', 'FollowUp');
+
+  const canEditSelectedCard = selectedFollowUp 
+    ? (ability.can('edit', 'FollowUp') && (isHighAuth || selectedFollowUp.addedBy?._id === currentUser.id || selectedFollowUp.addedBy?._id === currentUser._id || selectedFollowUp.addedBy === currentUser.id || selectedFollowUp.addedBy === currentUser._id))
+    : false;
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -211,23 +221,18 @@ const FollowUpBoard = () => {
   const renderCard = (fu) => {
     const TypeObj = FOLLOW_UP_TYPES.find(t => t.value === fu.type) || FOLLOW_UP_TYPES[5];
     const isOverdue = fu.nextFollowUpDate && new Date(fu.nextFollowUpDate) < new Date() && !fu.outcome && !isToday(fu.nextFollowUpDate);
-    const isOwn = fu.addedBy?._id === currentUser.id || fu.addedBy?._id === currentUser._id;
-    const canManage = isOwn || isHighAuth;
-
     return (
       <div
         key={fu._id}
         onClick={() => {
-          if (canManage) {
-            setSelectedFollowUp(fu);
-            setActionData({
-              type: fu.type || 'CALL',
-              notes: fu.notes || '',
-              outcome: fu.outcome || '',
-              nextFollowUpDate: fu.nextFollowUpDate ? fu.nextFollowUpDate.slice(0, 16) : ''
-            });
-            setShowActionModal(true);
-          }
+          setSelectedFollowUp(fu);
+          setActionData({
+            type: fu.type || 'CALL',
+            notes: fu.notes || '',
+            outcome: fu.outcome || '',
+            nextFollowUpDate: fu.nextFollowUpDate ? fu.nextFollowUpDate.slice(0, 16) : ''
+          });
+          setShowActionModal(true);
         }}
         className={`group p-4 bg-white/70 backdrop-blur-md rounded-2xl border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all cursor-pointer relative overflow-hidden`}
       >
@@ -303,13 +308,15 @@ const FollowUpBoard = () => {
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <button
-            onClick={() => setShowNewModal(true)}
-            className="inline-flex items-center justify-center px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-medium shadow-sm shadow-brand-500/30 transition-all"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Schedule Follow-Up
-          </button>
+          {ability.can('create', 'FollowUp') && (
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="inline-flex items-center justify-center px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-medium shadow-sm shadow-brand-500/30 transition-all"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Schedule Follow-Up
+            </button>
+          )}
         </div>
       </div>
 
@@ -576,12 +583,13 @@ const FollowUpBoard = () => {
                       <button
                         key={t.value}
                         type="button"
+                        disabled={!canEditSelectedCard}
                         onClick={() => setActionData(a => ({ ...a, type: t.value }))}
                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
                           actionData.type === t.value
                             ? TYPE_COLORS[t.value] + ' border-current'
                             : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'
-                        }`}
+                        } ${!canEditSelectedCard ? 'opacity-70 cursor-not-allowed' : ''}`}
                       >
                         <t.icon className="w-3 h-3" />
                         {t.label}
@@ -597,8 +605,9 @@ const FollowUpBoard = () => {
                     required
                     rows={2}
                     value={actionData.notes}
+                    disabled={!canEditSelectedCard}
                     onChange={e => setActionData(a => ({ ...a, notes: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none resize-none"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none resize-none disabled:opacity-75"
                     placeholder="State the objective of this reminder..."
                   />
                 </div>
@@ -609,8 +618,9 @@ const FollowUpBoard = () => {
                   <input
                     type="text"
                     value={actionData.outcome}
+                    disabled={!canEditSelectedCard}
                     onChange={e => setActionData({ ...actionData, outcome: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none disabled:opacity-75"
                     placeholder="e.g. Call completed, customer requested call back next week"
                   />
                   <span className="text-[10px] text-slate-400 font-medium mt-1 block">Adding an outcome will mark this reminder card as COMPLETED.</span>
@@ -622,27 +632,36 @@ const FollowUpBoard = () => {
                   <input
                     type="datetime-local"
                     value={actionData.nextFollowUpDate}
+                    disabled={!canEditSelectedCard}
                     onChange={e => setActionData({ ...actionData, nextFollowUpDate: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500/10 focus:border-brand-500 outline-none disabled:opacity-75"
                   />
                 </div>
               </div>
 
               <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => handleDelete(selectedFollowUp._id)}
-                  className="px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors inline-flex items-center gap-1"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete
-                </button>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => { setShowActionModal(false); setSelectedFollowUp(null); }} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 flex items-center">
-                    {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                    Save Update
+                {canEditSelectedCard ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(selectedFollowUp._id)}
+                    className="px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors inline-flex items-center gap-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete
                   </button>
+                ) : (
+                  <div />
+                )}
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => { setShowActionModal(false); setSelectedFollowUp(null); }} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">
+                    {canEditSelectedCard ? 'Cancel' : 'Close'}
+                  </button>
+                  {canEditSelectedCard && (
+                    <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 flex items-center">
+                      {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                      Save Update
+                    </button>
+                  )}
                 </div>
               </div>
             </form>

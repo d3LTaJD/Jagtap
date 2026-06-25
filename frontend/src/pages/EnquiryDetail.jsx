@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { getRoleCode, useAbility } from '../context/AbilityContext';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 import FollowUpPanel from '../components/FollowUpPanel';
@@ -89,10 +90,19 @@ const EnquiryDetail = () => {
   const [emailsLoading, setEmailsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('emails');
 
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const isHighAuth  = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(currentUser.role);
-  const isSales     = ['SALES'].includes(currentUser.role);
-  const canEdit     = isHighAuth || isSales || enquiry?.assignedTo?._id === currentUser.id;
+  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const userRoleCode = getRoleCode(currentUser.role);
+  const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
+  const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+  
+  const ability = useAbility();
+  const canEdit = ability.can('edit', 'Enquiry');
+  const canDelete = ability.can('delete', 'Enquiry');
+  const canAssign = ability.can('assign', 'Enquiry');
+  const canSetPriority = ability.can('setPriority', 'Enquiry');
+  const canMarkStatus = ability.can('markStatus', 'Enquiry');
+  const canExport = ability.can('export', 'Enquiry');
+  const isReadOnly = !canEdit;
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -358,14 +368,16 @@ const EnquiryDetail = () => {
             <p className="text-xs text-rose-600 mt-1">
               This enquiry was automatically extracted by AI with low confidence (Confidence: {enquiry.extractionConfidence ? `${enquiry.extractionConfidence}%` : 'Low'}). Please verify specifications, edit any incorrect fields, and click "Verify & Approve" to validate this enquiry.
             </p>
-            <div className="mt-3">
-              <button
-                onClick={() => setShowVerifyModal(true)}
-                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm shadow-rose-500/20"
-              >
-                Verify & Approve
-              </button>
-            </div>
+            {canEdit && (
+              <div className="mt-3">
+                <button
+                  onClick={() => setShowVerifyModal(true)}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm shadow-rose-500/20"
+                >
+                  Verify & Approve
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -389,11 +401,11 @@ const EnquiryDetail = () => {
             {/* Status Badge + Dropdown */}
             <div className="relative" ref={statusRef}>
               <button
-                onClick={() => canEdit && setShowStatusMenu(!showStatusMenu)}
-                className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border ${statusCfg.color} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                onClick={() => canMarkStatus && setShowStatusMenu(!showStatusMenu)}
+                className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border ${statusCfg.color} ${canMarkStatus ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
               >
                 {statusCfg.label}
-                {canEdit && <ChevronDown className="w-3 h-3" />}
+                {canMarkStatus && <ChevronDown className="w-3 h-3" />}
               </button>
               {showStatusMenu && (
                 <div className="absolute top-full mt-1 left-0 z-20 bg-white rounded-xl shadow-xl border border-slate-200 w-44 py-1 animate-in slide-in-from-top-1">
@@ -421,12 +433,12 @@ const EnquiryDetail = () => {
             {/* Priority Badge + Dropdown */}
             <div className="relative" ref={priorityRef}>
               <button
-                onClick={() => canEdit && setShowPriorityMenu(!showPriorityMenu)}
-                className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border ${priorityCfg.color} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                onClick={() => canSetPriority && setShowPriorityMenu(!showPriorityMenu)}
+                className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border ${priorityCfg.color} ${canSetPriority ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${priorityCfg.dot}`} />
                 {enquiry.priority || 'Medium'}
-                {canEdit && <ChevronDown className="w-3 h-3" />}
+                {canSetPriority && <ChevronDown className="w-3 h-3" />}
               </button>
               {showPriorityMenu && (
                 <div className="absolute top-full mt-1 left-0 z-20 bg-white rounded-xl shadow-xl border border-slate-200 w-36 py-1 animate-in slide-in-from-top-1">
@@ -466,7 +478,7 @@ const EnquiryDetail = () => {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center overflow-visible">
               <div className="px-3 py-1.5 bg-slate-50 border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-wider">Assign</div>
               <AutocompleteSelect
-                disabled={!isHighAuth}
+                disabled={!canAssign}
                 options={[
                   { value: '', label: 'Unassigned' },
                   ...users.map(u => ({
@@ -483,6 +495,7 @@ const EnquiryDetail = () => {
               />
             </div>
 
+            {ability.can('create', 'Quotation') && (
             <button
               onClick={() => navigate(`/app/quotations?createForEnquiry=${enquiry._id}`)}
               disabled={!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)}
@@ -495,6 +508,7 @@ const EnquiryDetail = () => {
             >
               <FileCheck className="w-3.5 h-3.5" /> Create Quotation
             </button>
+            )}
           </div>
 
           {/* Group 2: Management Operations */}
@@ -505,11 +519,13 @@ const EnquiryDetail = () => {
               </button>
             )}
 
-            <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold transition-all">
-              <Download className="w-3.5 h-3.5" /> Export
-            </button>
+            {canExport && (
+              <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold transition-all">
+                <Download className="w-3.5 h-3.5" /> Export
+              </button>
+            )}
 
-            {isHighAuth && (
+            {canDelete && (
               <button onClick={handleDelete} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold transition-all">
                 <Trash2 className="w-3.5 h-3.5" /> Archive
               </button>
@@ -659,17 +675,19 @@ const EnquiryDetail = () => {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold tracking-tight">Custom Fields</h2>
-              <button onClick={saveDynamicFields} disabled={saving}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-60">
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                Save Fields
-              </button>
+              {canEdit && (
+                <button onClick={saveDynamicFields} disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-60">
+                  {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                  Save Fields
+                </button>
+              )}
             </div>
             <DynamicFormRenderer
               formContext="Enquiry"
               values={{ productCategory: enquiry.productCategory, sourceChannel: enquiry.sourceChannel, standardCode: enquiry.standardCode, ...dynamicValues }}
               onChange={(fieldName, value) => setDynamicValues(prev => ({ ...prev, [fieldName]: value }))}
-              readOnly={false}
+              readOnly={!canEdit}
               currentUserRole={currentUser.role}
             />
           </div>
@@ -901,11 +919,11 @@ const EnquiryDetail = () => {
         {/* Right — Sidebar Panels */}
         <div className="space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <TaskPanel enquiryId={id} />
+            <TaskPanel enquiryId={id} readOnly={isReadOnly} />
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <FollowUpPanel enquiryId={id} currentUserRole={currentUser.role} />
+            <FollowUpPanel enquiryId={id} currentUserRole={currentUser.role} readOnly={isReadOnly} />
           </div>
         </div>
       </div>

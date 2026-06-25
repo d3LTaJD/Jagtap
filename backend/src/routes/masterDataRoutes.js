@@ -1,5 +1,5 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, requirePermission } = require('../middleware/auth');
 const {
   getAllMasterData, getMasterData, getMasterDataBySlug,
   createMasterData, updateMasterData,
@@ -14,11 +14,11 @@ router.get('/', getAllMasterData);
 router.get('/slug/:slug', getMasterDataBySlug);
 router.get('/:id', getMasterData);
 
-// Write — admin only
-router.post('/', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), createMasterData);
-router.patch('/:id', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), updateMasterData);
-router.post('/:id/link-field', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), linkField);
-router.delete('/:id/link-field/:fieldId', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), unlinkField);
-router.delete('/:id', authorize('SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'), deleteMasterData);
+// Write — SOW: SA, DIR, TA have full master data access
+router.post('/', requirePermission('Admin', 'masterDataWrite'), createMasterData);
+router.patch('/:id', requirePermission('Admin', 'masterDataWrite'), updateMasterData);
+router.post('/:id/link-field', requirePermission('Admin', 'masterDataWrite'), linkField);
+router.delete('/:id/link-field/:fieldId', requirePermission('Admin', 'masterDataWrite'), unlinkField);
+router.delete('/:id', requirePermission('Admin', 'masterDataWrite'), deleteMasterData);
 
 module.exports = router;

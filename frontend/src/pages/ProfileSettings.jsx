@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Mail, Phone, Lock, Shield, LogOut, Save, Loader2, Eye, EyeOff, CheckCircle2, ArrowLeft } from 'lucide-react';
 import api from '../api/client';
+import { getRoleDisplayName } from '../context/AbilityContext';
 
 const ProfileSettings = () => {
   const navigate = useNavigate();
@@ -18,7 +19,7 @@ const ProfileSettings = () => {
   const [pwData, setPwData] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
 
   useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem('user') || '{}');
+    const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
     setUser(stored);
     setFormData({
       fullName: stored.fullName || '',
@@ -38,7 +39,7 @@ const ProfileSettings = () => {
         mobile: formData.mobile,
       });
       const updatedUser = { ...user, fullName: formData.fullName, mobile: formData.mobile };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      sessionStorage.setItem('user', JSON.stringify(updatedUser));
       setUser(updatedUser);
       setSuccessMsg('Profile updated successfully!');
       setTimeout(() => setSuccessMsg(''), 3000);
@@ -77,8 +78,8 @@ const ProfileSettings = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
     window.location.replace('/login');
   };
 
@@ -88,13 +89,19 @@ const ProfileSettings = () => {
   };
 
   const getRoleBadge = (role) => {
-    const map = {
-      'SUPER_ADMIN': { label: 'Super Admin', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
-      'DIRECTOR': { label: 'Director', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
-      'DESIGN': { label: 'Design Engineer', cls: 'bg-brand-100 text-brand-700 border-brand-200' },
-      'SALES': { label: 'Sales', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    const label = getRoleDisplayName(role);
+    const colorMap = {
+      'Administrator': 'bg-purple-100 text-purple-700 border-purple-200',
+      'Director': 'bg-blue-100 text-blue-700 border-blue-200',
+      'Design Engineer': 'bg-brand-100 text-brand-700 border-brand-200',
+      'Sales Executive': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      'Technical Authority': 'bg-amber-100 text-amber-700 border-amber-200',
+      'QC Engineer': 'bg-teal-100 text-teal-700 border-teal-200',
+      'QC Supervisor': 'bg-cyan-100 text-cyan-700 border-cyan-200',
+      'Accounts': 'bg-orange-100 text-orange-700 border-orange-200',
+      'Management': 'bg-indigo-100 text-indigo-700 border-indigo-200',
     };
-    return map[role] || { label: role || 'User', cls: 'bg-slate-100 text-slate-700 border-slate-200' };
+    return { label, cls: colorMap[label] || 'bg-slate-100 text-slate-700 border-slate-200' };
   };
 
   if (loading) return (

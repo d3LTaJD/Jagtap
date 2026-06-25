@@ -111,7 +111,7 @@ const Qaps = () => {
               <input type="text" placeholder="Search QAPs..." className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm w-full shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all" />
             </div>
           </div>
-          <Can I="create" a="QAP">
+          <Can I="generateDraft" a="QAP">
             <button onClick={() => setShowNewModal(true)} className="inline-flex items-center justify-center px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-medium shadow-sm shadow-brand-500/30 transition-all">
               <Plus className="w-4 h-4 mr-2" />
               Generate QAP
@@ -157,7 +157,7 @@ const Qaps = () => {
                         {new Date(qap.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Can I="edit" a="QAP">
+                        <Can I="digitalSignature" a="QAP">
                           {qap.status === 'Pending Director Approval' && (
                             <button onClick={() => { setSelectedQapId(qap._id); setShowSignatureModal(true); }} className="inline-flex items-center px-3 py-1.5 bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg transition-colors border border-brand-200 shadow-sm">
                               <PenTool className="w-3.5 h-3.5 mr-1.5" />

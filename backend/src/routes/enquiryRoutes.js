@@ -8,8 +8,10 @@ const {
   deleteEnquiry,
   verifyAndApproveEnquiry,
   getEnquiryThreadEmails,
-  suggestEnquiryFields
+  suggestEnquiryFields,
+  importTender
 } = require('../controllers/enquiryController');
+const { upload } = require('../controllers/uploadController');
 const followUpRouter = require('./followUpRoutes');
 
 const router = express.Router();
@@ -18,6 +20,16 @@ const router = express.Router();
 router.use(protect);
 
 router.post('/suggest-fields', requirePermission('Enquiry', 'create'), suggestEnquiryFields);
+router.post(
+  '/import-tender',
+  requirePermission('Enquiry', 'create'),
+  upload.fields([
+    { name: 'boqFile', maxCount: 1 },
+    { name: 'specFile', maxCount: 1 }
+  ]),
+  importTender
+);
+
 
 // Mount nested routers
 router.use('/:enquiryId/followups', followUpRouter);

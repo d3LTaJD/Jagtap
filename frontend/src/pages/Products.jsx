@@ -20,6 +20,8 @@ const Products = () => {
     name: '', code: '', category: '', type: '', description: '', unit: 'NOS', basePrice: 0, status: 'Active', dynamicFields: {}
   });
 
+  const isFormReadOnly = editingProduct ? !ability.can('edit', 'Products') : !ability.can('create', 'Products');
+
   const fetchProducts = async () => {
     try {
       const res = await api.get(`/products?search=${searchTerm}`);
@@ -159,9 +161,9 @@ const Products = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right space-x-2">
-                      {ability.can('edit', 'Products') && (
-                        <button onClick={() => openModal(p)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors inline-flex"><Edit3 className="w-4 h-4" /></button>
-                      )}
+                      <button onClick={() => openModal(p)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors inline-flex">
+                        {ability.can('edit', 'Products') ? <Edit3 className="w-4 h-4" /> : <Search className="w-4 h-4 text-slate-500" />}
+                      </button>
                       {ability.can('delete', 'Products') && (
                         <button onClick={() => handleDelete(p._id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors inline-flex"><Trash2 className="w-4 h-4" /></button>
                       )}
@@ -181,7 +183,7 @@ const Products = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl shrink-0">
-              <h2 className="text-lg font-black text-slate-900">{editingProduct ? 'Edit Product' : 'Add New Product'}</h2>
+              <h2 className="text-lg font-black text-slate-900">{editingProduct ? (ability.can('edit', 'Products') ? 'Edit Product' : 'View Product') : 'Add New Product'}</h2>
               <button onClick={() => setShowModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
             </div>
             
@@ -191,16 +193,17 @@ const Products = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Product Name *</label>
-                  <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" />
+                  <input type="text" required disabled={isFormReadOnly} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" />
                 </div>
                 
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">SKU / Code</label>
-                  <input type="text" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none font-mono" />
+                  <input type="text" disabled={isFormReadOnly} value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none font-mono" />
                 </div>
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Unit</label>
                   <AutocompleteSelect 
+                    disabled={isFormReadOnly}
                     options={['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job']} 
                     value={formData.unit} 
                     onChange={v => setFormData({...formData, unit: v})} 
@@ -210,16 +213,17 @@ const Products = () => {
 
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Category</label>
-                  <input type="text" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" />
+                  <input type="text" disabled={isFormReadOnly} value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" />
                 </div>
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Base Price (₹)</label>
-                  <input type="number" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: Number(e.target.value)})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" />
+                  <input type="number" disabled={isFormReadOnly} value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: Number(e.target.value)})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all outline-none" />
                 </div>
 
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Status</label>
                   <AutocompleteSelect 
+                    disabled={isFormReadOnly}
                     options={['Active', 'Discontinued', 'In Development']} 
                     value={formData.status} 
                     onChange={v => setFormData({...formData, status: v})} 
@@ -230,7 +234,7 @@ const Products = () => {
               
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Description</label>
-                <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 min-h-[80px] outline-none resize-none" />
+                <textarea disabled={isFormReadOnly} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 min-h-[80px] outline-none resize-none" />
               </div>
 
               <hr className="border-slate-100" />
@@ -248,7 +252,8 @@ const Products = () => {
                         dynamicFields: { ...prev.dynamicFields, [fieldName]: value }
                       }));
                     }}
-                    currentUserRole={JSON.parse(localStorage.getItem('user') || '{}').role}
+                    readOnly={isFormReadOnly}
+                    currentUserRole={JSON.parse(sessionStorage.getItem('user') || '{}').role}
                   />
                 </div>
               </div>
@@ -256,9 +261,11 @@ const Products = () => {
 
             <div className="px-6 py-4 border-t border-slate-100 bg-white rounded-b-2xl flex justify-end gap-3 shrink-0">
               <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-sm">Cancel</button>
-              <button onClick={handleSubmit} disabled={submitLoading} className="px-6 py-2.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-all shadow-lg shadow-brand-500/30 flex items-center">
-                {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Save Product
-              </button>
+              {!isFormReadOnly && (
+                <button onClick={handleSubmit} disabled={submitLoading} className="px-6 py-2.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-all shadow-lg shadow-brand-500/30 flex items-center">
+                  {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Save Product
+                </button>
+              )}
             </div>
           </div>
         </div>

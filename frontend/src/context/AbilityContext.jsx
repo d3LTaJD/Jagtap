@@ -6,10 +6,54 @@ import api from '../api/client';
 export const AbilityContext = createContext();
 export const Can = createContextualCan(AbilityContext.Consumer);
 
+// Role group map matching backend aliases
+const roleGroupMap = {
+  'SA': ['SA', 'SUPER_ADMIN', 'SUPERADMIN', 'super_admin', 'superadmin'],
+  'DIR': ['DIR', 'DIRECTOR', 'director'],
+  'TA': ['TA', 'TECHNICAL_AUTHORITY', 'TECHNICALAUTHORITY', 'technical_authority', 'technicalauthority'],
+  'SALES': ['SALES', 'SALES_EXECUTIVE', 'SALESEXECUTIVE', 'sales_executive', 'salesexecutive'],
+  'DE': ['DE', 'DESIGN_ENGINEER', 'DESIGNENGINEER', 'design_engineer', 'designengineer'],
+  'QCE': ['QCE', 'QC_ENGINEER', 'QCENGINEER', 'qc_engineer', 'qcengineer'],
+  'QCS': ['QCS', 'QC_SUPERVISOR', 'QCSUPERVISOR', 'qc_supervisor', 'qcsupervisor'],
+  'ACC': ['ACC', 'ACCOUNTS', 'accounts'],
+  'MGR': ['MGR', 'MANAGEMENT_VIEWER', 'MANAGEMENTVIEWER', 'management_viewer', 'managementviewer', 'manager']
+};
+
+const getRoleCode = (role) => {
+  if (!role) return '';
+  const normalized = role.toUpperCase().trim();
+  for (const [shortCode, aliases] of Object.entries(roleGroupMap)) {
+    if (shortCode === normalized || aliases.some(a => a.toUpperCase() === normalized)) {
+      return shortCode;
+    }
+  }
+  return normalized;
+};
+
+const ROLE_DISPLAY_NAMES = {
+  'SA': 'Administrator',
+  'DIR': 'Director',
+  'TA': 'Technical Authority',
+  'SALES': 'Sales Executive',
+  'DE': 'Design Engineer',
+  'QCE': 'QC Engineer',
+  'QCS': 'QC Supervisor',
+  'ACC': 'Accounts',
+  'MGR': 'Management'
+};
+
+export const getRoleDisplayName = (role) => {
+  const code = getRoleCode(role);
+  return ROLE_DISPLAY_NAMES[code] || role || 'User';
+};
+
+export { getRoleCode };
+
 const defineAbilitiesFor = (user) => {
   const { can, rules } = new AbilityBuilder(Ability);
 
-  if (user && (user.role === 'SA' || user.role === 'SUPER_ADMIN')) {
+  const roleCode = user ? getRoleCode(user.role) : '';
+  if (user && roleCode === 'SA') {
     can('manage', 'all');
   } else if (user && user.permissions) {
     // Map existing permissions to CASL
@@ -27,23 +71,28 @@ const defineAbilitiesFor = (user) => {
 };
 
 export const AbilityProvider = ({ children }) => {
-  const [ability, setAbility] = useState(new Ability());
+  const [ability, setAbility] = useState(() => {
+    const userStr = sessionStorage.getItem('user');
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        return defineAbilitiesFor(user);
+      } catch (e) {
+        console.error("Error parsing user from sessionStorage:", e);
+      }
+    }
+    return new Ability();
+  });
 
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      setAbility(defineAbilitiesFor(user));
-    }
-    
     const fetchLatestPermissions = async () => {
-      const token = localStorage.getItem('token');
+      const token = sessionStorage.getItem('token');
       if (!token) return;
       try {
         const res = await api.get('/auth/me');
         if (res.data && res.data.user) {
           const user = res.data.user;
-          localStorage.setItem('user', JSON.stringify(user));
+          sessionStorage.setItem('user', JSON.stringify(user));
           setAbility(defineAbilitiesFor(user));
         }
       } catch (err) {
@@ -52,7 +101,7 @@ export const AbilityProvider = ({ children }) => {
     };
 
     // Refresh immediately on mount to catch any changes made while offline/closed
-    if (localStorage.getItem('token')) {
+    if (sessionStorage.getItem('token')) {
       fetchLatestPermissions();
     }
 
@@ -61,7 +110,7 @@ export const AbilityProvider = ({ children }) => {
     
     // Listen for storage changes (for login/logout)
     const handleStorage = () => {
-      const userStr = localStorage.getItem('user');
+      const userStr = sessionStorage.getItem('user');
       if (userStr) {
         const user = JSON.parse(userStr);
         setAbility(defineAbilitiesFor(user));

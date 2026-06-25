@@ -3,6 +3,7 @@ const Quotation = require('../models/Quotation');
 const { notifyRoles, sendEmail } = require('../services/notificationService');
 const ActivityLog = require('../models/ActivityLog');
 const { getNextSequenceValue } = require('../utils/counter');
+const { hasPermission } = require('../config/permissions');
 
 exports.generateQapFromQuotation = async (req, res, next) => {
   try {
@@ -415,7 +416,12 @@ exports.getQaps = async (req, res, next) => {
 
 exports.getQap = async (req, res, next) => {
   try {
-    const qap = await Qap.findById(req.params.id).populate('quotation').populate('customer');
+    const qap = await Qap.findById(req.params.id)
+      .populate('quotation')
+      .populate('customer')
+      .populate('preparedBy', 'fullName')
+      .populate('reviewedBy', 'fullName')
+      .populate('approvedBy', 'fullName');
     if (!qap) return res.status(404).json({ status: 'error', message: 'Not found' });
     res.status(200).json({ status: 'success', data: { qap } });
   } catch (err) {
@@ -425,16 +431,46 @@ exports.getQap = async (req, res, next) => {
 
 exports.updateQapStatus = async (req, res, next) => {
   try {
-    const { status, assignedTo } = req.body;
-    const updateData = {};
-    if (status) updateData.status = status;
-    if (assignedTo) updateData.assignedTo = assignedTo;
-
-    if (status === 'APPROVED') updateData.approvedBy = req.user._id;
-
     const originalQap = await Qap.findById(req.params.id);
-    const qap = await Qap.findByIdAndUpdate(req.params.id, updateData, { new: true });
-    
+    if (!originalQap) return res.status(404).json({ status: 'error', message: 'QAP not found' });
+
+    const { status, assignedTo, dynamicFields } = req.body;
+    const updateData = {};
+
+    // 1. Status change checks
+    if (status !== undefined && status !== originalQap.status) {
+      if (status === 'APPROVED') {
+        if (!hasPermission(req.user, 'QAP', 'finalSignOff')) {
+          return res.status(403).json({ status: 'error', message: 'Not authorized for final sign-off on QAP' });
+        }
+        updateData.approvedBy = req.user._id;
+      }
+      updateData.status = status;
+    }
+
+    // 2. Dynamic fields edit check
+    if (dynamicFields !== undefined) {
+      if (!hasPermission(req.user, 'QAP', 'editActivities')) {
+        return res.status(403).json({ status: 'error', message: 'Not authorized to edit QAP activities or fields' });
+      }
+      updateData.dynamicFields = { ...originalQap.dynamicFields, ...dynamicFields };
+    }
+
+    // 3. Assignment check
+    if (assignedTo !== undefined && assignedTo?.toString() !== originalQap.assignedTo?.toString()) {
+      if (!hasPermission(req.user, 'QAP', 'finalSignOff') && !hasPermission(req.user, 'QAP', 'editActivities')) {
+        return res.status(403).json({ status: 'error', message: 'Not authorized to assign QAPs' });
+      }
+      updateData.assignedTo = assignedTo || null;
+    }
+
+    const qap = await Qap.findByIdAndUpdate(req.params.id, updateData, { new: true })
+      .populate('quotation')
+      .populate('customer')
+      .populate('preparedBy', 'fullName')
+      .populate('reviewedBy', 'fullName')
+      .populate('approvedBy', 'fullName');
+
     if (status && status !== originalQap.status) {
       await ActivityLog.create({
         user_id: req.user._id,
@@ -445,9 +481,8 @@ exports.updateQapStatus = async (req, res, next) => {
       });
       
       if (status === 'UNDER_REVIEW') {
-        await notifyRoles({ roles: ['DIRECTOR'], type: 'QAP_APPROVAL', title: 'QAP Approval Required', message: `QAP ${qap.qapId} awaits Director approval.`, related_id: qap._id });
-        // Email
-        const adminUsers = await require('../models/User').find({ role: 'DIRECTOR' });
+        await notifyRoles({ roles: ['DIRECTOR', 'DIR'], type: 'QAP_APPROVAL', title: 'QAP Approval Required', message: `QAP ${qap.qapId} awaits Director approval.`, related_id: qap._id });
+        const adminUsers = await require('../models/User').find({ role: { $in: ['DIRECTOR', 'DIR'] } });
         adminUsers.forEach(u => {
           sendEmail({ userId: u._id, subject: 'QAP Approval Required', text: `Please approve QAP ${qap.qapId}` });
         });

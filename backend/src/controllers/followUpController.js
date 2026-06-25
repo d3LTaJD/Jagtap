@@ -1,5 +1,7 @@
 const FollowUp = require('../models/FollowUp');
 const Enquiry = require('../models/Enquiry');
+const { getRoleCode } = require('../middleware/auth');
+const { hasPermission } = require('../config/permissions');
 
 // GET /api/follow-ups?enquiryId=xxx
 exports.getFollowUps = async (req, res, next) => {
@@ -10,9 +12,12 @@ exports.getFollowUps = async (req, res, next) => {
     if (enquiryId) {
       filter.enquiry = enquiryId;
     } else {
-      // Global Tasks View
-      const isHighAuth = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(req.user.role?.toUpperCase() || '');
-      if (!isHighAuth) {
+      // Global Tasks View — SA, DIR, MGR can see all follow-ups
+      const userRoleCode = getRoleCode(req.user.role);
+      const userSecRoleCode = getRoleCode(req.user.secondaryRole);
+      const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+      const canSeeAll = userRoles.some(r => ['SA', 'DIR', 'MGR'].includes(r));
+      if (!canSeeAll) {
         // Regular users see tasks they created, escalated to them, or on enquiries assigned to them
         const userEnquiries = await Enquiry.find({ assignedTo: req.user._id }).select('_id');
         const eqIds = userEnquiries.map(e => e._id);
@@ -110,7 +115,10 @@ exports.updateFollowUp = async (req, res, next) => {
 
     // Only the author, Director, or SA can edit
     const isAuthor = followUp.addedBy.toString() === req.user._id.toString();
-    const isHighAuth = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(req.user.role);
+    const userRoleCode = getRoleCode(req.user.role);
+    const userSecRoleCode = getRoleCode(req.user.secondaryRole);
+    const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+    const isHighAuth = userRoles.some(r => ['SA', 'DIR'].includes(r));
     if (!isAuthor && !isHighAuth) {
       return res.status(403).json({ status: 'fail', message: 'Not authorized to edit this follow-up' });
     }
@@ -138,7 +146,13 @@ exports.updateFollowUp = async (req, res, next) => {
       followUp.nextFollowUpDate = nextFollowUpDate || null;
       await Enquiry.findByIdAndUpdate(followUp.enquiry, { nextFollowUpDate: nextFollowUpDate || null });
     }
-    if (isOverridden !== undefined && isHighAuth) {
+    if (isOverridden !== undefined) {
+      if (!hasPermission(req.user, 'FollowUp', 'overrideReminder')) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Not authorized to override follow-up reminders'
+        });
+      }
       followUp.isOverridden = isOverridden;
       followUp.overriddenBy = req.user._id;
       followUp.overrideNote = overrideNote || '';
@@ -158,7 +172,10 @@ exports.deleteFollowUp = async (req, res, next) => {
     if (!followUp) return res.status(404).json({ status: 'fail', message: 'Follow-up not found' });
 
     const isAuthor = followUp.addedBy.toString() === req.user._id.toString();
-    const isHighAuth = ['SA', 'SUPER_ADMIN', 'DIR', 'DIRECTOR'].includes(req.user.role);
+    const userRoleCode = getRoleCode(req.user.role);
+    const userSecRoleCode = getRoleCode(req.user.secondaryRole);
+    const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+    const isHighAuth = userRoles.some(r => ['SA', 'DIR'].includes(r));
     if (!isAuthor && !isHighAuth) {
       return res.status(403).json({ status: 'fail', message: 'Not authorized to delete this follow-up' });
     }
