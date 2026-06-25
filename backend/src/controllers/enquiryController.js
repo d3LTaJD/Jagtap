@@ -179,18 +179,21 @@ exports.createEnquiry = async (req, res, next) => {
     if (enquiry.contactEmail) {
       try {
         const emailBotService = require('../services/emailBotService');
-        await emailBotService.sendAutomatedReply(
+        const unifiedEnquiriesData = [{
+          enquiryId: enquiry.enquiryId,
+          productDescription: enquiry.productDescription,
+          productCategory: enquiry.productCategory,
+          quantity: enquiry.quantity,
+          unit: enquiry.unit || 'NOS',
+          status: enquiry.status,
+          missingFields: completion.missingFields,
+          products: enquiry.products || [],
+          dynamicFields: enquiry.dynamicFields || {}
+        }];
+        await emailBotService.sendAutomatedRepliesUnified(
           enquiry.contactEmail,
           enquiry.contactPerson || 'Customer',
-          enquiry.enquiryId,
-          {
-            productDescription: enquiry.productDescription,
-            productCategory: enquiry.productCategory,
-            quantity: enquiry.quantity,
-            unit: enquiry.unit || 'NOS',
-            priority: enquiry.priority
-          },
-          completion.missingFields
+          unifiedEnquiriesData
         );
       } catch (emailErr) {
         console.error('[Enquiry Controller] Failed to send automated reply for manual enquiry:', emailErr.message);
