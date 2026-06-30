@@ -109,8 +109,65 @@ const enquirySchema = new mongoose.Schema({
   processingStatus: { type: String, enum: ['Pending', 'Processing', 'Completed', 'Failed'], default: 'Pending', index: true },
   processingMessage: { type: String },
   processingStartedAt: { type: Date },
-  processingCompletedAt: { type: Date }
+  processingCompletedAt: { type: Date },
+  // Comprehensive Tender Intelligence (populated for sourceType === 'Tender')
+  tenderIntelligence: { type: mongoose.Schema.Types.Mixed, default: null },
+  extractionMetadata: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
+
+enquirySchema.pre('save', async function(next) {
+  try {
+    const FieldDefinition = mongoose.model('FieldDefinition');
+    const fields = await FieldDefinition.find({ formContext: 'Enquiry', isDeleted: false, isActive: true });
+    
+    // Create a map of fieldName -> productCategory
+    const fieldCatMap = {};
+    for (const f of fields) {
+      fieldCatMap[f.fieldName] = f.productCategory || '';
+    }
+
+    const cleanFields = (dynamicFields, targetCategory) => {
+      if (!dynamicFields || typeof dynamicFields !== 'object') return {};
+      if (!targetCategory || targetCategory === 'Multiple') return dynamicFields;
+
+      // Map common synonyms: e.g. "valves" -> "piping"
+      const normalizedTarget = targetCategory.toLowerCase() === 'valves' ? 'piping' : targetCategory.toLowerCase();
+
+      const cleaned = {};
+      for (const [key, val] of Object.entries(dynamicFields)) {
+        const fieldCat = fieldCatMap[key];
+        if (fieldCat) {
+          const normalizedFieldCat = fieldCat.toLowerCase() === 'valves' ? 'piping' : fieldCat.toLowerCase();
+          if (normalizedFieldCat !== normalizedTarget) {
+            console.log(`[Schema-Aware Validation] Stripping field "${key}" (belongs to: "${fieldCat}") from category "${targetCategory}"`);
+            continue;
+          }
+        }
+        cleaned[key] = val;
+      }
+      return cleaned;
+    };
+
+    // Clean root dynamicFields
+    if (this.dynamicFields) {
+      this.dynamicFields = cleanFields(this.dynamicFields, this.productCategory);
+    }
+
+    // Clean each product's dynamicFields
+    if (this.products && this.products.length > 0) {
+      for (const prod of this.products) {
+        if (prod.dynamicFields) {
+          prod.dynamicFields = cleanFields(prod.dynamicFields, prod.category || this.productCategory);
+        }
+      }
+    }
+
+    next();
+  } catch (err) {
+    console.error('[Schema-Aware Validation] Error in Enquiry pre-save hook:', err.message);
+    next(err);
+  }
+});
 
 enquirySchema.index({ status: 1 });
 enquirySchema.index({ assignedTo: 1 });

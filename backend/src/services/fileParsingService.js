@@ -9,17 +9,72 @@ const { uploadFile } = require('./localStorageService');
 let _PDFParse = null;
 try {
   const pdfParseModule = require('pdf-parse');
-  // v2.x exports: { PDFParse, ... }
   if (pdfParseModule && typeof pdfParseModule.PDFParse === 'function') {
     _PDFParse = pdfParseModule.PDFParse;
     console.log('[File Parsing] pdf-parse loaded: PDFParse class (v2.x)');
   } else {
-    // Fallback: older versions exported the function directly
     _PDFParse = null;
     console.warn('[File Parsing] pdf-parse: unexpected export shape, will use fallback');
   }
 } catch (e) {
   console.error('[File Parsing] Failed to load pdf-parse:', e.message);
+}
+
+/**
+ * Clean OCR or document text to remove headers, footers, duplicate lines, and normalize whitespace
+ * Part 16: OCR Improvements
+ */
+function cleanOcrText(text) {
+  if (!text) return '';
+
+  // 1. Split into lines
+  let lines = text.split(/\r?\n/);
+
+  // 2. Remove standard page headers/footers and metadata lines
+  const footerHeaderRegexes = [
+    /^\s*page\s+\d+\s+of\s+\d+\s*$/i,
+    /^\s*page\s+\d+\s*$/i,
+    /^\s*confidential\s*$/i,
+    /^\s*all rights reserved\s*$/i,
+    /^\s*petro\s*valve\s*industries\s*$/i,
+    /^\s*www\.[a-z0-9-]+\.[a-z]{2,}\s*$/i // website footers
+  ];
+
+  lines = lines.filter(line => {
+    const cleanLine = line.trim();
+    if (!cleanLine) return true; // Keep empty lines for structural separation
+    return !footerHeaderRegexes.some(rx => rx.test(cleanLine));
+  });
+
+  // 3. Normalize whitespace (Part 16)
+  lines = lines.map(line => line.replace(/\s+/g, ' ').trim());
+
+  // 4. Merge broken hyphenated words (Part 16)
+  const mergedLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    let currentLine = lines[i];
+    if (currentLine.endsWith('-') && i + 1 < lines.length) {
+      currentLine = currentLine.slice(0, -1) + lines[i + 1];
+      i++; // skip next line
+    }
+    mergedLines.push(currentLine);
+  }
+
+  // 5. Deduplicate duplicate adjacent/duplicate lines (Part 16)
+  const uniqueLines = [];
+  for (const line of mergedLines) {
+    if (line === '') {
+      if (uniqueLines[uniqueLines.length - 1] !== '') {
+        uniqueLines.push('');
+      }
+    } else {
+      if (!uniqueLines.includes(line)) {
+        uniqueLines.push(line);
+      }
+    }
+  }
+
+  return uniqueLines.join('\n').trim();
 }
 
 /**
@@ -62,24 +117,41 @@ function isCADFile(fileName) {
 async function extractTextFromFile(buffer, fileType, fileName) {
   const category = detectCategory(fileName);
 
+  // Part 17: Hash-based OCR Caching
+  const fileHash = crypto.createHash('md5').update(buffer).digest('hex');
+  const aiConfig = require('../config/aiConfig');
+
+  if (aiConfig.OCR_CACHE_ENABLED) {
+    const cached = await Attachment.findOne({ fileHash, extractionStatus: 'SUCCESS' });
+    if (cached && cached.extractedText) {
+      console.log(`[File Parsing] OCR Cache Hit for hash ${fileHash} (file: ${fileName}). Reusing extracted text.`);
+      return {
+        text: cached.extractedText,
+        confidence: cached.ocrConfidence || 100,
+        status: 'SUCCESS',
+        category: cached.attachmentCategory || category
+      };
+    }
+  }
+
   if (isCADFile(fileName)) {
     console.log(`[File Parsing] CAD/Drawing file detected (${fileName}). Skipping text extraction.`);
     return {
       text: '',
-      confidence: 100, // CAD files don't need OCR, treated as high confidence unparsed assets
+      confidence: 100,
       status: 'NOT_SUPPORTED',
       category: 'Drawing'
     };
   }
 
   const ext = fileName.split('.').pop().toLowerCase();
+  let resultObj = { text: '', confidence: 0, status: 'FAILED', category };
 
   try {
     // 1. PDF Documents
     if (ext === 'pdf' || fileType === 'application/pdf') {
       console.log(`[File Parsing] Extracting text from PDF: ${fileName} (buffer size: ${buffer.length})`);
       
-      // Attempt 1: Use PDFParse class (pdf-parse v2.x)
       let pdfTextResult = '';
       if (_PDFParse) {
         try {
@@ -90,19 +162,17 @@ async function extractTextFromFile(buffer, fileType, fileName) {
           console.log(`[File Parsing] PDF text extracted via PDFParse class: ${pdfTextResult.length} chars from ${fileName}`);
 
           if (pdfTextResult.length >= 50) {
-            return { text: pdfTextResult, confidence: 100, status: 'SUCCESS', category };
+            resultObj = { text: pdfTextResult, confidence: 100, status: 'SUCCESS', category };
+          } else {
+            console.log(`[File Parsing] PDF has very little text (${pdfTextResult.length} chars) — likely scanned: ${fileName}. Trying AI Vision OCR...`);
           }
-          
-          console.log(`[File Parsing] PDF has very little text (${pdfTextResult.length} chars) — likely scanned: ${fileName}. Trying AI Vision OCR...`);
         } catch (pdfErr) {
           console.error(`[File Parsing] PDFParse class failed for ${fileName}: ${pdfErr.message}`);
-          console.error('[File Parsing] Stack:', pdfErr.stack);
-          // Fall through to AI Vision / Tesseract OCR fallback below
         }
       }
 
-      // Attempt 2: Gemini Vision API for scanned PDFs (sends the PDF as base64)
-      if (process.env.GEMINI_API_KEY) {
+      // If PDFParse failed or returned too little text, run Gemini Vision OCR
+      if (resultObj.status !== 'SUCCESS' && process.env.GEMINI_API_KEY) {
         console.log(`[File Parsing] Using Gemini Vision API to OCR scanned PDF: ${fileName}`);
         try {
           const base64Pdf = buffer.toString('base64');
@@ -117,16 +187,7 @@ async function extractTextFromFile(buffer, fileType, fileName) {
                   }
                 },
                 {
-                  text: `Extract ALL text content from this scanned PDF document. This is a Request for Quotation (RFQ) or product specification document for industrial valves/piping.
-                  
-Return the COMPLETE text content exactly as it appears in the document, including:
-- All product names, descriptions, and specifications
-- All quantities, sizes, materials, pressure ratings
-- All table data, line items, and technical details
-- Company names, contact info, reference numbers
-- Any headers, footers, and notes
-
-Return ONLY the extracted text content. Do not add any commentary or formatting instructions.`
+                  text: `Extract ALL text content from this scanned PDF document. This is a Request for Quotation (RFQ) or product specification document for industrial valves/piping. Return the COMPLETE text content exactly as it appears in the document. Return ONLY the extracted text content. Do not add any commentary or formatting instructions.`
                 }
               ]
             }]
@@ -145,55 +206,35 @@ Return ONLY the extracted text content. Do not add any commentary or formatting 
             
             if (trimmed.length > 20) {
               console.log(`[File Parsing] ✅ Gemini Vision OCR extracted ${trimmed.length} chars from scanned PDF: ${fileName}`);
-              return {
-                text: trimmed,
-                confidence: 90,
-                status: 'SUCCESS',
-                category
-              };
-            } else {
-              console.log(`[File Parsing] Gemini Vision returned too little text (${trimmed.length} chars) for: ${fileName}`);
+              resultObj = { text: trimmed, confidence: 90, status: 'SUCCESS', category };
             }
-          } else {
-            const errBody = await geminiRes.text().catch(() => '');
-            console.error(`[File Parsing] Gemini Vision API error ${geminiRes.status} for ${fileName}: ${errBody.substring(0, 300)}`);
           }
         } catch (geminiErr) {
-          console.error(`[File Parsing] Gemini Vision OCR failed for ${fileName}: ${geminiErr.message}`);
+          console.error(`[File Parsing] Gemini Vision OCR failed for ${fileName}:`, geminiErr.message);
         }
       }
 
-      // Attempt 3: Groq does not support vision for PDFs, skip to Tesseract
-
-      // Attempt 4: Tesseract OCR on PDF (limited — works only if Tesseract can interpret the buffer as image)
-      console.log(`[File Parsing] Falling back to Tesseract OCR for PDF: ${fileName}`);
-      try {
-        const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
-        const trimmedText = (text || '').trim();
-        console.log(`[File Parsing] Tesseract OCR on PDF got ${trimmedText.length} chars (confidence: ${confidence})`);
-        if (trimmedText.length > 20) {
-          return {
-            text: trimmedText,
-            confidence: confidence || 40,
-            status: 'SUCCESS',
-            category
-          };
+      // If both PDFParse and Gemini failed, fallback to local Tesseract OCR
+      if (resultObj.status !== 'SUCCESS') {
+        console.log(`[File Parsing] Falling back to Tesseract OCR for PDF: ${fileName}`);
+        try {
+          const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
+          const trimmedText = (text || '').trim();
+          if (trimmedText.length > 20) {
+            resultObj = { text: trimmedText, confidence: confidence || 40, status: 'SUCCESS', category };
+          }
+        } catch (ocrErr) {
+          console.error(`[File Parsing] Tesseract OCR also failed for PDF ${fileName}:`, ocrErr.message);
         }
-      } catch (ocrErr) {
-        console.error(`[File Parsing] Tesseract OCR also failed for PDF ${fileName}: ${ocrErr.message}`);
       }
 
-      // Final fallback: return whatever we have
-      return {
-        text: pdfTextResult || '[Scanned PDF - OCR extraction unsuccessful]',
-        confidence: pdfTextResult.length > 0 ? 50 : 0,
-        status: pdfTextResult.length > 0 ? 'SUCCESS' : 'FAILED',
-        category
-      };
+      if (resultObj.status !== 'SUCCESS' && pdfTextResult) {
+        resultObj = { text: pdfTextResult, confidence: 50, status: 'SUCCESS', category };
+      }
     }
 
     // 2. Excel Spreadsheets / CSV
-    if (['xlsx', 'xls', 'csv'].includes(ext) || fileType.includes('spreadsheet') || fileType.includes('csv')) {
+    else if (['xlsx', 'xls', 'csv'].includes(ext) || fileType.includes('spreadsheet') || fileType.includes('csv')) {
       console.log(`[File Parsing] Extracting text from Excel/CSV: ${fileName}`);
       const workbook = XLSX.read(buffer, { type: 'buffer' });
       let text = '';
@@ -204,7 +245,7 @@ Return ONLY the extracted text content. Do not add any commentary or formatting 
         text += XLSX.utils.sheet_to_txt(sheet) + '\n';
       });
 
-      return {
+      resultObj = {
         text: text.trim(),
         confidence: 100,
         status: 'SUCCESS',
@@ -213,10 +254,10 @@ Return ONLY the extracted text content. Do not add any commentary or formatting 
     }
 
     // 3. Word Documents
-    if (ext === 'docx' || fileType.includes('word')) {
+    else if (ext === 'docx' || fileType.includes('word')) {
       console.log(`[File Parsing] Extracting text from Word: ${fileName}`);
       const result = await mammoth.extractRawText({ buffer });
-      return {
+      resultObj = {
         text: (result.value || '').trim(),
         confidence: 100,
         status: 'SUCCESS',
@@ -225,8 +266,7 @@ Return ONLY the extracted text content. Do not add any commentary or formatting 
     }
 
     // 4. Images (OCR via Gemini Vision → Tesseract.js fallback)
-    if (['png', 'jpg', 'jpeg', 'tiff', 'tif'].includes(ext) || fileType.startsWith('image/')) {
-      // Attempt 1: Gemini Vision API (better quality for complex documents)
+    else if (['png', 'jpg', 'jpeg', 'tiff', 'tif'].includes(ext) || fileType.startsWith('image/')) {
       if (process.env.GEMINI_API_KEY) {
         console.log(`[File Parsing] Running Gemini Vision OCR on image: ${fileName}`);
         try {
@@ -237,7 +277,7 @@ Return ONLY the extracted text content. Do not add any commentary or formatting 
             contents: [{
               parts: [
                 { inlineData: { mimeType, data: base64Img } },
-                { text: `Extract ALL text content from this image. This may be a product specification sheet, RFQ, or technical document for industrial valves/piping. Return the COMPLETE text content exactly as it appears, including all product names, quantities, sizes, materials, pressure ratings, table data, and technical details. Return ONLY the extracted text.` }
+                { text: `Extract ALL text content from this image. This may be a product specification sheet, RFQ, or technical document for industrial valves/piping. Return the COMPLETE text content exactly as it appears. Return ONLY the extracted text.` }
               ]
             }]
           };
@@ -253,48 +293,39 @@ Return ONLY the extracted text content. Do not add any commentary or formatting 
             const extractedText = (geminiResult.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
             if (extractedText.length > 10) {
               console.log(`[File Parsing] ✅ Gemini Vision OCR extracted ${extractedText.length} chars from image: ${fileName}`);
-              return { text: extractedText, confidence: 90, status: 'SUCCESS', category };
+              resultObj = { text: extractedText, confidence: 90, status: 'SUCCESS', category };
             }
           }
         } catch (geminiErr) {
-          console.error(`[File Parsing] Gemini Vision OCR failed for image ${fileName}: ${geminiErr.message}`);
+          console.error(`[File Parsing] Gemini Vision OCR failed for image ${fileName}:`, geminiErr.message);
         }
       }
 
-      // Attempt 2: Tesseract.js fallback
-      console.log(`[File Parsing] Running Tesseract OCR on image: ${fileName}`);
-      const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
-      return {
-        text: (text || '').trim(),
-        confidence: confidence || 70,
-        status: 'SUCCESS',
-        category
-      };
+      if (resultObj.status !== 'SUCCESS') {
+        console.log(`[File Parsing] Running Tesseract OCR on image: ${fileName}`);
+        const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
+        resultObj = {
+          text: (text || '').trim(),
+          confidence: confidence || 70,
+          status: 'SUCCESS',
+          category
+        };
+      }
     }
-
-    // Default: unsupported text type
-    console.log(`[File Parsing] Unsupported file format for text extraction: ${fileName}`);
-    return {
-      text: '',
-      confidence: 100,
-      status: 'NOT_SUPPORTED',
-      category
-    };
-
   } catch (err) {
     console.error(`[File Parsing] UNHANDLED ERROR extracting text from ${fileName}:`, err.message);
-    console.error('[File Parsing] Full stack:', err.stack);
-    return {
-      text: '',
-      confidence: 0,
-      status: 'FAILED',
-      category
-    };
   }
+
+  // Part 16: Clean the extracted OCR text to remove headers, footers, whitespace normalization
+  if (resultObj.status === 'SUCCESS' && resultObj.text) {
+    resultObj.text = cleanOcrText(resultObj.text);
+  }
+
+  return resultObj;
 }
 
 /**
- * Saves file to S3 and creates/versions an Attachment record in the database.
+ * Saves file to local storage and creates/versions an Attachment record in the database.
  */
 async function saveAndVersionAttachment({
   fileBuffer,
@@ -312,23 +343,24 @@ async function saveAndVersionAttachment({
     console.log(`[Attachment Storage] Saving ${originalFileName} to local storage...`);
     const storagePath = await uploadFile(fileBuffer, originalFileName, fileType);
 
+    // Calculate file MD5 hash for cache keys
+    const fileHash = crypto.createHash('md5').update(fileBuffer).digest('hex');
+
     // 2. Extract text/OCR content
     const extractionResult = await extractTextFromFile(fileBuffer, fileType, originalFileName);
 
     // 3. Resolve version control
-    // Find if this customer/thread already has an attachment with the exact same name
     const existing = await Attachment.findOne({
       customerId,
       threadId,
       originalFileName,
-      parentAttachmentId: null // Find the original version
+      parentAttachmentId: null
     });
 
     let versionNumber = 1;
     let parentAttachmentId = null;
 
     if (existing) {
-      // Find the latest version number
       const latestVersion = await Attachment.findOne({
         $or: [
           { _id: existing._id },
@@ -339,7 +371,6 @@ async function saveAndVersionAttachment({
       versionNumber = (latestVersion ? latestVersion.versionNumber : 1) + 1;
       parentAttachmentId = existing._id;
 
-      // Update all old versions to isLatestVersion = false
       await Attachment.updateMany(
         {
           $or: [
@@ -353,6 +384,9 @@ async function saveAndVersionAttachment({
       console.log(`[Attachment Versioning] Creating version ${versionNumber} for file: ${originalFileName}`);
     }
 
+    // Run document classification (Phase 1)
+    const classificationResult = await classifyAttachment(originalFileName, extractionResult.text || '');
+
     // 4. Create the new Attachment record
     const attachment = await Attachment.create({
       customerId,
@@ -362,10 +396,12 @@ async function saveAndVersionAttachment({
       fileType,
       fileSize,
       storagePath,
+      fileHash,
       extractedText: extractionResult.text,
       extractionStatus: extractionResult.status,
       ocrConfidence: extractionResult.ocrConfidence || extractionResult.confidence,
-      attachmentCategory: extractionResult.category,
+      attachmentCategory: classificationResult.category,
+      classification: classificationResult,
       versionNumber,
       parentAttachmentId,
       isLatestVersion: true,
@@ -382,8 +418,93 @@ async function saveAndVersionAttachment({
   }
 }
 
+/**
+ * Local heuristics for document classification (filename + text keywords).
+ * Part of Phase 1.
+ */
+function runLocalHeuristics(fileName, textSnippet = '') {
+  const name = fileName.toLowerCase();
+  const text = textSnippet.toLowerCase();
+
+  // 1. Direct Extension / Filename Heuristics (Unambiguous)
+  if (['dwg', 'dxf', 'step', 'stp', 'iges', 'igs'].some(ext => name.endsWith('.' + ext)) || name.includes('drawing') || name.includes('isometric') || name.includes('ga-drg')) {
+    return { category: 'Drawing', confidence: 100, source: 'heuristic' };
+  }
+  if (name.includes('priced boq') || name.includes('price bid') || name.includes('price_bid') || name.includes('financial bid')) {
+    return { category: 'Price Bid', confidence: 100, source: 'heuristic' };
+  }
+  if (name.includes('boq') || name.includes('bill of quantit') || name.includes('schedule of rate') || name.includes('price schedule') || name.includes('sor.xls') || name.includes('sor_')) {
+    return { category: 'BOQ', confidence: 100, source: 'heuristic' };
+  }
+  if (name.includes('corrigendum') || name.includes('amendment') || name.includes('addendum') || name.includes('extension')) {
+    return { category: 'Corrigendum', confidence: 100, source: 'heuristic' };
+  }
+  if (name.includes('datasheet') || name.includes('data sheet') || name.includes('technical data')) {
+    return { category: 'Datasheet', confidence: 95, source: 'heuristic' };
+  }
+  if (name.includes('inspection') || name.includes('release note') || name.includes('mtc') || name.includes('test certificate') || name.includes('mill certificate')) {
+    return { category: 'Inspection Document', confidence: 95, source: 'heuristic' };
+  }
+  if (name.includes('purchase order') || name.includes('po_') || name.includes('po-')) {
+    return { category: 'Purchase Order', confidence: 95, source: 'heuristic' };
+  }
+  if (name.includes('qap') || name.includes('quality plan') || name.includes('quality assurance')) {
+    return { category: 'Quality Plan', confidence: 95, source: 'heuristic' };
+  }
+  if (name.includes('pre-bid query') || name.includes('prebid') || name.includes('query reply') || name.includes('vendor query')) {
+    return { category: 'Vendor Query', confidence: 95, source: 'heuristic' };
+  }
+  if (name.includes('annexure') || name.includes('appendix') || name.includes('exhibit')) {
+    return { category: 'Annexure', confidence: 90, source: 'heuristic' };
+  }
+  if (name.includes('nit') || name.includes('notice inviting') || name.includes('tender document') || name.includes('general tender')) {
+    return { category: 'General Tender', confidence: 90, source: 'heuristic' };
+  }
+
+  // 2. Text Keyword Heuristics
+  if (text.includes('bill of quantities') || text.includes('schedule of rates') || (text.includes('item no') && text.includes('qty') && text.includes('description'))) {
+    return { category: 'BOQ', confidence: 90, source: 'heuristic' };
+  }
+  if (text.includes('technical specification') || text.includes('specification sheet') || text.includes('scope of work')) {
+    return { category: 'Technical Specification', confidence: 90, source: 'heuristic' };
+  }
+
+  // Ambiguous: return low confidence to force AI classifier
+  return { category: 'Unknown', confidence: 0, source: 'heuristic' };
+}
+
+/**
+ * Integrates local heuristics and AI classifier fallback.
+ * Part of Phase 1.
+ */
+async function classifyAttachment(fileName, textContent = '') {
+  const textSnippet = textContent.substring(0, 2000);
+  
+  // 1. Local Heuristics
+  const localResult = runLocalHeuristics(fileName, textSnippet);
+  
+  if (localResult.confidence >= 90) {
+    console.log(`[Attachment Classification]\nFile: ${fileName}\nMethod: Heuristic\nCategory: ${localResult.category}\nConfidence: ${localResult.confidence}%\n`);
+    return localResult;
+  }
+
+  // 2. AI Classifier Fallback
+  console.log(`[Attachment Classification] Ambiguous document "${fileName}" (heuristic confidence: ${localResult.confidence}%). Invoking AI...`);
+  const aiService = require('./aiService');
+  const aiResult = await aiService.classifyAttachmentAgent(fileName, textSnippet);
+
+  console.log(`[Attachment Classification]\nFile: ${fileName}\nMethod: AI\nCategory: ${aiResult.category}\nConfidence: ${aiResult.confidence}%\n`);
+  
+  return {
+    category: aiResult.category,
+    confidence: aiResult.confidence,
+    source: 'ai'
+  };
+}
+
 module.exports = {
   extractTextFromFile,
   saveAndVersionAttachment,
-  detectCategory
+  detectCategory,
+  classifyAttachment
 };

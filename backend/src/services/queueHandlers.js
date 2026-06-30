@@ -26,6 +26,93 @@ const confidenceCalculationQueue = new Queue('ConfidenceCalculationQueue');
 const notificationQueue = new Queue('NotificationQueue');
 const attachmentReprocessingQueue = new Queue('AttachmentReprocessingQueue');
 
+// ── Tender Intelligence Match & Map Helpers ──────────────────
+
+function findMatchingSORItem(prod, tenderIntelligence) {
+  if (!tenderIntelligence || !tenderIntelligence.scheduleOfRates) return null;
+  const prodDesc = (prod.description || '').toLowerCase();
+  
+  // Clean description helper
+  const clean = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanProd = clean(prodDesc);
+  
+  // Try 1: Exact description match
+  for (const sch of tenderIntelligence.scheduleOfRates) {
+    for (const item of (sch.items || [])) {
+      if (clean(item.description) === cleanProd) {
+        return item;
+      }
+    }
+  }
+
+  // Try 2: Size & Class & Qty match
+  const parseSize = (desc) => {
+    const d = desc.toLowerCase();
+    const match = d.match(/\b(\d+(?:\/\d+)?\s*(?:inch|in|nb|dn|\"|mm))/i) || d.match(/(?:^|\s)(dn\s*\d+|\d+\s*mm)/i);
+    return match ? match[1].replace(/\s+/g, '').replace(/inch|in|dn|nb|mm|\"/g, '') : null;
+  };
+
+  const parseClass = (desc) => {
+    const d = desc.toLowerCase();
+    const match = d.match(/\b(\d+\s*#|\d+\s*class|class\s*\d+|#\s*\d+|\b\d+\s*lbs?)/i);
+    return match ? match[1].replace(/\s+/g, '').replace(/class|lbs?|#/g, '') : null;
+  };
+
+  const prodSize = parseSize(prodDesc);
+  const prodClass = parseClass(prodDesc);
+
+  for (const sch of tenderIntelligence.scheduleOfRates) {
+    for (const item of (sch.items || [])) {
+      const itemSize = parseSize(item.description || item.size || '');
+      const itemClass = parseClass(item.description || item.classRating || '');
+      const qtyMatch = Number(item.quantity) === Number(prod.quantity);
+      if (prodSize && itemSize && prodSize === itemSize &&
+          prodClass && itemClass && prodClass === itemClass &&
+          qtyMatch) {
+        return item;
+      }
+    }
+  }
+
+  // Try 3: Description substring match
+  for (const sch of tenderIntelligence.scheduleOfRates) {
+    for (const item of (sch.items || [])) {
+      const itemDesc = (item.description || '').toLowerCase();
+      if (prodDesc.includes(itemDesc) || itemDesc.includes(prodDesc)) {
+        return item;
+      }
+    }
+  }
+
+  return null;
+}
+
+function mapSORItemToFields(sorItem) {
+  const fields = {};
+  if (sorItem.size) fields.valve_size = { value: sorItem.size, confidence: 100 };
+  if (sorItem.classRating) fields.valve_class = { value: sorItem.classRating, confidence: 100 };
+  if (sorItem.endConnection) fields.valve_end_connection = { value: sorItem.endConnection, confidence: 100 };
+  if (sorItem.bodyMaterial) fields.valve_moc_body = { value: sorItem.bodyMaterial, confidence: 100 };
+  if (sorItem.ballStemMaterial) fields.valve_moc_ball = { value: sorItem.ballStemMaterial, confidence: 100 };
+  if (sorItem.operationType) fields.valve_operating = { value: sorItem.operationType, confidence: 100 };
+  if (sorItem.boreType) fields.valve_bore = { value: sorItem.boreType, confidence: 100 };
+  if (sorItem.ballType) fields.valve_ball_type = { value: sorItem.ballType, confidence: 100 };
+  
+  const desc = (sorItem.description || '').toLowerCase();
+  if (desc.includes('ball')) {
+    fields.valve_type = { value: 'Ball', confidence: 100 };
+  } else if (desc.includes('gate')) {
+    fields.valve_type = { value: 'Gate', confidence: 100 };
+  } else if (desc.includes('globe')) {
+    fields.valve_type = { value: 'Globe', confidence: 100 };
+  } else if (desc.includes('check')) {
+    fields.valve_type = { value: 'Check', confidence: 100 };
+  } else if (desc.includes('butterfly')) {
+    fields.valve_type = { value: 'Butterfly', confidence: 100 };
+  }
+  return fields;
+}
+
 /**
  * Checks if all attachments linked to an EmailMessage have completed background processing.
  * If yes, advances the message to AIExtractionQueue.
@@ -118,10 +205,13 @@ async function handleOCRProcessing({ attachmentId, emailMessageId }) {
   const buffer = await getFileBuffer(att.storagePath);
   const result = await fileParsingService.extractTextFromFile(buffer, att.fileType, att.originalFileName);
 
+  const classificationResult = await fileParsingService.classifyAttachment(att.originalFileName, result.text || '');
+  att.classification = classificationResult;
+  att.attachmentCategory = classificationResult.category;
+
   att.extractedText = result.text;
   att.extractionStatus = result.status;
   att.ocrConfidence = result.confidence;
-  att.attachmentCategory = result.category;
   att.processingStatus = 'Completed';
   att.processingCompletedAt = new Date();
   await att.save();
@@ -154,9 +244,12 @@ async function handleDocumentParsing({ attachmentId, emailMessageId }) {
   const buffer = await getFileBuffer(att.storagePath);
   const result = await fileParsingService.extractTextFromFile(buffer, att.fileType, att.originalFileName);
 
+  const classificationResult = await fileParsingService.classifyAttachment(att.originalFileName, result.text || '');
+  att.classification = classificationResult;
+  att.attachmentCategory = classificationResult.category;
+
   att.extractedText = result.text;
   att.extractionStatus = result.status;
-  att.attachmentCategory = result.category;
   att.processingStatus = 'Completed';
   att.processingCompletedAt = new Date();
   await att.save();
@@ -373,13 +466,68 @@ async function handleAIExtraction({ emailMessageId }) {
     });
   } else if (classification.category === 'Enquiry' || classification.category === 'Tender') {
     // ──────────────────────────────────────────────────────────────
-    // ROUTE: Enquiry / Tender → New product extraction
+    // ROUTE: Enquiry / Tender → New product extraction (Phase 4 Structured BOQ)
     // ──────────────────────────────────────────────────────────────
-    console.log(`[AI Extraction] Calling AI extractEnquiries for new ${classification.category}...`);
-    const metadata = { from: emailMsg.sender, subject: emailMsg.subject };
-    const extractedResult = await aiService.extractEnquiries(bodyText, savedAttachments, metadata);
+    const boqParserService = require('./boqParserService');
+    const boqAttachments = savedAttachments.filter(att => att.attachmentCategory === 'BOQ');
+    
+    const structuredProducts = [];
+    const successfullyParsedBoqIds = new Set();
 
-    if (extractedResult.isEnquiry === false || !extractedResult.enquiries || extractedResult.enquiries.length === 0) {
+    for (const att of boqAttachments) {
+      const parsed = await boqParserService.parseStructuredBOQ(att);
+      if (parsed && parsed.length > 0) {
+        structuredProducts.push(...parsed);
+        successfullyParsedBoqIds.add(att._id.toString());
+      }
+    }
+
+    // Filter out successfully parsed BOQs from files sent to AI
+    const remainingAttachmentsForAI = savedAttachments.filter(att => !successfullyParsedBoqIds.has(att._id.toString()));
+
+    console.log(`[AI Extraction] Calling AI extractEnquiries for new ${classification.category}... (Sent ${remainingAttachmentsForAI.length} attachments, skipped ${successfullyParsedBoqIds.size} parsed BOQs)`);
+    const metadata = { from: emailMsg.sender, subject: emailMsg.subject };
+    
+    // Pass 1: AI Catalog building
+    const extractedResult = await aiService.extractEnquiries(bodyText, remainingAttachmentsForAI, metadata);
+
+    // Merge structured products from BOQ with AI products
+    let allProducts = [];
+    if (structuredProducts.length > 0) {
+      // If we have structurally parsed BOQs (like the CSV), use them as the absolute source of truth!
+      allProducts = structuredProducts.map(item => ({
+        productCategory: item.productCategory || 'Custom',
+        productDescription: item.productDescription || '',
+        quantity: item.quantity || 1,
+        unit: item.unit || 'NOS',
+        standardCode: item.standardCode || 'Not specified',
+        specialRequirements: '',
+        priority: 'Medium',
+        confidence: 100, // Structured parsing has 100% confidence
+        linkedAttachmentNames: []
+      }));
+      console.log(`[AI Extraction] Using ${allProducts.length} structured products from BOQ. Skipping AI-extracted products to avoid duplication.`);
+    } else {
+      // Fallback: Use AI-extracted products from PDF/Email body
+      if (extractedResult && extractedResult.enquiries && extractedResult.enquiries.length > 0) {
+        allProducts = extractedResult.enquiries.map(item => ({
+          productCategory: item.productCategory || 'Custom',
+          productDescription: item.productDescription || '',
+          quantity: item.quantity || 1,
+          unit: item.unit || 'NOS',
+          standardCode: item.standardCode || 'Not specified',
+          specialRequirements: item.specialRequirements || '',
+          priority: item.priority || 'Medium',
+          confidence: item.confidence || 90,
+          linkedAttachmentNames: item.linkedAttachmentNames || []
+        }));
+      }
+      
+      // Phase 5: Deduplicate and merge products from multiple sources (only for AI-extracted products)
+      allProducts = boqParserService.mergeEnquiryProducts(allProducts);
+    }
+
+    if (allProducts.length === 0) {
       console.log(`[AI Extraction] Email ${emailMessageId} classified as ${classification.category} but no products extracted. Terminating.`);
       emailMsg.processingStatus = 'Completed';
       emailMsg.processingMessage = `Classified as ${classification.category} but no extractable products found`;
@@ -388,14 +536,10 @@ async function handleAIExtraction({ emailMessageId }) {
       return;
     }
 
-    // Safety limit check
-    const MAX_PRODUCTS_PER_EMAIL = 50;
-    if (extractedResult.enquiries.length > MAX_PRODUCTS_PER_EMAIL) {
-      const err = new Error(`Email contains ${extractedResult.enquiries.length} products, exceeding safety limit of ${MAX_PRODUCTS_PER_EMAIL}`);
-      emailMsg.processingStatus = 'Failed';
-      emailMsg.processingMessage = `Safety Limit Exceeded: ${extractedResult.enquiries.length} items`;
-      await emailMsg.save();
-      throw err;
+    // Log and handle product limit (Part 18: no hard stop)
+    const aiConfig = require('../config/aiConfig');
+    if (allProducts.length > aiConfig.MAX_PRODUCTS_PER_BATCH) {
+      console.warn(`[AI Extraction] Warning: Email contains ${allProducts.length} products, which exceeds the configured batch size of ${aiConfig.MAX_PRODUCTS_PER_BATCH}. Processing all of them.`);
     }
 
     // Create temporary enquiries in 'Pending' processingStatus
@@ -403,7 +547,7 @@ async function handleAIExtraction({ emailMessageId }) {
     const agentId = defaultAgent ? defaultAgent._id : null;
 
     // Update customer company info
-    if (extractedResult.companyName && extractedResult.companyName !== 'Individual Customer' && customer.companyName === 'Individual Customer') {
+    if (extractedResult && extractedResult.companyName && extractedResult.companyName !== 'Individual Customer' && customer.companyName === 'Individual Customer') {
       customer.companyName = extractedResult.companyName;
       customer.primaryContactName = extractedResult.primaryContactName || customer.primaryContactName;
       customer.mobileNumber = extractedResult.mobileNumber !== '0000000000' ? extractedResult.mobileNumber : customer.mobileNumber;
@@ -411,7 +555,7 @@ async function handleAIExtraction({ emailMessageId }) {
     }
 
     // Map products array
-    const productsArray = extractedResult.enquiries.map(item => ({
+    const productsArray = allProducts.map(item => ({
       description: item.productDescription || '',
       quantity: item.quantity || 1,
       unit: item.unit || 'NOS',
@@ -422,24 +566,24 @@ async function handleAIExtraction({ emailMessageId }) {
     }));
 
     // Build merged enquiry fields
-    const categories = [...new Set(extractedResult.enquiries.map(item => item.productCategory).filter(Boolean))];
+    const categories = [...new Set(allProducts.map(item => item.productCategory).filter(Boolean))];
     const mergedCategory = categories.length === 1 ? categories[0] : (categories.length > 1 ? 'Multiple' : 'Multiple');
 
-    const descParts = extractedResult.enquiries.map((item, idx) => `${idx + 1}. ${item.productDescription} (${item.quantity} ${item.unit || 'NOS'})`);
+    const descParts = allProducts.map((item, idx) => `${idx + 1}. ${item.productDescription} (${item.quantity} ${item.unit || 'NOS'})`);
     let mergedDescription = descParts.join(' | ');
     if (mergedDescription.length > 200) {
       mergedDescription = mergedDescription.substring(0, 197) + '...';
     }
 
-    const mergedQuantity = extractedResult.enquiries.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    const mergedQuantity = allProducts.reduce((sum, item) => sum + (item.quantity || 0), 0);
 
-    const units = [...new Set(extractedResult.enquiries.map(item => item.unit).filter(Boolean))];
+    const units = [...new Set(allProducts.map(item => item.unit).filter(Boolean))];
     const mergedUnit = units.length === 1 ? units[0] : 'NOS';
 
-    const standards = [...new Set(extractedResult.enquiries.map(item => item.standardCode).filter(Boolean))];
+    const standards = [...new Set(allProducts.map(item => item.standardCode).filter(Boolean))];
     const mergedStandard = standards.length === 1 ? standards[0] : 'Not specified';
 
-    const reqs = [...new Set(extractedResult.enquiries.map(item => item.specialRequirements).filter(r => r && r.trim().length > 0))];
+    const reqs = [...new Set(allProducts.map(item => item.specialRequirements).filter(r => r && r.trim().length > 0))];
     let mergedSpecialRequirements = reqs.join(' | ');
     if (mergedSpecialRequirements.length > 400) {
       mergedSpecialRequirements = mergedSpecialRequirements.substring(0, 397) + '...';
@@ -448,7 +592,7 @@ async function handleAIExtraction({ emailMessageId }) {
     const priorityRank = { 'Urgent': 4, 'High': 3, 'Medium': 2, 'Low': 1 };
     let maxPriority = 'Medium';
     let maxRank = 0;
-    for (const item of extractedResult.enquiries) {
+    for (const item of allProducts) {
       const r = priorityRank[item.priority] || 2;
       if (r > maxRank) {
         maxRank = r;
@@ -458,16 +602,16 @@ async function handleAIExtraction({ emailMessageId }) {
     const mergedPriority = maxPriority;
 
     const averageConfidence = Math.round(
-      extractedResult.enquiries.reduce((sum, item) => sum + (item.confidence || 100), 0) / extractedResult.enquiries.length
+      allProducts.reduce((sum, item) => sum + (item.confidence || 100), 0) / allProducts.length
     );
 
-    const minConfidence = extractedResult.enquiries.reduce(
+    const minConfidence = allProducts.reduce(
       (min, item) => Math.min(min, item.confidence || 100),
       100
     );
 
     const attachmentNames = [];
-    for (const item of extractedResult.enquiries) {
+    for (const item of allProducts) {
       if (item.linkedAttachmentNames) {
         attachmentNames.push(...item.linkedAttachmentNames);
       }
@@ -618,29 +762,46 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       enquiry.processingMessage = 'Recalculating specifications and confidence';
       await enquiry.save();
 
-      const fields = await FieldDefinition.find({
-        formContext: 'Enquiry',
-        isDeleted: false,
-        isActive: true,
-        $or: [
-          { productCategory: enquiry.productCategory },
-          { productCategory: null },
-          { productCategory: '' }
-        ]
-      });
-
       // AI dynamic spec extraction per product — MERGE with existing fields (don't wipe)
       const previousFields = { ...enquiry.dynamicFields };
       const newlyExtractedGlobal = {};
       
       if (enquiry.products && enquiry.products.length > 0) {
-        for (const prod of enquiry.products) {
+        const aiConfig = require('../config/aiConfig');
+        const mapLimit = async (items, limit, fn) => {
+          const results = [];
+          const executing = new Set();
+          for (const item of items) {
+            const p = Promise.resolve().then(() => fn(item));
+            results.push(p);
+            executing.add(p);
+            const clean = () => executing.delete(p);
+            p.then(clean, clean);
+            if (executing.size >= limit) {
+              await Promise.race(executing);
+            }
+          }
+          return Promise.all(results);
+        };
+
+        await mapLimit(enquiry.products, aiConfig.MAX_AI_CONCURRENCY, async (prod) => {
+          const prodCategory = prod.category || enquiry.productCategory;
+          const fields = await FieldDefinition.find({
+            formContext: 'Enquiry',
+            isDeleted: false,
+            isActive: true,
+            $or: [
+              { productCategory: prodCategory },
+              { productCategory: null },
+              { productCategory: '' }
+            ]
+          });
+
           const existingProdFields = { ...(prod.dynamicFields || {}) };
-          const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description);
-          // Merge: keep existing values, overlay with newly extracted non-empty values
+          const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description, enquiry.enquiryId);
           prod.dynamicFields = { ...existingProdFields, ...prodFields };
           Object.assign(newlyExtractedGlobal, prodFields);
-        }
+        });
 
         // Apply any newly extracted fields to ALL products that were missing them
         // (e.g. customer replied "150#" without specifying which product — apply to all)
@@ -649,7 +810,8 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
           for (const prod of enquiry.products) {
             const prodCat = prod.category || enquiry.productCategory;
             // Only fill if this product's category matches the field's category
-            const fieldDef = fields.find(f => f.fieldName === key);
+            const allFields = await FieldDefinition.find({ fieldName: key, formContext: 'Enquiry', isDeleted: false });
+            const fieldDef = allFields[0];
             if (fieldDef && fieldDef.productCategory && fieldDef.productCategory !== prodCat) continue;
             if (!prod.dynamicFields[key]) {
               prod.dynamicFields[key] = val;
@@ -664,7 +826,17 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
           Object.assign(enquiry.dynamicFields, prod.dynamicFields);
         }
       } else {
-        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
+        const fields = await FieldDefinition.find({
+          formContext: 'Enquiry',
+          isDeleted: false,
+          isActive: true,
+          $or: [
+            { productCategory: enquiry.productCategory },
+            { productCategory: null },
+            { productCategory: '' }
+          ]
+        });
+        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription, enquiry.enquiryId);
         enquiry.dynamicFields = { ...previousFields, ...extractedFields };
       }
 
@@ -813,31 +985,108 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       enquiry.processingMessage = 'Mapping specifications and computing confidence';
       await enquiry.save();
 
-      const fields = await FieldDefinition.find({
-        formContext: 'Enquiry',
-        isDeleted: false,
-        isActive: true,
-        $or: [
-          { productCategory: enquiry.productCategory },
-          { productCategory: null },
-          { productCategory: '' }
-        ]
-      });
+      // ── Tender Intelligence Extraction (Runs First for Tenders) ─────────
+      let tenderIntelligence = null;
+      if (enquiry.sourceType === 'Tender') {
+        try {
+          const tenderIntelligenceService = require('./tenderIntelligenceService');
+          const attachmentFileNames = freshAttachments.map(a => a.originalFileName).filter(Boolean);
+          console.log(`[Confidence Queue] Running Tender Intelligence extraction for ${enquiry.enquiryId} first...`);
+          tenderIntelligence = await tenderIntelligenceService.extractTenderIntelligence(
+            fullTextContext, attachmentFileNames, enquiry.enquiryId
+          );
+          enquiry.tenderIntelligence = tenderIntelligence;
+          enquiry.markModified('tenderIntelligence');
+
+          // Backfill top-level tender fields from intelligence if not already set
+          if (tenderIntelligence.tenderDetails) {
+            if (!enquiry.tenderNumber && tenderIntelligence.tenderDetails.gemTenderNo) {
+              enquiry.tenderNumber = tenderIntelligence.tenderDetails.gemTenderNo;
+            }
+            if (!enquiry.gemTenderNo && tenderIntelligence.tenderDetails.gemTenderNo) {
+              enquiry.gemTenderNo = tenderIntelligence.tenderDetails.gemTenderNo;
+            }
+          }
+          if (tenderIntelligence.tenderTimeline) {
+            if (!enquiry.tenderDeadline && tenderIntelligence.tenderTimeline.bidSubmissionDate) {
+              enquiry.tenderDeadline = new Date(tenderIntelligence.tenderTimeline.bidSubmissionDate);
+            }
+            if (!enquiry.requiredDeliveryWeeks && tenderIntelligence.tenderTimeline.deliveryPeriodDays) {
+              enquiry.requiredDeliveryWeeks = Math.ceil(tenderIntelligence.tenderTimeline.deliveryPeriodDays / 7);
+            }
+          }
+          console.log(`[Confidence Queue] Tender Intelligence extracted for ${enquiry.enquiryId}. Missing fields: ${tenderIntelligence.missingFields?.length || 0}`);
+        } catch (tiErr) {
+          console.error(`[Confidence Queue] Tender Intelligence extraction failed for ${enquiry.enquiryId}:`, tiErr.message);
+        }
+      }
 
       enquiry.dynamicFields = {};
       if (enquiry.products && enquiry.products.length > 0) {
-        for (const prod of enquiry.products) {
-          const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description);
+        const aiConfig = require('../config/aiConfig');
+        const mapLimit = async (items, limit, fn) => {
+          const results = [];
+          const executing = new Set();
+          for (const item of items) {
+            const p = Promise.resolve().then(() => fn(item));
+            results.push(p);
+            executing.add(p);
+            const clean = () => executing.delete(p);
+            p.then(clean, clean);
+            if (executing.size >= limit) {
+              await Promise.race(executing);
+            }
+          }
+          return Promise.all(results);
+        };
+
+        await mapLimit(enquiry.products, aiConfig.MAX_AI_CONCURRENCY, async (prod) => {
+          let prodFields = null;
+
+          // Optimization: If Tender Intelligence successfully extracted SOR table,
+          // map fields directly in 0ms instead of calling sequential AI requests!
+          if (enquiry.sourceType === 'Tender' && tenderIntelligence) {
+            const matchedSorItem = findMatchingSORItem(prod, tenderIntelligence);
+            if (matchedSorItem) {
+              prodFields = mapSORItemToFields(matchedSorItem);
+              console.log(`[Confidence Queue] Product "${prod.description}" successfully mapped to SOR Schedule Item (0ms, 100% confidence).`);
+            }
+          }
+
+          // Fallback: Use AI-based extraction
+          if (!prodFields) {
+            const prodCategory = prod.category || enquiry.productCategory;
+            const fields = await FieldDefinition.find({
+              formContext: 'Enquiry',
+              isDeleted: false,
+              isActive: true,
+              $or: [
+                { productCategory: prodCategory },
+                { productCategory: null },
+                { productCategory: '' }
+              ]
+            });
+            prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description, enquiry.enquiryId);
+          }
+
           prod.dynamicFields = prodFields;
           Object.assign(enquiry.dynamicFields, prodFields);
-        }
+        });
         enquiry.markModified('products');
       } else {
-        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription);
+        const fields = await FieldDefinition.find({
+          formContext: 'Enquiry',
+          isDeleted: false,
+          isActive: true,
+          $or: [
+            { productCategory: enquiry.productCategory },
+            { productCategory: null },
+            { productCategory: '' }
+          ]
+        });
+        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription, enquiry.enquiryId);
         enquiry.dynamicFields = extractedFields;
       }
-
-      // Find attachments mapped by AI — use freshAttachments (full documents, not ObjectIds)
       const mappedAttachments = freshAttachments.filter(att =>
         (aiItem.linkedAttachmentNames || []).some(name =>
           name && att.originalFileName && name.toLowerCase() === att.originalFileName.toLowerCase()
@@ -959,9 +1208,11 @@ async function handleNotificationProcessing({ emailMessageId, isReply, enquiryId
       quantity: enquiry.quantity,
       unit: enquiry.unit,
       status: enquiry.status,
+      emailAccount: enquiry.emailAccount,
       missingFields: completion.missingFields,
       dynamicFields: enquiry.dynamicFields || {},
-      products: enquiry.products || []
+      products: enquiry.products || [],
+      tenderIntelligence: enquiry.tenderIntelligence || null
     });
 
     // Notify agents
@@ -1034,6 +1285,14 @@ async function handleAttachmentReprocessing({ attachmentId }) {
 
   const buffer = await getFileBuffer(att.storagePath);
   const result = await fileParsingService.extractTextFromFile(buffer, att.fileType, att.originalFileName);
+
+  const crypto = require('crypto');
+  const fileHash = crypto.createHash('md5').update(buffer).digest('hex');
+  att.fileHash = fileHash;
+
+  const classificationResult = await fileParsingService.classifyAttachment(att.originalFileName, result.text || '');
+  att.classification = classificationResult;
+  att.attachmentCategory = classificationResult.category;
 
   att.extractedText = result.text;
   att.extractionStatus = result.status;

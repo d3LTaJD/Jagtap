@@ -13,13 +13,12 @@ exports.createNotification = async ({ user_id, type, title, message, related_id 
     // Prevent duplicate notifications in the last 60 seconds
     const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
     const existing = await Notification.findOne({
-      $or: [{ user_id }, { userId: user_id }],
+      $and: [
+        { $or: [{ user_id }, { userId: user_id }] },
+        { $or: [{ related_id: related_id || null }, { entityId: related_id || null }] }
+      ],
       type,
       title,
-      $or: [
-        { related_id: related_id || null },
-        { entityId: related_id || null }
-      ],
       created_at: { $gte: sixtySecondsAgo }
     });
 

@@ -35,6 +35,46 @@ exports.uploadFile = async (req, res, next) => {
       entityId: entityId || null
     });
 
+    // 3. If this is an Enquiry attachment, also create an Attachment record and
+    //    queue it for text extraction + AI field filling (same pipeline as email attachments)
+    if (module === 'Enquiry' && entityId) {
+      try {
+        const Attachment = require('../models/Attachment');
+        const Enquiry = require('../models/Enquiry');
+        const enquiry = await Enquiry.findById(entityId);
+        
+        if (enquiry) {
+          const attachment = await Attachment.create({
+            customerId: enquiry.customer,
+            threadId: enquiry.threadId || '',
+            originalFileName: req.file.originalname,
+            fileType: req.file.mimetype,
+            fileSize: req.file.size,
+            storagePath: fileKey,
+            extractedText: '',
+            extractionStatus: 'PENDING',
+            processingStatus: 'Pending',
+            attachmentOwnerType: 'User',
+            uploadedBy: req.user._id,
+            linkedEnquiries: [enquiry._id]
+          });
+
+          // Link attachment to enquiry
+          if (!enquiry.attachmentsList) enquiry.attachmentsList = [];
+          enquiry.attachmentsList.push(attachment._id);
+          await enquiry.save();
+
+          // Queue for text extraction → AI field extraction
+          const { attachmentReprocessingQueue } = require('../services/queueHandlers');
+          await attachmentReprocessingQueue.add({ attachmentId: attachment._id });
+          console.log(`[Upload] Queued manual attachment ${req.file.originalname} for extraction on enquiry ${enquiry.enquiryId}`);
+        }
+      } catch (extractionErr) {
+        // Don't fail the upload if extraction queueing fails
+        console.error('[Upload] Failed to queue attachment for extraction:', extractionErr.message);
+      }
+    }
+
     res.status(201).json({ 
       status: 'success', 
       data: { file: fileMeta } 

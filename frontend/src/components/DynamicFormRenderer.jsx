@@ -51,8 +51,22 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
   if (loading) return null;
   if (!fields.length) return null;
 
+  const getFieldValue = (fieldName) => {
+    const rawVal = values[fieldName];
+    if (rawVal && typeof rawVal === 'object' && rawVal.hasOwnProperty('value')) {
+      return rawVal.value;
+    }
+    return rawVal;
+  };
+
   // Evaluate conditional logic — returns true if field should be visible
   const isVisible = (field) => {
+    // Category boundary check
+    if (field.productCategory && values.productCategory) {
+      if (field.productCategory !== 'Multiple' && field.productCategory !== 'Custom' && field.productCategory !== values.productCategory) {
+        return false;
+      }
+    }
     // Role-based visibility check
     if (field.visibleToRoles?.length) {
       if (!userRoles.length) return false; // Safety: if restricted but no role, hide
@@ -60,7 +74,7 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
     }
     // Conditional logic
     if (field.conditionalLogic?.dependsOnField) {
-      const controllingValue = String(values[field.conditionalLogic.dependsOnField] || '');
+      const controllingValue = String(getFieldValue(field.conditionalLogic.dependsOnField) || '');
       return controllingValue === field.conditionalLogic.requiredValue;
     }
     return true;
@@ -94,7 +108,7 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
   });
 
   const renderInput = (field) => {
-    const val = values[field.fieldName] ?? '';
+    const val = getFieldValue(field.fieldName) ?? '';
     const canEdit = isEditable(field);
     const baseClass = `w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm 
       font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors outline-none disabled:bg-slate-100 disabled:text-slate-500`;

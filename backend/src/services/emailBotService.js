@@ -220,10 +220,15 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
         if (prod.dynamicFields && Object.keys(prod.dynamicFields).length > 0) {
           for (const [key, val] of Object.entries(prod.dynamicFields)) {
             if (val === undefined || val === null || val === '') continue;
+            const displayVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
+            if (displayVal === undefined || displayVal === null || displayVal === '') continue;
+            
             const def = fieldDefs.find(f => f.fieldName === key);
             const label = def ? def.fieldLabel : key;
-            prodSpecLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${val}</li>`);
-            prodSpecTextLines.push(`    - ${label}: ${val}`);
+            const formattedVal = typeof displayVal === 'boolean' ? (displayVal ? 'Yes' : 'No') : displayVal;
+            
+            prodSpecLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${formattedVal}</li>`);
+            prodSpecTextLines.push(`    - ${label}: ${formattedVal}`);
           }
         }
         
@@ -262,10 +267,15 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
       const specTextLines = [];
       for (const [key, val] of Object.entries(item.dynamicFields)) {
         if (val === undefined || val === null || val === '') continue;
+        const displayVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
+        if (displayVal === undefined || displayVal === null || displayVal === '') continue;
+
         const def = fieldDefs.find(f => f.fieldName === key);
         const label = def ? def.fieldLabel : key;
-        specLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${val}</li>`);
-        specTextLines.push(`  - ${label}: ${val}`);
+        const formattedVal = typeof displayVal === 'boolean' ? (displayVal ? 'Yes' : 'No') : displayVal;
+
+        specLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${formattedVal}</li>`);
+        specTextLines.push(`  - ${label}: ${formattedVal}`);
       }
       if (specLines.length > 0) {
         specsHtml = `
@@ -349,9 +359,39 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
     bodyTemplate = 'Dear {contactName},\n\nThis is a friendly follow-up reminder regarding your enquiry. We still need some additional specifications to process your request:\n\n{itemsText}\n\nPlease reply directly to this email with the requested details.\n\nBest regards,\nPetro Valve Sales Team';
   }
 
+  // Build tender intelligence summary block for tender-type enquiries
+  let tenderSummaryHtml = '';
+  let tenderSummaryText = '';
+  if (enquiriesData.length > 0 && enquiriesData[0].tenderIntelligence) {
+    const ti = enquiriesData[0].tenderIntelligence;
+    const td = ti.tenderDetails || {};
+    const tl = ti.tenderTimeline || {};
+    const ct = ti.commercialTerms || {};
+
+    const tiRows = [];
+    const tiTextLines = [];
+    if (td.tenderName) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Tender</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.tenderName}</td></tr>`); tiTextLines.push(`  Tender: ${td.tenderName}`); }
+    if (td.customer) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Customer</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.customer}</td></tr>`); tiTextLines.push(`  Customer: ${td.customer}`); }
+    if (td.epcmConsultant) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">EPCM</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.epcmConsultant}</td></tr>`); tiTextLines.push(`  EPCM: ${td.epcmConsultant}`); }
+    if (td.gemTenderNo) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">GeM No</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.gemTenderNo}</td></tr>`); tiTextLines.push(`  GeM No: ${td.gemTenderNo}`); }
+    if (td.projectNo) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Project No</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.projectNo}</td></tr>`); tiTextLines.push(`  Project No: ${td.projectNo}`); }
+    if (tl.bidSubmissionDate) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Bid Deadline</td><td style="padding:4px 8px;color:#dc2626;font-weight:bold;font-size:12px;">${tl.bidSubmissionDate}</td></tr>`); tiTextLines.push(`  Bid Deadline: ${tl.bidSubmissionDate}`); }
+
+
+    if (tiRows.length > 0) {
+      tenderSummaryHtml = `
+        <div style="background-color:#fffbeb;border:1px solid #fef3c7;border-radius:12px;padding:15px;margin:15px 0;">
+          <h4 style="margin-top:0;color:#92400e;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">📋 Tender Intelligence Summary</h4>
+          <table style="width:100%;border-collapse:collapse;">${tiRows.join('')}</table>
+        </div>
+      `;
+      tenderSummaryText = `\nTender Intelligence:\n${tiTextLines.join('\n')}\n`;
+    }
+  }
+
   const textContent = bodyTemplate
     .replace(/{contactName}/g, contactName)
-    .replace(/{itemsText}/g, itemsText);
+    .replace(/{itemsText}/g, tenderSummaryText + itemsText);
 
   const formattedItemsHtml = `
     <div style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:15px;margin:20px 0;">
@@ -362,7 +402,7 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
 
   let bodyHtml = bodyTemplate
     .replace(/{contactName}/g, `<strong>${contactName}</strong>`)
-    .replace(/{itemsText}/g, formattedItemsHtml)
+    .replace(/{itemsText}/g, tenderSummaryHtml + formattedItemsHtml)
     .split('\n').join('<br/>');
 
   const htmlContent = `

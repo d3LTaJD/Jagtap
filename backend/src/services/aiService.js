@@ -1,4 +1,25 @@
+const crypto = require('crypto');
 const { logActivity } = require('../utils/logger');
+const aiConfig = require('../config/aiConfig');
+const aiLogger = require('../utils/aiLogger');
+
+// Part 2: Custom Production-Grade Errors
+class RetryableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'RetryableError';
+    this.rateLimited = true;
+    this.retryable = true;
+  }
+}
+
+class ExtractionFailedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ExtractionFailedError';
+    this.nonRetryable = true;
+  }
+}
 
 // Normalizes AI product category outputs to the Mongoose Enquiry enum
 const PRODUCT_CATEGORIES = [
@@ -23,34 +44,296 @@ const STANDARD_CODES = [
   'Not specified'
 ];
 
+// Conversion map for inch to mm NB sizing
+const inchToMmMap = {
+  '1/2': '15',
+  '3/4': '20',
+  '1': '25',
+  '1.25': '32',
+  '1.1/4': '32',
+  '1-1/4': '32',
+  '1.5': '40',
+  '1.1/2': '40',
+  '1-1/2': '40',
+  '2': '50',
+  '2.5': '65',
+  '2.1/2': '65',
+  '2-1/2': '65',
+  '3': '80',
+  '4': '100',
+  '5': '125',
+  '6': '150',
+  '8': '200',
+  '10': '250',
+  '12': '300',
+  '14': '350',
+  '16': '400',
+  '18': '450',
+  '20': '500',
+  '24': '600'
+};
+
+/**
+ * Helper to safely parse and clean JSON output from LLMs
+ */
+function tryParseJson(text) {
+  if (!text) return null;
+  let cleanText = text.trim();
+  if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+  }
+  try {
+    return JSON.parse(cleanText);
+  } catch (err) {
+    console.warn('[AI Service] Failed to parse JSON. Raw content snippet:', cleanText.substring(0, 300));
+    return null;
+  }
+}
+
+/**
+ * Unified fallback AI requester with timeouts, structured JSON validation, and 1x retry on JSON parse failures.
+ * cascade chain: OpenAI -> Gemini -> Groq -> RetryableError / ExtractionFailedError
+ */
+async function callAIServiceWithFallback({ prompt, validateFn = () => true, logTag = 'AI Service', enquiryId = 'SYSTEM' }) {
+  const startTime = Date.now();
+
+  let anySucceeded = false;
+  let anyRateLimited = false;
+  let anyServerError = false;
+  let parsedResult = null;
+  const attempts = [];
+
+  const fetchWithTimeout = async (url, options) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), aiConfig.AI_TIMEOUT);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return res;
+    } catch (err) {
+      clearTimeout(id);
+      throw err;
+    }
+  };
+
+  const attemptProvider = async (providerName, modelName, executeFetch, extractTextFn) => {
+    let currentPrompt = prompt;
+
+    for (let attemptNum = 1; attemptNum <= 2; attemptNum++) {
+      const attemptStartTime = Date.now();
+      let httpStatus = 0;
+      let errorReason = '';
+
+      try {
+        console.log(`[${logTag}] Attempting ${providerName} (${modelName}) - Attempt ${attemptNum}...`);
+        const res = await executeFetch(currentPrompt);
+        httpStatus = res.status;
+
+        if (res.ok) {
+          const body = await res.json();
+          const rawText = extractTextFn(body);
+          const parsed = tryParseJson(rawText);
+
+          if (parsed && validateFn(parsed)) {
+            attempts.push({
+              provider: providerName,
+              model: modelName,
+              attempt: attemptNum,
+              processingTime: Date.now() - attemptStartTime,
+              status: 'success',
+              httpStatus
+            });
+            parsedResult = parsed;
+            anySucceeded = true;
+            
+            aiLogger.logAIRequestResponse(
+              enquiryId,
+              `${logTag}_${providerName}_Attempt${attemptNum}`,
+              { prompt: currentPrompt, provider: providerName, model: modelName, attempt: attemptNum },
+              { httpStatus, body }
+            );
+
+            return true;
+          } else {
+            errorReason = 'JSON_VALIDATE_FAILED';
+            console.warn(`[${logTag}] ${providerName} (${modelName}) returned invalid JSON format or failed custom validation.`);
+            
+            aiLogger.logAIRequestResponse(
+              enquiryId,
+              `${logTag}_${providerName}_Attempt${attemptNum}_Validation_Failed`,
+              { prompt: currentPrompt, provider: providerName, model: modelName, attempt: attemptNum },
+              { httpStatus, body, rawText, parsed }
+            );
+          }
+        } else if (res.status === 429) {
+          anyRateLimited = true;
+          errorReason = '429 Rate Limited';
+          console.warn(`[${logTag}] ${providerName} (${modelName}) rate limited.`);
+          
+          aiLogger.logAIRequestResponse(
+            enquiryId,
+            `${logTag}_${providerName}_Attempt${attemptNum}_429`,
+            { prompt: currentPrompt, provider: providerName, model: modelName, attempt: attemptNum },
+            { httpStatus, error: 'Rate Limited' }
+          );
+
+          break; // Skip retry on 429, cascade to next provider immediately
+        } else {
+          anyServerError = true;
+          errorReason = `HTTP Error ${res.status}`;
+          const errText = await res.text().catch(() => '');
+          console.error(`[${logTag}] ${providerName} (${modelName}) error: ${errText.substring(0, 200)}`);
+          
+          aiLogger.logAIRequestResponse(
+            enquiryId,
+            `${logTag}_${providerName}_Attempt${attemptNum}_Error`,
+            { prompt: currentPrompt, provider: providerName, model: modelName, attempt: attemptNum },
+            { httpStatus, error: errText }
+          );
+        }
+      } catch (err) {
+        let isTimeout = err.name === 'AbortError';
+        if (isTimeout) {
+          anyServerError = true;
+          errorReason = 'Timeout (Abort)';
+          console.error(`[${logTag}] ${providerName} (${modelName}) request timed out after ${aiConfig.AI_TIMEOUT}ms.`);
+        } else {
+          anyServerError = true;
+          errorReason = err.message;
+          console.error(`[${logTag}] ${providerName} (${modelName}) fetch error:`, err.message);
+        }
+
+        aiLogger.logAIRequestResponse(
+          enquiryId,
+          `${logTag}_${providerName}_Attempt${attemptNum}_Exception`,
+          { prompt: currentPrompt, provider: providerName, model: modelName, attempt: attemptNum },
+          { error: err.message, isTimeout, stack: err.stack }
+        );
+      }
+
+      attempts.push({
+        provider: providerName,
+        model: modelName,
+        attempt: attemptNum,
+        processingTime: Date.now() - attemptStartTime,
+        status: 'failed',
+        reason: errorReason,
+        httpStatus
+      });
+
+      if (anyRateLimited || anyServerError) {
+        break; // Cascade to next provider immediately
+      }
+
+      if (attemptNum === 1) {
+        console.log(`[${logTag}] Retrying ${providerName} once with invalid JSON warning...`);
+        currentPrompt = prompt + `\n\nCRITICAL: You returned invalid JSON in your previous attempt. Return ONLY a valid, parseable JSON object matching the instructions above. Do not include markdown code block formatting, explanations, or text before/after.`;
+      }
+    }
+    return false;
+  };
+
+  // 1. Try OpenAI (Primary)
+  if (process.env.OPENAI_API_KEY) {
+    const success = await attemptProvider(
+      'OpenAI',
+      aiConfig.PRIMARY_MODEL,
+      async (p) => fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: aiConfig.PRIMARY_MODEL,
+          messages: [{ role: 'user', content: p }],
+          response_format: { type: 'json_object' }
+        })
+      }),
+      (body) => body.choices?.[0]?.message?.content
+    );
+    if (success) return { result: parsedResult, attempts };
+  }
+
+  // 2. Try Gemini (Fallback)
+  if (process.env.GEMINI_API_KEY) {
+    for (const modelName of aiConfig.GEMINI_MODELS) {
+      const success = await attemptProvider(
+        'Gemini',
+        modelName,
+        async (p) => fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: p }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        }),
+        (body) => body.candidates?.[0]?.content?.parts?.[0]?.text
+      );
+      if (success) return { result: parsedResult, attempts };
+    }
+  }
+
+  // 3. Try Groq (Fallback)
+  if (process.env.GROQ_API_KEY) {
+    const success = await attemptProvider(
+      'Groq',
+      aiConfig.GROQ_MODEL,
+      async (p) => fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: aiConfig.GROQ_MODEL,
+          messages: [{ role: 'user', content: p }],
+          response_format: { type: 'json_object' }
+        })
+      }),
+      (body) => body.choices?.[0]?.message?.content
+    );
+    if (success) return { result: parsedResult, attempts };
+  }
+
+  // Exhausted all providers
+  const totalTime = Date.now() - startTime;
+  console.error(`[${logTag}] All AI providers exhausted. Attempts summary:`, JSON.stringify(attempts));
+
+  if (anyRateLimited) {
+    throw new RetryableError(`All AI providers rate limited or exhausted. Attempts: ${JSON.stringify(attempts)}`);
+  }
+
+  throw new ExtractionFailedError(`AI extraction failed permanently across all providers. Attempts: ${JSON.stringify(attempts)}`);
+}
+
 /**
  * Extracts a list of enquiries and customer details from email body and attachments.
- * One email may contain one or more product items. The system will create one Enquiry per extracted product item.
- * 
- * @param {string} emailText The email body content
- * @param {Array} attachments List of attachments with originalFileName and extractedText
- * @param {object} metadata Information about the email sender (from, subject)
- * @returns {Promise<object>} Parsed structured details containing enquiries array
+ * Part 3, 4, 5: strict OpenAI-first, Prompt instructions, JSON validation
  */
 exports.extractEnquiries = async (emailText, attachments = [], metadata = {}) => {
   const fromAddress = metadata.from || '';
   const subjectText = metadata.subject || '';
   
-  console.log(`[AI Multi-Extraction] Processing email from "${fromAddress}" with subject "${subjectText}"`);
+  console.log(`[AI Multi-Extraction] Processing email from "${fromAddress}"`);
 
-  // Format attachments list for prompt context
+  // Format attachments list for prompt context (capped per attachment to prevent token overflow)
   const attachmentsListStr = (attachments || []).map((att, index) => {
+    const trimmedText = (att.extractedText || '').slice(0, aiConfig.MAX_ATTACHMENT_TEXT);
+    const truncNote = (att.extractedText || '').length > aiConfig.MAX_ATTACHMENT_TEXT ? ' [TRUNCATED]' : '';
     return `Attachment #${index + 1}:
 Filename: ${att.originalFileName}
 Category: ${att.attachmentCategory || 'Unknown'}
 Extracted Text Content:
 """
-${att.extractedText || '(No text content extracted)'}
+${trimmedText || '(No text content extracted)'}${truncNote}
 """`;
   }).join('\n\n');
 
-  const prompt = `You are an enterprise email routing and requirements gathering bot for Petro Valve Workflow Automation.
-Read the customer email request and its parsed attachments:
+  // Part 5: Improved Prompt (Return ONLY JSON, no markdown/code blocks, null if not found, use attachment context only)
+  const prompt = `You are a requirements gathering bot.
+Read the customer email request and its attachments:
 
 Sender Info (From): ${fromAddress}
 Subject: ${subjectText}
@@ -62,142 +345,67 @@ ${emailText}
 Parsed Email Attachments:
 ${attachmentsListStr || 'None'}
 
-Your task is to parse this email request and its attachments, extract customer contact details, and split the request into one or more product enquiries. One email may contain one or more product items. The system will create one Enquiry per extracted product item.
+Extract customer contact details, and split the request into one or more product enquiries.
+CRITICAL FOCUS:
+- Treat every Schedule, SOR row, BOQ row, material line item, equipment tag, and specification sheet as an independent product.
+- Never merge products. If 18 products exist, return exactly 18 JSON objects.
+- Search every attachment before concluding a product does not exist.
+- Ignore table of contents, legal clauses, and commercial terms unless they contain product information.
+- Do NOT attempt to extract custom technical specs (e.g. design temperature, MOC, pressure class, head type, shell thickness, capacity) in this pass. Focus solely on building the general catalog list of products.
 
-Return ONLY a JSON object containing the following keys (do not wrap in markdown quotes, return ONLY the raw JSON string):
+Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks, explanations, comments, or headers.
 
-1. "isEnquiry" (boolean): True if this email is a genuine commercial inquiry, request for quotation (RFQ), or product specification request for Petro Valve's products (valves, pipes, flanges, vessels, etc.). False if it is a general discussion, promotional material, spam, newsletter, bounce, or unrelated content.
-2. "companyName" (string): The company the sender represents. Guess it from the signature, email domain, or attachments. Write "Individual Customer" if unknown.
-3. "primaryContactName" (string): The sender's name. Default to "Email Contact" if unknown.
-4. "mobileNumber" (string): The contact's phone/mobile number. Check the signature block. Default to "0000000000" if unknown.
-5. "enquiries" (array of objects): An array of product items extracted. Each item must contain:
-   - "productCategory" (string): Must match exactly one of: "Piping", "Pressure Vessel", "Heat Exchanger", "Storage Tank", "Structural", "Custom", "Multiple". (Default is "Piping" for valve inquiries).
-   - "productDescription" (string): A short, professional summary of the items and specs requested (e.g., "CS BALL VALVE BWE 300#, 100MM (4\")"). Limit to 200 characters.
-   - "quantity" (number): The quantity of items requested. Default is 1.
-   - "unit" (string): Must be one of: "NOS", "SET", "MT", "KG", "M", "M2", "Job". Default is "NOS".
-   - "standardCode" (string): Must be one of: "ASME", "IS", "BS", "EN", "API", "IBR", "Custom", "Not specified". Default is "Not specified".
-   - "specialRequirements" (string): Any specific material details, paint specs, or special inspections. Limit to 400 characters.
-   - "priority" (string): Must be one of: "Urgent", "High", "Medium", "Low". Default is "Medium".
-   - "confidence" (number): A score from 0 to 100 representing your certainty of this extraction.
-   - "linkedAttachmentNames" (array of strings): The exact filenames of the attachments that contain details or drawings for this specific product item. (Must match the filenames provided in the attachment list above).
-
-You MUST return a valid JSON object matching these instructions. Do not add explanations.`;
-
-  // 1. Try Groq
-  if (process.env.GROQ_API_KEY) {
-    try {
-      const apiKey = process.env.GROQ_API_KEY;
-      const url = 'https://api.groq.com/openai/v1/chat/completions';
-      const payload = {
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' }
-      };
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = result.choices?.[0]?.message?.content;
-        if (rawText) {
-          return cleanAndNormalizeMultiResult(JSON.parse(rawText.trim()), fromAddress);
-        }
-      }
-    } catch (err) {
-      console.error('[AI Multi-Extraction] Groq API call failed, trying fallback...', err.message);
+Schema:
+{
+  "isEnquiry": true/false (true if this is a genuine inquiry for Petro Valve's industrial valves, vessels, piping, or tanks),
+  "companyName": "...", (or "Individual Customer" if unknown),
+  "primaryContactName": "...", (or "Email Sender" if unknown),
+  "mobileNumber": "...", (or "0000000000" if unknown),
+  "enquiries": [
+    {
+      "productCategory": "Piping" / "Pressure Vessel" / "Heat Exchanger" / "Storage Tank" / "Structural" / "Custom" / "Multiple",
+      "productDescription": "...", (max 200 chars summary of product, e.g. "CS Ball Valve 100mm"),
+      "quantity": 1,
+      "unit": "NOS" / "SET" / "MT" / "KG" / "M" / "M2" / "Job",
+      "standardCode": "ASME" / "IS" / "BS" / "EN" / "API" / "IBR" / "Custom" / "Not specified",
+      "specialRequirements": "...", (max 400 chars, e.g. NACE MR0175, TPI, paint spec),
+      "priority": "Low" / "Medium" / "High" / "Urgent",
+      "confidence": 0-100,
+      "linkedAttachmentNames": ["..."] (filenames of attachments containing specs for this item)
     }
-  }
+  ]
+}
 
-  // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" }
-      };
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          return cleanAndNormalizeMultiResult(JSON.parse(rawText.trim()), fromAddress);
-        }
-      }
-    } catch (err) {
-      console.error('[AI Multi-Extraction] Gemini API call failed, trying fallback...', err.message);
-    }
-  }
+If information cannot be extracted, return null for that field. Never invent values. Use attachment content only.`;
 
-  // 3. Try OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const apiKey = process.env.OPENAI_API_KEY;
-      const url = 'https://api.openai.com/v1/chat/completions';
-      const payload = {
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' }
-      };
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = result.choices?.[0]?.message?.content;
-        if (rawText) {
-          return cleanAndNormalizeMultiResult(JSON.parse(rawText.trim()), fromAddress);
-        }
-      }
-    } catch (err) {
-      console.error('[AI Multi-Extraction] OpenAI API call failed, trying fallback...', err.message);
-    }
-  }
-
-  // Final fallback: Local Heuristics
-  console.log('[AI Multi-Extraction] Using heuristic fallback.');
-  const singleEnquiry = runHeuristicExtraction(emailText, fromAddress, subjectText);
-  return {
-    isEnquiry: singleEnquiry.isEnquiry,
-    companyName: singleEnquiry.companyName,
-    primaryContactName: singleEnquiry.primaryContactName,
-    mobileNumber: singleEnquiry.mobileNumber,
-    enquiries: [
-      {
-        productCategory: singleEnquiry.productCategory,
-        productDescription: singleEnquiry.productDescription,
-        quantity: singleEnquiry.quantity,
-        unit: singleEnquiry.unit,
-        standardCode: singleEnquiry.standardCode,
-        specialRequirements: singleEnquiry.specialRequirements,
-        priority: singleEnquiry.priority,
-        confidence: 100,
-        linkedAttachmentNames: []
-      }
-    ]
+  const validateFn = (data) => {
+    return data && typeof data === 'object' && data.isEnquiry !== undefined;
   };
+
+  const { result, attempts } = await callAIServiceWithFallback({
+    prompt,
+    validateFn,
+    logTag: 'AI Multi-Extraction',
+    enquiryId: metadata.enquiryId || 'NEW_ENQUIRY'
+  });
+
+  const normalized = cleanAndNormalizeMultiResult(result, fromAddress);
+  normalized.extractionMetadata = {
+    provider: attempts[attempts.length - 1]?.provider,
+    model: attempts[attempts.length - 1]?.model,
+    attemptsCount: attempts.length,
+    processingTime: attempts.reduce((sum, a) => sum + a.processingTime, 0),
+    attempts
+  };
+
+  return normalized;
 };
 
 /**
  * Normalizes values of multi-enquiry AI output to match schemas perfectly.
  */
 function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
-  if (data.isEnquiry === false || !data.enquiries || !Array.isArray(data.enquiries)) {
+  if (!data || data.isEnquiry === false || !data.enquiries || !Array.isArray(data.enquiries)) {
     return {
       isEnquiry: false,
       companyName: 'Individual Customer',
@@ -207,7 +415,6 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
     };
   }
 
-  // Clean contact details
   let mobile = String(data.mobileNumber || '').trim().replace(/[^0-9+]/g, '');
   if (!mobile || mobile.length < 5) {
     mobile = '0000000000';
@@ -259,9 +466,10 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
 }
 
 /**
- * Helper to select the most relevant text chunks from a large specification file.
+ * Intelligent context retrieval to chunk large documents.
+ * Part 7 & 8: Context Selection using dynamic weights.
  */
-function getRelevantContext(text, productDescription, relevantFields, maxChars = 35000) {
+function getRelevantContext(text, productDescription, relevantFields, maxChars = aiConfig.MAX_CONTEXT_SIZE) {
   if (!text || text.length <= maxChars) return text;
 
   console.log(`[AI Context Filter] Original text size: ${text.length} chars. Filtering down to ${maxChars} chars...`);
@@ -276,21 +484,32 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
     chunks.push({
       text: chunk,
       index: i,
-      score: 0
+      score: 0,
+      matchedHigh: [],
+      matchedLow: []
     });
   }
 
-  // Pre-compile search terms from fields and product description
+  // Keywords defined for Phase 2
+  const HIGH_RANK_KEYWORDS = [
+    'schedule', 'boq', 'sor', 'qty', 'quantity', 'item no', 'item number', 'line item',
+    'valve data sheet', 'datasheet', 'api', 'pressure class', 'class', 'size', 'dn',
+    'material', 'moc', 'actuator', 'motorized'
+  ];
+
+  const EXCLUSION_KEYWORDS = [
+    'terms', 'conditions', 'legal', 'nda', 'proprietary', 'force majeure', 'arbitration',
+    'indemnity', 'liabilities', 'warranties'
+  ];
+
   const searchTerms = new Set();
   
-  // Add product description terms
   if (productDescription) {
     productDescription.toLowerCase().split(/\s+/).forEach(word => {
       if (word.length > 2) searchTerms.add(word);
     });
   }
 
-  // Add field terms
   for (const f of relevantFields) {
     f.fieldLabel.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).forEach(word => {
       if (word.length > 2) searchTerms.add(word);
@@ -309,16 +528,32 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
 
   const termsArr = Array.from(searchTerms);
 
-  // Score each chunk
+  // Score each chunk (Phase 2)
   for (const chunk of chunks) {
     const chunkLower = chunk.text.toLowerCase();
     
-    // Product description matches are very important
+    // Exact description match
     if (productDescription && chunkLower.includes(productDescription.toLowerCase())) {
       chunk.score += 200;
     }
 
-    // Match keywords
+    // High-rank keywords (+100 each)
+    for (const kw of HIGH_RANK_KEYWORDS) {
+      if (chunkLower.includes(kw)) {
+        chunk.score += 100;
+        chunk.matchedHigh.push(kw);
+      }
+    }
+
+    // Exclusion keywords (-150 each)
+    for (const kw of EXCLUSION_KEYWORDS) {
+      if (chunkLower.includes(kw)) {
+        chunk.score -= 150;
+        chunk.matchedLow.push(kw);
+      }
+    }
+
+    // Generic search terms (+10 each)
     for (const term of termsArr) {
       if (chunkLower.includes(term)) {
         chunk.score += 10;
@@ -326,7 +561,6 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
     }
   }
 
-  // Sort by score descending, keep top chunks that fit within maxChars
   const sortedChunks = [...chunks].sort((a, b) => b.score - a.score);
   const selectedChunks = [];
   let currentLength = 0;
@@ -337,28 +571,47 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
     }
     selectedChunks.push(chunk);
     currentLength += chunk.text.length;
+
+    // Log why this page/chunk was selected (Phase 2 Requirement)
+    console.log(`[AI Context Filter] Selected chunk at offset ${chunk.index}: Score ${chunk.score}`);
+    console.log(`  - High-rank keywords matched: [${chunk.matchedHigh.join(', ')}]`);
+    console.log(`  - Exclusion keywords matched: [${chunk.matchedLow.join(', ')}]`);
   }
 
-  // Sort selected chunks back to original order to maintain document flow
   selectedChunks.sort((a, b) => a.index - b.index);
 
-  const filteredText = selectedChunks.map(c => c.text).join('\n... [section skipped] ...\n');
-  console.log(`[AI Context Filter] Selected ${selectedChunks.length} chunks. Filtered text size: ${filteredText.length} chars. Total score: ${selectedChunks.reduce((sum, c) => sum + c.score, 0)}`);
+  // Phase 8: Overlapping Chunk deduplication & merging
+  let filteredText = '';
+  let lastEnd = 0;
+  for (const chunk of selectedChunks) {
+    if (chunk.index < lastEnd) {
+      const overlapStart = lastEnd - chunk.index;
+      filteredText += chunk.text.substring(overlapStart);
+    } else {
+      if (filteredText.length > 0) {
+        filteredText += '\n... [section skipped] ...\n';
+      }
+      filteredText += chunk.text;
+    }
+    lastEnd = chunk.index + chunk.text.length;
+  }
+
+  // Phase 8 Log Requirement
+  console.log(`[AI Context Filter] Retrieval Metrics:
+  - Original chars: ${text.length}
+  - Selected chunks: ${selectedChunks.length}
+  - Final chars: ${filteredText.length}`);
   
   return filteredText;
 }
 
 /**
  * Dynamic Field Extractor from emails focusing on a target product description.
+ * Part 21: respecting provider rate limits, validating types.
  */
-exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescription = '') => {
+exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescription = '', enquiryId = 'SYSTEM') => {
   if (!fieldDefinitions || fieldDefinitions.length === 0) return {};
 
-  // ── Smart Field Pre-Filtering ──────────────────────────────────────────────
-  // When there are many fields (cross-category), the LLM can return {} or poor
-  // results because the prompt is too long. Score fields by relevance to the
-  // text and keep the top MAX_FIELDS most relevant ones (always including
-  // required fields so they are never silently dropped).
   const MAX_FIELDS = 100;
   let relevantFields = fieldDefinitions;
 
@@ -367,14 +620,11 @@ exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescri
 
     const scoreField = (f) => {
       let score = 0;
-      // Required fields always get a bonus
       if (f.isRequired) score += 100;
-      // Score by how many words from the label appear in the text
       const labelWords = f.fieldLabel.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
       for (const word of labelWords) {
         if (textLower.includes(word)) score += 10;
       }
-      // Score by fieldName keyword match (e.g. valve_ prefix when text has 'valve')
       const nameWords = f.fieldName.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(w => w.length > 2);
       for (const word of nameWords) {
         if (textLower.includes(word)) score += 5;
@@ -386,15 +636,12 @@ exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescri
       .map(f => ({ field: f, score: scoreField(f) }))
       .sort((a, b) => b.score - a.score);
 
-    // Always include required fields + top scoring optional fields up to MAX_FIELDS
     const required = scored.filter(s => s.field.isRequired).map(s => s.field);
     const optional = scored.filter(s => !s.field.isRequired).slice(0, MAX_FIELDS - required.length).map(s => s.field);
     relevantFields = [...required, ...optional];
-
-    console.log(`[AI Dynamic Extraction] Filtered ${fieldDefinitions.length} fields → ${relevantFields.length} relevant fields for: "${productDescription}"`);
   }
 
-  // Filter text to fit within limits
+  // Part 7 & 8: Intelligent chunk filtering
   const filteredContextText = getRelevantContext(emailText, productDescription, relevantFields);
 
   const fieldListStr = relevantFields.map(f => {
@@ -406,241 +653,236 @@ exports.extractDynamicFields = async (emailText, fieldDefinitions, productDescri
     itemContextFocus = `
 CRITICAL FOCUS:
 We are extracting specifications specifically for this product item: "${productDescription}".
-Ignore specifications that belong to other product items mentioned in the text. Focus ONLY on this specific item.
+Ignore any specifications that belong to other product items mentioned in the text. Focus ONLY on this specific item and extract its matching specifications.
 `;
   }
 
-  const prompt = `You are a data extraction bot.
-Read the email text below:
+  // Part 5: strict output prompt (Return ONLY JSON, no code blocks, null if not found)
+  const prompt = `You are a technical specification extraction bot.
+Read the text context below:
 """
 ${filteredContextText}
 """
 ${itemContextFocus}
 
-We have defined the following custom fields that we need to extract from this text:
+Extract values for these custom fields:
 ${fieldListStr}
 
-Extract values for these fields. Return ONLY a JSON object containing the fieldName keys that you found values for. For fields that are not mentioned or cannot be determined, do NOT include them in the JSON object.
-Ensure values match the expected types:
-- Dropdown fields must match one of the listed options (case-insensitive or exact).
-- Checkbox fields must be boolean (true/false).
-- Number fields must be numeric.
-- Text fields must be strings.
+CRITICAL FOCUS:
+- Extract specifications and values ONLY for the current product: "${productDescription}".
+- Ignore specifications of any unrelated products.
+- Never invent or hallucinate values. If a field is not found or not mentioned in the context, you MUST return null for value, 0 for confidence, and null for sourcePage.
+- For each extracted field, include value, confidence, and source page number.
 
-Return ONLY the raw JSON string. Do not wrap in markdown quotes or add explanations.`;
+Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks (no \`\`\`json). Do not add explanations or text before/after the JSON.
 
-  // 1. Try Groq
-  if (process.env.GROQ_API_KEY) {
-    try {
-      const apiKey = process.env.GROQ_API_KEY;
-      const url = 'https://api.groq.com/openai/v1/chat/completions';
-      const payload = {
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' }
-      };
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = result.choices?.[0]?.message?.content;
-        if (rawText) {
-          const parsed = JSON.parse(rawText.trim());
-          console.log(`[AI Dynamic Extraction] Groq extracted ${Object.keys(parsed).length} field(s):`, JSON.stringify(parsed));
-          return normalizeExtractedFields(parsed, fieldDefinitions);
-        }
-      } else {
-        const errBody = await res.json().catch(() => ({}));
-        console.error(`[AI Dynamic Extraction] Groq API error ${res.status}:`, JSON.stringify(errBody).substring(0, 200));
-      }
-    } catch (err) {
-      console.error('[AI Dynamic Extraction] Groq API failed:', err.message);
-    }
-  }
+Schema:
+{
+${relevantFields.map(f => `  "${f.fieldName}": {
+    "value": "extracted value" / number / boolean / null,
+    "confidence": 0-100,
+    "sourcePage": number / null
+  }`).join(',\n')}
+}
+`;
 
-  // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
-    
-    for (const modelName of geminiModels) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        console.warn(`[AI Dynamic Extraction] Gemini model ${modelName} timed out (15s). Aborting...`);
-        controller.abort();
-      }, 15000);
+  const validateFn = (data) => {
+    return data && typeof data === 'object';
+  };
 
-      try {
-        console.log(`[AI Dynamic Extraction] Trying Gemini model: ${modelName}...`);
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-        const payload = {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json" }
-        };
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+  const { result } = await callAIServiceWithFallback({
+    prompt,
+    validateFn,
+    logTag: 'AI Dynamic Extraction',
+    enquiryId
+  });
 
-        if (res.ok) {
-          const result = await res.json();
-          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-          console.log(`[AI Dynamic Extraction] Gemini (${modelName}) raw text:`, rawText);
-          if (rawText) {
-            const parsed = JSON.parse(rawText.trim());
-            console.log(`[AI Dynamic Extraction] Gemini (${modelName}) extracted ${Object.keys(parsed).length} field(s):`, JSON.stringify(parsed));
-            return normalizeExtractedFields(parsed, fieldDefinitions);
-          }
-        } else {
-          const errBody = await res.json().catch(() => ({}));
-          console.error(`[AI Dynamic Extraction] Gemini (${modelName}) API error ${res.status}:`, JSON.stringify(errBody));
-        }
-      } catch (err) {
-        clearTimeout(timeoutId);
-        console.error(`[AI Dynamic Extraction] Gemini (${modelName}) API failed:`, err.message);
-      }
-    }
-  }
-
-  // 3. Try OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const apiKey = process.env.OPENAI_API_KEY;
-      const url = 'https://api.openai.com/v1/chat/completions';
-      const payload = {
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' }
-      };
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = result.choices?.[0]?.message?.content;
-        if (rawText) {
-          return normalizeExtractedFields(JSON.parse(rawText.trim()), fieldDefinitions);
-        }
-      }
-    } catch (err) {
-      console.error('[AI Dynamic Extraction] OpenAI API failed:', err.message);
-    }
-  }
-
-  // Heuristic fallback
-  const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const extracted = {};
-  for (const field of fieldDefinitions) {
-    const label = field.fieldLabel;
-    const labelClean = label.replace(/\([^)]*\)/g, '').trim();
-    const name = field.fieldName;
-    
-    const escapedLabel = escapeRegExp(label);
-    const escapedLabelClean = escapeRegExp(labelClean);
-    const escapedName = escapeRegExp(name);
-
-    const patterns = [
-      new RegExp(`${escapedLabel}\\s*[:=-]\\s*([^\\n]+)`, 'i'),
-      new RegExp(`${escapedLabelClean}\\s*[:=-]\\s*([^\\n]+)`, 'i'),
-      new RegExp(`${escapedName}\\s*[:=-]\\s*([^\\n]+)`, 'i')
-    ];
-    
-    for (const regex of patterns) {
-      const match = emailText.match(regex);
-      if (match) {
-        let val = match[1].trim();
-        val = val.replace(/[,;]$/, '');
-        if (field.fieldType.includes('Number')) {
-          const num = parseFloat(val);
-          if (!isNaN(num)) extracted[field.fieldName] = num;
-        } else if (field.fieldType.includes('Checkbox')) {
-          extracted[field.fieldName] = /yes|true|1/i.test(val);
-        } else {
-          if (field.options && field.options.length) {
-            let matchedOpt = field.options.find(opt => String(opt).toLowerCase() === val.toLowerCase());
-            if (!matchedOpt) {
-              const normalize = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-              const normVal = normalize(val);
-              matchedOpt = field.options.find(opt => normalize(opt) === normVal);
-            }
-            if (matchedOpt) {
-              extracted[field.fieldName] = matchedOpt;
-            } else {
-              extracted[field.fieldName] = val;
-            }
-          } else {
-            extracted[field.fieldName] = val;
-          }
-        }
-        break;
-      }
-    }
-  }
-  return extracted;
+  return normalizeExtractedFields(result, fieldDefinitions);
 };
 
 /**
- * Normalizes options and drops irrelevant keys.
+ * Validates and normalizes extracted fields.
+ * Part 20: Rejects negative values for sizes/pressure ratings, validates date objects.
+ * Phase 7: Returns rich object `{ value, confidence, sourcePage }`.
  */
-const inchToMmMap = {
-  '1/2': '15', '0.5': '15',
-  '3/4': '20', '0.75': '20',
-  '1': '25',
-  '1.25': '32', '1-1/4': '32', '1 1/4': '32',
-  '1.5': '40', '1-1/2': '40', '1 1/2': '40',
-  '2': '50',
-  '2.5': '65', '2-1/2': '65', '2 1/2': '65',
-  '3': '80',
-  '4': '100',
-  '6': '150',
-  '8': '200',
-  '10': '250',
-  '12': '300',
-  '14': '350',
-  '16': '400',
-  '18': '450',
-  '20': '500',
-  '24': '600'
-};
-
 function normalizeExtractedFields(data, fieldDefinitions) {
   const normalized = {};
-  for (const key of Object.keys(data)) {
-    const field = fieldDefinitions.find(f => f.fieldName === key);
-    if (field) {
-      let val = data[key];
-      if (key.toLowerCase().includes('size') && field.fieldType.includes('Dropdown') && field.options && field.options.length) {
-        let cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
-        if (inchToMmMap[cleanVal]) {
-          val = inchToMmMap[cleanVal];
-        }
+  for (const f of fieldDefinitions) {
+    const key = f.fieldName;
+    let rawInput = data[key];
+
+    let val = null;
+    let confidence = 90;
+    let sourcePage = null;
+
+    if (rawInput !== undefined && rawInput !== null) {
+      if (typeof rawInput === 'object' && rawInput !== null && rawInput.value !== undefined) {
+        val = rawInput.value;
+        confidence = parseInt(rawInput.confidence, 10);
+        if (isNaN(confidence)) confidence = 90;
+        sourcePage = (rawInput.sourcePage !== undefined && rawInput.sourcePage !== null) ? parseInt(rawInput.sourcePage, 10) : null;
+        if (isNaN(sourcePage)) sourcePage = null;
+      } else {
+        val = rawInput;
+        confidence = 90;
+        sourcePage = null;
       }
-      if (field.fieldType.includes('Dropdown') && field.options && field.options.length) {
-        const matchedOpt = field.options.find(opt => {
-          const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-          return normalizeStr(opt) === normalizeStr(val);
-        });
-        if (matchedOpt) {
-          normalized[key] = matchedOpt;
+    }
+
+    const nullResult = {
+      value: null,
+      confidence: 0,
+      sourcePage: null
+    };
+
+    if (val === undefined || val === null) {
+      normalized[key] = nullResult;
+      continue;
+    }
+
+    const lowerKey = key.toLowerCase();
+    const lowerLabel = (f.fieldLabel || '').toLowerCase();
+    const isSizeField = lowerKey.includes('size') || lowerLabel.includes('size');
+    const isPressureField = lowerKey.includes('pressure') || lowerKey.includes('class') || lowerKey.includes('bar') || lowerLabel.includes('pressure') || lowerLabel.includes('class') || lowerLabel.includes('bar');
+    const isMocOrActuatorField = lowerKey.includes('moc') || lowerKey.includes('material') || lowerKey.includes('actuator') || lowerKey.includes('actuation') || lowerLabel.includes('moc') || lowerLabel.includes('material') || lowerLabel.includes('actuator') || lowerLabel.includes('actuation');
+
+    // Phase 10: Size Pre-normalization and Validation
+    if (isSizeField) {
+      const cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
+      if (inchToMmMap[cleanVal]) {
+        val = inchToMmMap[cleanVal];
+      } else {
+        val = cleanVal;
+      }
+
+      const sizeInMm = Number(val);
+      if (!isNaN(sizeInMm)) {
+        if (sizeInMm < 15 || sizeInMm > 2000) {
+          console.warn(`[Validation] Rejecting size outside 15mm-2000mm range: ${val} (resolved: ${sizeInMm}mm)`);
+          normalized[key] = nullResult;
           continue;
         }
       }
-      normalized[key] = val;
     }
+
+    // Phase 10: Pressure Class/Rating Validation
+    if (isPressureField) {
+      const clean = String(val).toLowerCase().replace(/[^0-9.]/g, '').trim();
+      const num = Number(clean);
+      if (!isNaN(num) && num > 0) {
+        const isStrictClass = lowerKey.includes('class') || lowerLabel.includes('class');
+        const isStrictBar = lowerKey.includes('bar') || lowerLabel.includes('bar');
+
+        if (isStrictClass) {
+          if (num < 150 || num > 4500) {
+            console.warn(`[Validation] Rejecting class rating outside 150#-4500# range: ${val}`);
+            normalized[key] = nullResult;
+            continue;
+          }
+        } else if (isStrictBar) {
+          if (num < 10 || num > 400) {
+            console.warn(`[Validation] Rejecting pressure rating outside 10bar-400bar range: ${val}`);
+            normalized[key] = nullResult;
+            continue;
+          }
+        } else {
+          // General pressure field (can be class or bar)
+          if (num >= 150) {
+            if (num < 150 || num > 4500) {
+              console.warn(`[Validation] Rejecting class rating outside 150#-4500# range: ${val}`);
+              normalized[key] = nullResult;
+              continue;
+            }
+          } else {
+            if (num < 10 || num > 400) {
+              console.warn(`[Validation] Rejecting pressure rating outside 10bar-400bar range: ${val}`);
+              normalized[key] = nullResult;
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    // Phase 10: MOC/Actuator text integrity (rejects negative numbers and junk keywords)
+    if (isMocOrActuatorField) {
+      const sVal = String(val).trim();
+      const cleanLower = sVal.toLowerCase();
+      const isJunk = ['unknown', 'n/a', 'na', 'none', 'not specified', 'not available'].includes(cleanLower) || cleanLower.includes('-') && !isNaN(Number(cleanLower.replace(/[^0-9.-]/g, '')));
+      if (isJunk) {
+        console.warn(`[Validation] Rejecting invalid/junk text for field ${key}: "${sVal}"`);
+        normalized[key] = nullResult;
+        continue;
+      }
+    }
+
+    // 1. Validate Number fields (Part 20)
+    if (f.fieldType === 'Number') {
+      let num = Number(val);
+      if (isNaN(num)) {
+        const match = String(val).match(/[-+]?[0-9]*\.?[0-9]+/);
+        num = match ? Number(match[0]) : NaN;
+      }
+      if (!isNaN(num)) {
+        if (num < 0 && (key.toLowerCase().includes('qty') || key.toLowerCase().includes('quantity') || key.toLowerCase().includes('pressure') || key.toLowerCase().includes('size') || key.toLowerCase().includes('class'))) {
+          console.warn(`[Validation] Rejecting negative value for field ${key}: ${num}`);
+          normalized[key] = nullResult;
+        } else {
+          normalized[key] = { value: num, confidence, sourcePage };
+        }
+      } else {
+        console.warn(`[Validation] Rejected invalid numeric value for field ${key}:`, val);
+        normalized[key] = nullResult;
+      }
+      continue;
+    }
+
+    // 2. Validate Checkbox/Boolean fields
+    if (f.fieldType === 'Checkbox') {
+      let boolVal;
+      if (typeof val === 'boolean') {
+        boolVal = val;
+      } else {
+        const cleanVal = String(val).toLowerCase();
+        boolVal = ['true', 'yes', '1', 'y', 'checked'].includes(cleanVal);
+      }
+      normalized[key] = { value: boolVal, confidence, sourcePage };
+      continue;
+    }
+
+    // 3. Validate Date fields (Part 20)
+    if (f.fieldType === 'Date') {
+      const parsedDate = Date.parse(val);
+      if (!isNaN(parsedDate)) {
+        normalized[key] = { value: new Date(parsedDate).toISOString(), confidence, sourcePage };
+      } else {
+        console.warn(`[Validation] Rejected invalid date value for field ${key}:`, val);
+        normalized[key] = nullResult;
+      }
+      continue;
+    }
+
+    // 4. Dropdown Option matching
+    if (f.fieldType === 'Dropdown' && f.options && f.options.length) {
+      let matchVal = val;
+      if (key.toLowerCase().includes('size') && inchToMmMap[String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim()]) {
+        matchVal = inchToMmMap[String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim()];
+      }
+      const matchedOpt = f.options.find(opt => {
+        const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+        return normalizeStr(opt) === normalizeStr(matchVal);
+      });
+      if (matchedOpt) {
+        normalized[key] = { value: matchedOpt, confidence, sourcePage };
+      } else {
+        console.warn(`[Validation] Option "${val}" not found in options list for ${key}:`, f.options);
+        normalized[key] = nullResult;
+      }
+      continue;
+    }
+
+    // 5. String fields
+    normalized[key] = { value: String(val).trim(), confidence, sourcePage };
   }
   return normalized;
 }
@@ -707,108 +949,62 @@ const EMAIL_CATEGORIES = ['Enquiry', 'Tender', 'Follow-up', 'Vendor Document', '
 
 /**
  * Classifies an incoming email into one of: Enquiry, Tender, Follow-up, Vendor Document, Spam/Other.
- * Uses the same AI fallback chain (Groq → Gemini → OpenAI → Heuristic).
- *
- * @param {string} emailText The email body text
- * @param {object} metadata { from, subject }
- * @param {Array} attachmentNames List of attachment filenames
- * @returns {Promise<object>} { category, confidence, reason }
+ * Part 3, 4, 5: strict OpenAI-first, prompt guidelines, JSON validation
  */
 exports.classifyEmail = async (emailText, metadata = {}, attachmentNames = []) => {
   const fromAddress = metadata.from || '';
   const subjectText = metadata.subject || '';
 
-  console.log(`[AI Classification] Classifying email from "${fromAddress}" subject "${subjectText}"`);
+  console.log(`[AI Classification] Classifying email from "${fromAddress}"`);
 
   const attachmentsList = attachmentNames.length > 0
     ? `Attachment Filenames: ${attachmentNames.join(', ')}`
     : 'No attachments';
 
-  const prompt = `You are an email classification bot for Petro Valve, an industrial valve and piping manufacturer.
-
+  const prompt = `You are a requirements classification bot.
 Classify this incoming email into EXACTLY ONE of these categories:
 
-1. "Enquiry" — A new commercial request, Request for Quotation (RFQ), product inquiry, or price request from a customer/buyer wanting to purchase valves, pipes, flanges, vessels, or related industrial products. The sender wants pricing or is asking about products.
-
-2. "Tender" — A formal government tender notice, bid invitation, tender document, NIT (Notice Inviting Tender), Expression of Interest (EOI), or GEM portal request. These often contain tender numbers, bid deadlines, EMD amounts, or formal procurement language. They may be from government bodies, PSUs, municipal corporations, or public sector entities.
-
-3. "Follow-up" — A reply to an existing conversation, a status check, a delivery update request, revision to an existing enquiry, or any email that references a previous interaction or enquiry ID (ENQ-XXXX). Also includes emails requesting modifications to previously submitted requirements.
-
-4. "Vendor Document" — An email from a supplier/vendor/sub-contractor sending material test certificates (MTC), inspection reports, delivery challans, invoices, purchase confirmations, material availability updates, or compliance documents. The sender is selling TO Petro Valve, not buying FROM them.
-
-5. "Spam/Other" — Newsletters, promotional emails, auto-responses, out-of-office replies, job applications, HR-related emails, or any email that does not fit the above categories.
+1. "Enquiry" — A new commercial request, Request for Quotation (RFQ), product inquiry, or price request.
+2. "Tender" — A formal government/municipal/refinery tender notice, bid invitation, NIT (Notice Inviting Tender).
+3. "Follow-up" — A status check, reply to an existing conversation, or query referencing previous enquiry ENQ-XXXX.
+4. "Vendor Document" — Document from a supplier (MTC, inspection report, delivery challan, invoice).
+5. "Spam/Other" — Promotional, newsletter, bounce, job application, auto-reply.
 
 Email Details:
 From: ${fromAddress}
 Subject: ${subjectText}
 ${attachmentsList}
 
-Email Body:
+Email Body (first 3000 chars):
 """
 ${emailText.substring(0, 3000)}
 """
 
-Return ONLY a JSON object with these keys:
-- "category" (string): One of "Enquiry", "Tender", "Follow-up", "Vendor Document", "Spam/Other"
-- "confidence" (number): 0-100 confidence score
-- "reason" (string): One-line explanation of why this category was chosen (max 150 chars)
-- "tenderNumber" (string or null): If category is "Tender", extract the tender/NIT number. Otherwise null.
-- "tenderDeadline" (string or null): If category is "Tender", extract the bid submission deadline as ISO date string. Otherwise null.
-- "referencedEnquiryIds" (array of strings): If category is "Follow-up", extract any ENQ-XXXX IDs mentioned. Otherwise empty array.
+Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown code blocks. Do not add explanations.
 
-Return ONLY raw JSON. No explanations.`;
+Schema:
+{
+  "category": "Enquiry" / "Tender" / "Follow-up" / "Vendor Document" / "Spam/Other",
+  "confidence": 0-100,
+  "reason": "One-line explanation",
+  "tenderNumber": "..." (or null if not Tender),
+  "tenderDeadline": "ISO Date String" (or null if not Tender),
+  "referencedEnquiryIds": ["ENQ-XXXX"] (or empty array if not Follow-up)
+}
 
-  const callAI = async (provider, url, buildPayload, parseResponse) => {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: buildPayload.headers,
-        body: JSON.stringify(buildPayload.body)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = parseResponse(result);
-        if (rawText) {
-          const parsed = JSON.parse(rawText.trim());
-          return normalizeClassification(parsed);
-        }
-      }
-    } catch (err) {
-      console.error(`[AI Classification] ${provider} failed:`, err.message);
-    }
-    return null;
+If information cannot be extracted, return null. Never invent values.`;
+
+  const validateFn = (data) => {
+    return data && typeof data === 'object' && data.category !== undefined;
   };
 
-  // 1. Try Groq
-  if (process.env.GROQ_API_KEY) {
-    const result = await callAI('Groq', 'https://api.groq.com/openai/v1/chat/completions', {
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-      body: { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
-    }, r => r.choices?.[0]?.message?.content);
-    if (result) return result;
-  }
+  const { result } = await callAIServiceWithFallback({
+    prompt,
+    validateFn,
+    logTag: 'AI Classification'
+  });
 
-  // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
-    const result = await callAI('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
-    }, r => r.candidates?.[0]?.content?.parts?.[0]?.text);
-    if (result) return result;
-  }
-
-  // 3. Try OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    const result = await callAI('OpenAI', 'https://api.openai.com/v1/chat/completions', {
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
-    }, r => r.choices?.[0]?.message?.content);
-    if (result) return result;
-  }
-
-  // 4. Heuristic fallback
-  console.log('[AI Classification] Using heuristic fallback.');
-  return heuristicClassify(emailText, subjectText, fromAddress, attachmentNames);
+  return normalizeClassification(result);
 };
 
 /**
@@ -817,13 +1013,12 @@ Return ONLY raw JSON. No explanations.`;
 function normalizeClassification(data) {
   let category = data.category;
   if (!EMAIL_CATEGORIES.includes(category)) {
-    // Fuzzy match
     const lower = (category || '').toLowerCase();
     if (lower.includes('tender') || lower.includes('nit') || lower.includes('bid')) category = 'Tender';
     else if (lower.includes('follow') || lower.includes('reply') || lower.includes('update')) category = 'Follow-up';
     else if (lower.includes('vendor') || lower.includes('supplier') || lower.includes('mtc')) category = 'Vendor Document';
     else if (lower.includes('spam') || lower.includes('other') || lower.includes('junk')) category = 'Spam/Other';
-    else category = 'Enquiry'; // Default
+    else category = 'Enquiry';
   }
 
   let confidence = parseInt(data.confidence, 10);
@@ -846,7 +1041,6 @@ function heuristicClassify(text, subject, from, attachmentNames) {
   const combined = `${subject} ${text} ${from}`.toLowerCase();
   const attStr = attachmentNames.join(' ').toLowerCase();
 
-  // Tender keywords
   const tenderKeywords = ['tender', 'nit', 'notice inviting', 'bid invitation', 'eoi', 'expression of interest',
     'gem portal', 'earnest money', 'emd', 'bid submission', 'corrigendum', 'addendum',
     'procurement', 'rfp', 'request for proposal', 'municipal', 'public sector'];
@@ -854,13 +1048,11 @@ function heuristicClassify(text, subject, from, attachmentNames) {
     return { category: 'Tender', confidence: 75, reason: 'Tender keywords detected in subject/body', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [] };
   }
 
-  // Follow-up (reply)
   if (/^(re|fwd|fw)\s*:/i.test(subject.trim()) || /ENQ-\d{4}-\d{2}-\d{4}/i.test(combined)) {
     const refs = (combined.match(/ENQ-\d{4}-\d{2}-\d{4}/gi) || []).map(r => r.toUpperCase());
     return { category: 'Follow-up', confidence: 80, reason: 'Reply subject prefix or ENQ reference ID found', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [...new Set(refs)] };
   }
 
-  // Vendor document
   const vendorKeywords = ['mtc', 'material test certificate', 'inspection report', 'test report',
     'challan', 'delivery note', 'dispatch', 'invoice', 'proforma', 'quotation from',
     'material availability', 'stock available', 'rate list'];
@@ -868,7 +1060,6 @@ function heuristicClassify(text, subject, from, attachmentNames) {
     return { category: 'Vendor Document', confidence: 70, reason: 'Vendor/supplier document keywords detected', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [] };
   }
 
-  // Default to Enquiry
   return { category: 'Enquiry', confidence: 60, reason: 'Default classification — no specific category matched', tenderNumber: null, tenderDeadline: null, referencedEnquiryIds: [] };
 }
 
@@ -882,82 +1073,46 @@ function extractEmailFromString(str) {
 /**
  * Extracts commercial terms and compliance details from tender/enquiry PDF or email context
  * to pre-populate a Quotation.
- * 
- * @param {string} textContext Full parsed text of the email + attachments
- * @returns {Promise<object>} Extracted quotation terms
+ * Part 3, 4, 5: strict OpenAI-first, prompt guidelines, JSON validation
  */
 exports.extractQuotationTerms = async (textContext) => {
-  console.log(`[AI Term Extraction] Extracting commercial and compliance terms from context (${textContext.length} chars)`);
+  console.log(`[AI Term Extraction] Extracting commercial and compliance terms`);
 
-  const prompt = `You are a contract compliance and estimation bot for Petro Valve.
-Read the tender document text and technical specifications below:
+  const prompt = `You are a contract compliance and estimation assistant.
+Read the tender document text below:
 """
 ${textContext.substring(0, 10000)}
 """
 
 Extract the commercial terms, delivery period, and quality/inspection compliance requirements. 
-Return ONLY a JSON object containing the following keys (do not wrap in markdown quotes, return ONLY raw JSON):
+Return ONLY a valid JSON object matching this schema. Do not wrap in markdown code blocks. Do not add explanations.
 
-1. "paymentTerms" (string): Payment terms mentioned in the document (e.g. "10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch" or "100% within 30 days of delivery"). If not found, output null.
-2. "deliverySchedule" (string): The delivery timeline or completion schedule required (e.g., "Within 12 weeks from approval" or "As per tender schedule"). If not found, output null.
-3. "tpiTerms" (string): Third-party inspection (TPI) agency or inspection terms (e.g. "Inspection by LLOYDS/TPIA" or "CE/IBR certification required"). If not found, output null.
-4. "guaranteeTerms" (string): Guarantee/warranty period specified (e.g., "18 months from supply or 12 months from commissioning"). If not found, output null.
-5. "validityTerms" (string): Bid or quotation validity period (e.g. "120 days from bid opening"). If not found, output null.
-6. "priceBasis" (string): Price basis terms (e.g. "Ex-works", "FOR Destination", "FOB"). If not found, output null.
-7. "freightTerms" (string): Who pays for freight (e.g., "Freight paid by buyer", "Inclusive of freight"). If not found, output null.
-8. "packingForwardingTerms" (string): Packaging requirements (e.g. "Seaworthy wooden box packing required"). If not found, output null.
-9. "technicalDeviations" (string): Any special compliance requirements or deviations from standard design mentioned in the tender specifications (e.g., "Special dual-plate configuration required, compliance with NACE MR0175 required"). If not found, output null.
+Schema:
+{
+  "paymentTerms": "...", (or null if not found),
+  "deliverySchedule": "...", (or null if not found),
+  "tpiTerms": "...", (or null if not found),
+  "guaranteeTerms": "...", (or null if not found),
+  "validityTerms": "...", (or null if not found),
+  "priceBasis": "...", (or null if not found),
+  "freightTerms": "...", (or null if not found),
+  "packingForwardingTerms": "...", (or null if not found),
+  "technicalDeviations": "..." (or null if not found)
+}
 
-Return ONLY raw JSON. No explanations.`;
+If information cannot be extracted, return null for that field. Never invent values.`;
 
-  const callAI = async (provider, url, buildPayload, parseResponse) => {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: buildPayload.headers,
-        body: JSON.stringify(buildPayload.body)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = parseResponse(result);
-        if (rawText) {
-          return JSON.parse(rawText.trim());
-        }
-      }
-    } catch (err) {
-      console.error(`[AI Term Extraction] ${provider} failed:`, err.message);
-    }
-    return null;
+  const validateFn = (data) => {
+    return data && typeof data === 'object';
   };
 
-  // 1. Try Groq
-  if (process.env.GROQ_API_KEY) {
-    const result = await callAI('Groq', 'https://api.groq.com/openai/v1/chat/completions', {
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-      body: { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
-    }, r => r.choices?.[0]?.message?.content);
-    if (result) return normalizeExtractedTerms(result);
-  }
+  const { result } = await callAIServiceWithFallback({
+    prompt,
+    validateFn,
+    logTag: 'AI Term Extraction'
+  });
 
-  // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
-    const result = await callAI('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
-    }, r => r.candidates?.[0]?.content?.parts?.[0]?.text);
-    if (result) return normalizeExtractedTerms(result);
-  }
-
-  // 3. Try OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    const result = await callAI('OpenAI', 'https://api.openai.com/v1/chat/completions', {
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
-    }, r => r.choices?.[0]?.message?.content);
-    if (result) return normalizeExtractedTerms(result);
-  }
-
-  return {};
+  return normalizeExtractedTerms(result);
 };
 
 function normalizeExtractedTerms(data) {
@@ -973,9 +1128,10 @@ function normalizeExtractedTerms(data) {
 
 /**
  * Suggests fields and technical dynamic specifications for an enquiry based on customer purchase history.
+ * Part 3, 4, 5: strict OpenAI-first, prompt guidelines, JSON validation
  */
 exports.suggestEnquiryFields = async (productCategory, productDescription, customerHistory = []) => {
-  console.log(`[AI Suggestion] Generating suggestions for category "${productCategory}" and description "${productDescription}". Past enquiries: ${customerHistory.length}`);
+  console.log(`[AI Suggestion] Generating suggestions for category "${productCategory}"`);
 
   const historyText = customerHistory.map((item, idx) => {
     return `Enquiry #${idx + 1}:
@@ -984,33 +1140,31 @@ Description: ${item.productDescription}
 Quantity: ${item.quantity} ${item.unit}
 Standard: ${item.standardCode || 'Not specified'}
 Special Requirements: ${item.specialRequirements || 'None'}
-Priority: ${item.priority || 'Medium'}
 Technical Specifications: ${JSON.stringify(item.dynamicFields || {})}
 ---`;
   }).join('\n');
 
-  const prompt = `You are an expert sales engineering assistant for Petro Valve.
+  const prompt = `You are a sales engineering assistant.
 A sales agent is creating a new enquiry for a customer.
 
-Here is the customer's history of previous enquiries (most recent first):
+Customer previous history:
 ${historyText || 'No previous history available.'}
 
-The sales agent has entered the following minimal info for the new enquiry:
+New enquiry inputs:
 - Product Category: ${productCategory}
 - Product Description: ${productDescription}
 
-Based on this customer's history (if any) and standard engineering specifications for "${productDescription}" under category "${productCategory}", suggest the most likely values for the remaining fields:
-1. "standardCode": Must match exactly one of: "ASME", "IS", "BS", "EN", "API", "IBR", "Custom", "Not specified".
-2. "quantity": A suggested quantity (number).
-3. "unit": Must match exactly one of: "NOS", "SET", "MT", "KG", "M", "M2", "Job".
-4. "priority": Must match exactly one of: "Low", "Medium", "High", "Urgent".
-5. "specialRequirements": Suggest a short summary of any special requirements or inspections (max 400 characters).
-6. "dynamicFields": Suggest technical specifications (key-value pairs) appropriate for this category and product. Suggest keys and values that are relevant. For example:
-   - For Piping: designTempC, designPressureBar, pipeSizeInch, pipeSchedule, materialGrade.
-   - For Pressure Vessel: shellMaterial, headMaterial, capacityLitres, workingPressureBar.
-   - For Heat Exchanger: tubeMaterial, shellMaterial, heatTransferAreaSqM, workingTempC.
+Suggest the most likely values for:
+1. "standardCode": "ASME" / "IS" / "BS" / "EN" / "API" / "IBR" / "Custom" / "Not specified"
+2. "quantity": number
+3. "unit": "NOS" / "SET" / "MT" / "KG" / "M" / "M2" / "Job"
+4. "priority": "Low" / "Medium" / "High" / "Urgent"
+5. "specialRequirements": max 400 characters description
+6. "dynamicFields": Suggested technical specifications (key-value pairs) appropriate for this category and product.
 
-Return ONLY a JSON object containing the suggested fields and an explanation of why they were suggested (do not wrap in markdown code blocks, return ONLY raw JSON):
+Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown code blocks. Do not add explanations.
+
+Schema:
 {
   "suggestions": {
     "standardCode": "...",
@@ -1019,71 +1173,112 @@ Return ONLY a JSON object containing the suggested fields and an explanation of 
     "priority": "...",
     "specialRequirements": "...",
     "dynamicFields": {
-      "key1": "value1",
-      "key2": "value2"
+      "key1": "value1"
     }
   },
   "explanation": "..."
 }
-Do not wrap the JSON in markdown code blocks. Return ONLY the raw JSON string.`;
 
-  const callAI = async (provider, url, buildPayload, parseResponse) => {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: buildPayload.headers,
-        body: JSON.stringify(buildPayload.body)
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const rawText = parseResponse(result);
-        if (rawText) {
-          return JSON.parse(rawText.trim());
-        }
-      }
-    } catch (err) {
-      console.error(`[AI Suggestion] ${provider} failed:`, err.message);
-    }
-    return null;
+If information cannot be suggested, return null. Never invent values.`;
+
+  const validateFn = (data) => {
+    return data && data.suggestions && typeof data.suggestions === 'object';
   };
 
-  // 1. Try Groq
-  if (process.env.GROQ_API_KEY) {
-    const result = await callAI('Groq', 'https://api.groq.com/openai/v1/chat/completions', {
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-      body: { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
-    }, r => r.choices?.[0]?.message?.content);
-    if (result) return result;
-  }
+  const { result } = await callAIServiceWithFallback({
+    prompt,
+    validateFn,
+    logTag: 'AI Suggestion'
+  });
 
-  // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
-    const result = await callAI('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
-    }, r => r.candidates?.[0]?.content?.parts?.[0]?.text);
-    if (result) return result;
-  }
-
-  // 3. Try OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    const result = await callAI('OpenAI', 'https://api.openai.com/v1/chat/completions', {
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }
-    }, r => r.choices?.[0]?.message?.content);
-    if (result) return result;
-  }
-
-  // Fallback default suggestions
-  return {
-    suggestions: {
-      standardCode: 'Not specified',
-      quantity: 1,
-      unit: 'NOS',
-      priority: 'Medium',
-      specialRequirements: '',
-      dynamicFields: {}
-    },
-    explanation: 'No AI service available. Returned default specifications.'
-  };
+  return result;
 };
+
+/**
+ * Classifies a parsed attachment using the fallback chain of AI models (OpenAI-first).
+ * Part of Phase 1.
+ * 
+ * @param {string} fileName Filename of the attachment
+ * @param {string} textSnippet A snippet of the extracted/OCR text (typically first 2000 chars)
+ * @returns {Promise<object>} { category, confidence }
+ */
+exports.classifyAttachmentAgent = async (fileName, textSnippet = '') => {
+  console.log(`[AI Attachment Classification] Classifying file: "${fileName}"`);
+
+  const ATTACHMENT_CATEGORIES = [
+    'BOQ',
+    'Technical Specification',
+    'Commercial',
+    'Datasheet',
+    'Drawing',
+    'Corrigendum',
+    'Vendor Query',
+    'Price Bid',
+    'Annexure',
+    'General Tender',
+    'Purchase Order',
+    'Inspection Document',
+    'Quality Plan',
+    'Unknown'
+  ];
+
+  const prompt = `You are a document classification bot.
+Your job is to read the file name and a snippet of its text content, and classify it into EXACTLY ONE of the following 14 categories:
+
+- "BOQ" (Bill of Quantities, schedules of items, price schedules with blank rates, spreadsheet tables containing product rows and quantities)
+- "Technical Specification" (Detailed technical requirements, specification sheets, project standards, engineering specifications)
+- "Commercial" (Bid terms, commercial guidelines, instructions to bidders, payment terms, legal requirements, qualification criteria)
+- "Datasheet" (Product-specific data sheets, valve data sheets, tag lists, dimensional specs)
+- "Drawing" (CAD layouts, dimensional drawings, GA drawings, piping isometric drawings)
+- "Corrigendum" (Tender amendments, timeline extensions, reply to pre-bid queries, corrigenda)
+- "Vendor Query" (Pre-bid clarifications, queries raised by suppliers, clarification logs)
+- "Price Bid" (Priced schedule, financial bid format, commercial bid price sheets)
+- "Annexure" (Annexures, exhibits, standard formats for certificates or declarations)
+- "General Tender" (Notice Inviting Tender, NIT cover page, brief summary of tender scope)
+- "Purchase Order" (Formal buyer-seller agreement, PO, release order)
+- "Inspection Document" (Third-party inspection certificates, release certificates, material test certificates (MTC))
+- "Quality Plan" (Quality assurance plans, QAP, inspection test plans, testing check sheets)
+- "Unknown" (Any document that does not fit any category above)
+
+File Details:
+File Name: ${fileName}
+Text Content Snippet:
+"""
+${textSnippet.substring(0, 2000)}
+"""
+
+Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown code blocks. Do not add explanations.
+
+Schema:
+{
+  "category": "BOQ" / "Technical Specification" / "Commercial" / "Datasheet" / "Drawing" / "Corrigendum" / "Vendor Query" / "Price Bid" / "Annexure" / "General Tender" / "Purchase Order" / "Inspection Document" / "Quality Plan" / "Unknown",
+  "confidence": 0-100
+}
+`;
+
+  const validateFn = (data) => {
+    return data && typeof data === 'object' && ATTACHMENT_CATEGORIES.includes(data.category);
+  };
+
+  try {
+    const { result } = await callAIServiceWithFallback({
+      prompt,
+      validateFn,
+      logTag: 'AI Attachment Classification'
+    });
+    return {
+      category: result.category,
+      confidence: parseInt(result.confidence, 10) || 80
+    };
+  } catch (err) {
+    console.error(`[AI Attachment Classification] AI failed to classify, returning Unknown. Error:`, err.message);
+    return {
+      category: 'Unknown',
+      confidence: 0
+    };
+  }
+};
+
+module.exports.RetryableError = RetryableError;
+module.exports.ExtractionFailedError = ExtractionFailedError;
+module.exports.getRelevantContext = getRelevantContext;

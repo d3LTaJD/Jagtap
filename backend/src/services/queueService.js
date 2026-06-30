@@ -198,7 +198,8 @@ async function processJobs() {
           await Metrics.create({ metricName: 'AiSuccessRate', value: 0 }).catch(() => {});
         }
 
-        if (failedJob.attempts < failedJob.maxAttempts) {
+        const isRetryable = !err.nonRetryable;
+        if (isRetryable && failedJob.attempts < failedJob.maxAttempts) {
           // Schedule retry (putting back into Pending status, releasing lock, exponential retry backoff)
           failedJob.status = 'Pending';
           failedJob.lockedBy = null;

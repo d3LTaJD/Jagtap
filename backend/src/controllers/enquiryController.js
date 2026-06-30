@@ -591,85 +591,177 @@ exports.suggestEnquiryFields = async (req, res, next) => {
 
 exports.importTender = async (req, res, next) => {
   try {
-    const boqFile = req.files?.boqFile?.[0];
-    const specFile = req.files?.specFile?.[0];
+    // Support both plural (new) and singular (backward compat) field names
+    const boqFileList = [
+      ...(req.files?.boqFiles || []),
+      ...(req.files?.boqFile || [])
+    ];
+    const specFileList = [
+      ...(req.files?.specFiles || []),
+      ...(req.files?.specFile || [])
+    ];
 
-    if (!boqFile && !specFile) {
+    if (boqFileList.length === 0 && specFileList.length === 0) {
       return res.status(400).json({ status: 'fail', message: 'Please upload at least a BOQ file or a Specification PDF file.' });
     }
 
+    console.log(`[Tender Import] Received ${boqFileList.length} BOQ file(s) and ${specFileList.length} spec file(s)`);
+
     let products = [];
-    let specifications = {};
     let parsedText = '';
 
-    // 1. Process BOQ File (XLSX, XLS, CSV)
-    if (boqFile) {
+    // Category detection helper — simple keyword-based classification for BOQ rows
+    const detectProductCategory = (desc) => {
+      const d = (desc || '').toLowerCase();
+      if (/vessel|reactor|column|drum|tank|autoclave/i.test(d)) return 'Pressure Vessel';
+      if (/exchanger|cooler|condenser|reboiler|heater/i.test(d)) return 'Heat Exchanger';
+      if (/tank|silo|hopper|storage/i.test(d)) return 'Storage Tank';
+      if (/beam|channel|angle|plate|structural/i.test(d)) return 'Structural';
+      return 'Piping';
+    };
+
+    // ── 1. Process ALL BOQ Files (XLSX, XLS, CSV) ──────────────────────────
+    if (boqFileList.length > 0) {
       const XLSX = require('xlsx');
-      const workbook = XLSX.read(boqFile.buffer, { type: 'buffer' });
-      const firstSheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet);
 
-      // Map rows to product items
-      products = rows.map((row, index) => {
-        const titleKey = Object.keys(row).find(k => /title|name|product/i.test(k)) || Object.keys(row).find(k => /item/i.test(k) && !/number|no|qty/i.test(k));
-        const descKey = Object.keys(row).find(k => /desc/i.test(k) || /specification/i.test(k));
-        const qtyKey = Object.keys(row).find(k => /qty|quantity/i.test(k));
-        const unitKey = Object.keys(row).find(k => /unit|uom/i.test(k));
+      for (const boqFile of boqFileList) {
+        console.log(`[Tender Import] Parsing BOQ: ${boqFile.originalname} (${boqFile.size} bytes)`);
+        const workbook = XLSX.read(boqFile.buffer, { type: 'buffer' });
 
-        const title = titleKey ? String(row[titleKey]).trim() : '';
-        const desc = descKey ? String(row[descKey]).trim() : '';
-        const fullDesc = title && desc ? `${title}: ${desc}` : title || desc || `Item ${index + 1}`;
+        // Process ALL sheets in the workbook (some tenders split items across sheets)
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(sheet);
+          if (rows.length === 0) continue;
 
-        let quantity = qtyKey ? Number(row[qtyKey]) : 1;
-        if (isNaN(quantity)) quantity = 1;
+          const sheetProducts = rows.map((row, index) => {
+            const titleKey = Object.keys(row).find(k => /title|name|product/i.test(k)) || Object.keys(row).find(k => /item/i.test(k) && !/number|no|qty/i.test(k));
+            const descKey = Object.keys(row).find(k => /desc/i.test(k) || /specification/i.test(k));
+            const qtyKey = Object.keys(row).find(k => /qty|quantity/i.test(k));
+            const unitKey = Object.keys(row).find(k => /unit|uom/i.test(k));
 
-        let unit = 'NOS';
-        if (unitKey) {
-          const rawUnit = String(row[unitKey]).trim().toUpperCase();
-          if (['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'].includes(rawUnit)) {
-            unit = rawUnit;
-          } else if (rawUnit.startsWith('NO')) {
-            unit = 'NOS';
-          }
+            const title = titleKey ? String(row[titleKey]).trim() : '';
+            const desc = descKey ? String(row[descKey]).trim() : '';
+            const fullDesc = title && desc ? `${title}: ${desc}` : title || desc || `Item ${index + 1}`;
+
+            // Skip rows that look like headers or empty rows
+            if (!title && !desc) return null;
+
+            let quantity = qtyKey ? Number(row[qtyKey]) : 1;
+            if (isNaN(quantity)) quantity = 1;
+
+            const boqParserService = require('../services/boqParserService');
+            const unit = unitKey ? boqParserService.normalizeUnit(row[unitKey]) : 'NOS';
+
+            return {
+              description: fullDesc,
+              quantity,
+              unit,
+              category: detectProductCategory(fullDesc),
+              dynamicFields: {}
+            };
+          }).filter(Boolean);
+
+          products.push(...sheetProducts);
+          console.log(`[Tender Import] Sheet "${sheetName}" in ${boqFile.originalname}: ${sheetProducts.length} product(s) extracted`);
         }
+      }
 
-        return {
-          description: fullDesc,
-          quantity,
-          unit,
-          category: 'Piping', // Default to Piping for valves in tenders
-          dynamicFields: {}
-        };
-      });
+      // Do NOT merge products from structured BOQ files to preserve all separate items
+      console.log(`[Tender Import] Preserved ${products.length} separate items from BOQ files.`);
     }
 
-    // 2. Process Technical Specification PDF
-    if (specFile) {
+    // ── 2. Process ALL Technical Specification files ────────────────────────
+    if (specFileList.length > 0) {
       const fileParsingService = require('../services/fileParsingService');
-      const parseResult = await fileParsingService.extractTextFromFile(specFile.buffer, specFile.mimetype, specFile.originalname);
-      if (parseResult.status === 'SUCCESS') {
-        parsedText = parseResult.text;
+      const textParts = [];
 
-        // Query active 'Piping' Category field definitions (since tenders are generally for Piping/valves)
+      for (const specFile of specFileList) {
+        console.log(`[Tender Import] Parsing spec file: ${specFile.originalname} (${specFile.size} bytes, type: ${specFile.mimetype})`);
+        const parseResult = await fileParsingService.extractTextFromFile(specFile.buffer, specFile.mimetype, specFile.originalname);
+
+        if (parseResult.status === 'SUCCESS' && parseResult.text?.trim().length > 0) {
+          textParts.push(`\n\n--- Specification Document: ${specFile.originalname} ---\n${parseResult.text}`);
+          console.log(`[Tender Import] Extracted ${parseResult.text.length} chars from ${specFile.originalname}`);
+        } else {
+          console.warn(`[Tender Import] Spec file ${specFile.originalname} extraction status: ${parseResult.status}`);
+        }
+      }
+
+      // Concatenate all spec texts into a single context
+      parsedText = textParts.join('');
+
+      if (parsedText.length > 0 && products.length > 0) {
+        const aiService = require('../services/aiService');
+        const aiConfig = require('../config/aiConfig');
+
+        const mapLimit = async (items, limit, fn) => {
+          const results = [];
+          const executing = new Set();
+          for (const item of items) {
+            const p = Promise.resolve().then(() => fn(item));
+            results.push(p);
+            executing.add(p);
+            const clean = () => executing.delete(p);
+            p.then(clean, clean);
+            if (executing.size >= limit) {
+              await Promise.race(executing);
+            }
+          }
+          return Promise.all(results);
+        };
+
+        // Extract dynamic fields for EACH product using its own category concurrently
+        await mapLimit(products, aiConfig.MAX_AI_CONCURRENCY, async (prod) => {
+          const prodFields = await FieldDefinition.find({
+            productCategory: prod.category,
+            formContext: 'Enquiry',
+            isDeleted: false,
+            isActive: true
+          });
+          if (prodFields.length > 0) {
+            prod.dynamicFields = await aiService.extractDynamicFields(
+              parsedText,
+              prodFields,
+              prod.description,
+              'NEW_TENDER'
+            );
+          }
+        });
+      } else if (parsedText.length > 0 && products.length === 0) {
+        // No BOQ files uploaded, just spec PDFs — extract with generic Piping fields
+        const aiService = require('../services/aiService');
         const fields = await FieldDefinition.find({
           productCategory: 'Piping',
           formContext: 'Enquiry',
           isDeleted: false,
           isActive: true
         });
-
-        if (fields.length > 0 && parsedText.length > 0) {
-          const aiService = require('../services/aiService');
-          // Use Gemini to extract dynamic fields
-          specifications = await aiService.extractDynamicFields(
-            parsedText,
-            fields,
-            products.length > 0 ? products[0].description : 'Valves Tender'
-          );
+        if (fields.length > 0) {
+          const specifications = await aiService.extractDynamicFields(parsedText, fields, 'Valves Tender', 'NEW_TENDER');
+          products = [{
+            description: 'Tender items (from specification documents)',
+            quantity: 1,
+            unit: 'NOS',
+            category: 'Piping',
+            dynamicFields: specifications
+          }];
         }
-      } else {
-        console.warn(`[Tender Import] PDF text extraction status: ${parseResult.status}`);
+      }
+    }
+
+    // ── 3. Extract Tender Intelligence (For auto-populating form fields) ────
+    let tenderIntelligence = null;
+    const fullTextContext = parsedText + '\n\n' + products.map(p => p.description).join('\n');
+    if (fullTextContext.trim().length > 50) {
+      try {
+        const tenderIntelligenceService = require('../services/tenderIntelligenceService');
+        const allFiles = [...boqFileList, ...specFileList];
+        const fileNames = allFiles.map(f => f.originalname).filter(Boolean);
+        console.log(`[Tender Import] Extracting Tender Intelligence...`);
+        tenderIntelligence = await tenderIntelligenceService.extractTenderIntelligence(fullTextContext, fileNames, 'IMPORT_TENDER');
+      } catch (tiErr) {
+        console.error(`[Tender Import] Tender Intelligence extraction failed:`, tiErr.message);
       }
     }
 
@@ -677,7 +769,12 @@ exports.importTender = async (req, res, next) => {
       status: 'success',
       data: {
         products,
-        specifications,
+        tenderIntelligence,
+        specifications: {},
+        filesSummary: {
+          boqFiles: boqFileList.map(f => f.originalname),
+          specFiles: specFileList.map(f => f.originalname)
+        },
         textSnippet: parsedText ? parsedText.substring(0, 500) : ''
       }
     });
@@ -685,4 +782,3 @@ exports.importTender = async (req, res, next) => {
     next(err);
   }
 };
-

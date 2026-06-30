@@ -9,10 +9,36 @@ const attachmentSchema = new mongoose.Schema({
   fileType: { type: String, required: true },
   fileSize: { type: Number, required: true },
   storagePath: { type: String, required: true }, // Local storage file path / filename key
+  fileHash: { type: String, index: true }, // Hash of the file buffer for OCR caching
   extractedText: { type: String, default: '' }, // Extracted text/OCR content stored permanently
   extractionStatus: { type: String, enum: ['PENDING', 'SUCCESS', 'FAILED', 'NOT_SUPPORTED'], default: 'PENDING' },
   ocrConfidence: { type: Number }, // Raw OCR confidence (0-100)
-  attachmentCategory: { type: String, enum: ['Datasheet', 'Drawing', 'Commercial', 'Unknown'], default: 'Unknown' },
+  attachmentCategory: {
+    type: String,
+    enum: [
+      'BOQ',
+      'Technical Specification',
+      'Commercial',
+      'Datasheet',
+      'Drawing',
+      'Corrigendum',
+      'Vendor Query',
+      'Price Bid',
+      'Annexure',
+      'General Tender',
+      'Purchase Order',
+      'Inspection Document',
+      'Quality Plan',
+      'Unknown'
+    ],
+    default: 'Unknown',
+    index: true
+  },
+  classification: {
+    category: { type: String, default: 'Unknown' },
+    confidence: { type: Number, default: 0 },
+    source: { type: String, enum: ['heuristic', 'ai'] }
+  },
   
   // Version Control
   versionNumber: { type: Number, default: 1 },

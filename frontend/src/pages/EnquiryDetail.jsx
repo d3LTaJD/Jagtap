@@ -12,6 +12,14 @@ import AutocompleteSelect from '../components/AutocompleteSelect';
 import FollowUpPanel from '../components/FollowUpPanel';
 import TaskPanel from '../components/TaskPanel';
 import AttachmentManager from '../components/AttachmentManager';
+import TenderIntelligencePanel from '../components/TenderIntelligencePanel';
+
+const renderVal = (val) => {
+  if (val && typeof val === 'object' && val.value !== undefined) {
+    return val.value;
+  }
+  return val;
+};
 
 const PRIORITY_CONFIG = {
   Urgent: { color: 'bg-red-100 text-red-700 border-red-200',    dot: 'bg-red-500'   },
@@ -554,9 +562,9 @@ const EnquiryDetail = () => {
                   ['Tender Deadline', enquiry.tenderDeadline ? new Date(enquiry.tenderDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—']
                 ] : []),
                 ...(enquiry.productCategory === 'Piping' ? [
-                  ['Valve Type',      enquiry.dynamicFields?.valve_type || '—'],
-                  ['Valve Size',      enquiry.dynamicFields?.valve_size ? `${enquiry.dynamicFields.valve_size} mm` : '—'],
-                  ['Pressure Class',  enquiry.dynamicFields?.valve_class || '—']
+                  ['Valve Type',      renderVal(enquiry.dynamicFields?.valve_type) || '—'],
+                  ['Valve Size',      renderVal(enquiry.dynamicFields?.valve_size) ? `${renderVal(enquiry.dynamicFields.valve_size)} mm` : '—'],
+                  ['Pressure Class',  renderVal(enquiry.dynamicFields?.valve_class) || '—']
                 ] : []),
                 ...(enquiry.sourceChannel === 'IndiaMart' ? [
                   ['IndiaMart Lead ID', enquiry.indiaMartLeadId || '—'],
@@ -616,10 +624,22 @@ const EnquiryDetail = () => {
                             <div className="flex flex-wrap gap-1.5 mt-1.5">
                               {Object.entries(prod.dynamicFields).map(([key, val]) => {
                                 if (val === undefined || val === null || val === '') return null;
+                                const hasRichData = typeof val === 'object' && val !== null;
+                                const displayVal = hasRichData ? val.value : val;
+                                if (displayVal === undefined || displayVal === null || displayVal === '') return null;
+
                                 return (
-                                  <span key={key} className="inline-flex items-center gap-1 rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                                  <span key={key} className="inline-flex items-center gap-1.5 rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">
                                     <span className="text-slate-400">{formatFieldName(key)}:</span>
-                                    <span>{val}</span>
+                                    <span>{displayVal}</span>
+                                    {hasRichData && val.confidence !== undefined && val.confidence > 0 && (
+                                      <span className="text-[10px] text-slate-400 font-normal">({val.confidence}%)</span>
+                                    )}
+                                    {hasRichData && val.sourcePage !== undefined && val.sourcePage !== null && (
+                                      <span className="text-[9px] bg-slate-200/70 text-slate-500 rounded px-1 ml-0.5 font-semibold cursor-help" title={`Page ${val.sourcePage}`}>
+                                        p.{val.sourcePage}
+                                      </span>
+                                    )}
                                   </span>
                                 );
                               })}
@@ -649,6 +669,11 @@ const EnquiryDetail = () => {
                 </table>
               </div>
             </div>
+          )}
+
+          {/* Tender Intelligence Panel */}
+          {enquiry.sourceType === 'Tender' && enquiry.tenderIntelligence && (
+            <TenderIntelligencePanel tenderIntelligence={enquiry.tenderIntelligence} />
           )}
 
           {/* Customer Info */}

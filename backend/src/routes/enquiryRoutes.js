@@ -24,6 +24,8 @@ router.post(
   '/import-tender',
   requirePermission('Enquiry', 'create'),
   upload.fields([
+    { name: 'boqFiles', maxCount: 10 },
+    { name: 'specFiles', maxCount: 10 },
     { name: 'boqFile', maxCount: 1 },
     { name: 'specFile', maxCount: 1 }
   ]),
