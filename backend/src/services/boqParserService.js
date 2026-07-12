@@ -8,25 +8,29 @@ const { getFileBuffer } = require('./localStorageService');
  */
 function detectProductCategory(desc) {
   const lower = desc.toLowerCase();
-  if (lower.includes('valve')) return 'Piping';
-  if (lower.includes('piping') || lower.includes('pipe') || lower.includes('flange') || lower.includes('fitting')) return 'Piping';
+  if (lower.includes('valve')) return 'Valves';
+  if (lower.includes('piping') || lower.includes('pipe') || lower.includes('flange') || lower.includes('fitting')) return 'Valves';
   if (lower.includes('tank') || lower.includes('vessel')) return 'Storage Tank';
   if (lower.includes('exchanger') || lower.includes('heater') || lower.includes('cooler')) return 'Heat Exchanger';
   if (lower.includes('structure') || lower.includes('structural') || lower.includes('beam') || lower.includes('column')) return 'Structural';
   return 'Custom';
 }
 
-/**
- * Detects standard code from a description string.
- */
 function detectStandardCode(desc) {
+  if (!desc) return 'Not specified';
   const lower = desc.toLowerCase();
-  if (lower.includes('asme') || lower.includes('ansi')) return 'ASME';
-  if (lower.includes('api')) return 'API';
-  if (lower.includes('ibr')) return 'IBR';
-  if (lower.includes('is ') || lower.includes('is:')) return 'IS';
-  if (lower.includes('bs ')) return 'BS';
-  if (lower.includes('en ')) return 'EN';
+  const found = [];
+  if (lower.includes('asme') || lower.includes('ansi')) found.push('ASME');
+  if (lower.includes('api')) found.push('API');
+  if (lower.includes('ibr')) found.push('IBR');
+  // Match 'is' as a separate word, or followed by colon, dash, space, or number
+  if (/\bis\b|\bis[:\-\s\d]/i.test(lower)) found.push('IS');
+  if (/\bbs\b|\bbs[:\-\s\d]/i.test(lower)) found.push('BS');
+  if (/\ben\b|\ben[:\-\s\d]/i.test(lower)) found.push('EN');
+  
+  if (found.length > 0) {
+    return found.join(', ');
+  }
   return 'Not specified';
 }
 
@@ -383,36 +387,8 @@ function mergeEnquiryProducts(products) {
       const descMatch = desc.toLowerCase().replace(/[^a-z0-9]/g, '') === otherDesc.toLowerCase().replace(/[^a-z0-9]/g, '');
 
       let isMatch = false;
-      if (catMatch) {
-        if (descMatch) {
-          isMatch = true;
-        } else if (sizeMatch && ratingMatch) {
-          const featA = {
-            material: parseMaterial(desc),
-            valveType: parseValveType(desc),
-            bore: parseBore(desc),
-            operation: parseOperation(desc),
-            endConnection: parseEndConnection(desc)
-          };
-          const featB = {
-            material: parseMaterial(otherDesc),
-            valveType: parseValveType(otherDesc),
-            bore: parseBore(otherDesc),
-            operation: parseOperation(otherDesc),
-            endConnection: parseEndConnection(otherDesc)
-          };
-
-          const isCompatible = 
-            (featA.material === null || featB.material === null || featA.material === featB.material) &&
-            (featA.valveType === null || featB.valveType === null || featA.valveType === featB.valveType) &&
-            (featA.bore === null || featB.bore === null || featA.bore === featB.bore) &&
-            (featA.operation === null || featB.operation === null || featA.operation === featB.operation) &&
-            (featA.endConnection === null || featB.endConnection === null || featA.endConnection === featB.endConnection);
-
-          if (isCompatible) {
-            isMatch = true;
-          }
-        }
+      if (catMatch && descMatch) {
+        isMatch = true;
       }
 
       if (isMatch) {

@@ -67,8 +67,8 @@ exports.generateQapFromQuotation = async (req, res, next) => {
                           desc.toLowerCase().includes('ball valve') || 
                           item.dynamicFields?.valve_type === 'Ball Valve' ||
                           q.dynamicFields?.valve_type === 'Ball Valve' ||
-                          item.productCategory === 'Piping' ||
-                          q.productCategory === 'Piping'
+                          item.productCategory === 'Valves' ||
+                          q.productCategory === 'Valves'
       );
 
       return { classVal, sizeVal, isBallValve, isCheckValve, isGlobeValve };

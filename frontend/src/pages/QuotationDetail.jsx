@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   FileText, Download, User as UserIcon, CheckCircle, CheckCircle2,
   Clock, AlertCircle, ArrowLeft, Loader2, IndianRupee,
@@ -12,6 +12,7 @@ import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 import AttachmentManager from '../components/AttachmentManager';
 import EmailComposerModal from '../components/EmailComposerModal';
+import { formatTextToMm } from '../utils/valveFormatter';
 
 const StatusBadge = ({ status }) => {
   const colors = {
@@ -81,7 +82,7 @@ const QuotationDetail = () => {
           setQuotation(q);
           const populatedItems = (q.items || []).map(item => ({
             ...item,
-            productCategory: item.productCategory || q.enquiry?.productCategory || 'Piping'
+            productCategory: item.productCategory || q.enquiry?.productCategory || 'Valves'
           }));
           setItems(populatedItems);
           setTechFields({
@@ -271,7 +272,22 @@ const QuotationDetail = () => {
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{quotation.quotationId || 'Draft'}</h1>
             <StatusBadge status={quotation.status} />
           </div>
-          <p className="text-sm text-slate-500 font-medium mt-1">Ref Enquiry: {quotation.enquiry?.enquiryId || 'N/A'}</p>
+          <p className="text-sm text-slate-500 font-medium mt-1">
+            Ref Enquiry:{' '}
+            {quotation.enquiry?.enquiryId ? (
+              <Link
+                to={`/app/enquiries/${quotation.enquiry._id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brand-600 hover:text-brand-700 font-semibold hover:underline ml-1 inline-flex items-center gap-1"
+              >
+                {quotation.enquiry.enquiryId}
+                <span className="text-[10px] text-slate-400 font-normal">(opens in new tab)</span>
+              </Link>
+            ) : (
+              'N/A'
+            )}
+          </p>
         </div>
         
         <div className="flex items-center gap-3 flex-wrap">
@@ -413,7 +429,7 @@ const QuotationDetail = () => {
                         <div className="flex justify-between items-start gap-4">
                           <div>
                             <span className="px-2 py-0.5 bg-brand-100 text-brand-700 text-[10px] font-black rounded uppercase">Item {item.itemNo || idx + 1}</span>
-                            <h3 className="font-bold text-slate-800 text-sm mt-1">{item.description}</h3>
+                            <h3 className="font-bold text-slate-800 text-sm mt-1">{formatTextToMm(item.description)}</h3>
                             <p className="text-xs text-slate-500 mt-0.5">Category: {item.productCategory} · MOC: {item.materialGrade || 'N/A'}</p>
                           </div>
                           <button
@@ -824,7 +840,7 @@ const QuotationDetail = () => {
             <div className="p-6 border-b border-slate-200 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Contract Checklist Specifications</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Item {activeItemIndex + 1}: {items[activeItemIndex]?.description}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Item {activeItemIndex + 1}: {formatTextToMm(items[activeItemIndex]?.description)}</p>
               </div>
               <button
                 onClick={() => setActiveItemIndex(null)}
@@ -838,13 +854,13 @@ const QuotationDetail = () => {
               <DynamicFormRenderer
                 formContext="Quotation"
                 values={{
-                  productCategory: items[activeItemIndex]?.productCategory || quotation?.enquiry?.productCategory || 'Piping',
+                  productCategory: items[activeItemIndex]?.productCategory || quotation?.enquiry?.productCategory || 'Valves',
                   ...(items[activeItemIndex]?.dynamicFields || {})
                 }}
                 onChange={(fieldName, value) => {
                   const newItems = [...items];
                   if (!newItems[activeItemIndex].productCategory) {
-                    newItems[activeItemIndex].productCategory = quotation?.enquiry?.productCategory || 'Piping';
+                    newItems[activeItemIndex].productCategory = quotation?.enquiry?.productCategory || 'Valves';
                   }
                   if (!newItems[activeItemIndex].dynamicFields) {
                     newItems[activeItemIndex].dynamicFields = {};

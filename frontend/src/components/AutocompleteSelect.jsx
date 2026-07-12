@@ -295,9 +295,10 @@ const AutocompleteSelect = ({
         disabled={disabled}
         className={`
           w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left
-          bg-slate-50 border border-slate-200 rounded-xl text-sm
+          rounded-xl text-sm
           focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500
           transition-all
+          ${!value && !disabled ? 'bg-yellow-50 border border-yellow-300' : 'bg-slate-50 border border-slate-200'}
           ${disabled ? 'opacity-60 cursor-not-allowed bg-slate-100' : 'cursor-pointer hover:border-slate-300'}
           ${isOpen ? 'ring-2 ring-brand-500/20 border-brand-500' : ''}
         `}

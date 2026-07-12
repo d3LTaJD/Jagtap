@@ -23,7 +23,32 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Connect to database then start server
-connectDB().then(() => {
+connectDB().then(async () => {
+  // Clear any stuck processing states from previous server runs
+  try {
+    const Enquiry = require('./src/models/Enquiry');
+    const EmailMessage = require('./src/models/EmailMessage');
+    const Attachment = require('./src/models/Attachment');
+
+    await Promise.all([
+      Enquiry.updateMany(
+        { processingStatus: { $in: ['Pending', 'Processing'] } },
+        { $set: { processingStatus: 'Completed', processingMessage: '' } }
+      ),
+      EmailMessage.updateMany(
+        { processingStatus: { $in: ['Pending', 'Processing'] } },
+        { $set: { processingStatus: 'Completed' } }
+      ),
+      Attachment.updateMany(
+        { processingStatus: { $in: ['Pending', 'Processing'] } },
+        { $set: { processingStatus: 'Completed' } }
+      )
+    ]);
+    console.log('[Startup] Cleared any stuck AI processing queue states.');
+  } catch (clearErr) {
+    console.error('[Startup] Failed to clear stuck processing states:', clearErr.message);
+  }
+
   initCronJobs();
   emailBotService.start();
   startQueueWorker();

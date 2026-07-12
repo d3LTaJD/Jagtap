@@ -617,7 +617,7 @@ exports.importTender = async (req, res, next) => {
       if (/exchanger|cooler|condenser|reboiler|heater/i.test(d)) return 'Heat Exchanger';
       if (/tank|silo|hopper|storage/i.test(d)) return 'Storage Tank';
       if (/beam|channel|angle|plate|structural/i.test(d)) return 'Structural';
-      return 'Piping';
+      return 'Valves';
     };
 
     // ── 1. Process ALL BOQ Files (XLSX, XLS, CSV) ──────────────────────────
@@ -732,7 +732,7 @@ exports.importTender = async (req, res, next) => {
         // No BOQ files uploaded, just spec PDFs — extract with generic Piping fields
         const aiService = require('../services/aiService');
         const fields = await FieldDefinition.find({
-          productCategory: 'Piping',
+          productCategory: 'Valves',
           formContext: 'Enquiry',
           isDeleted: false,
           isActive: true
@@ -743,7 +743,7 @@ exports.importTender = async (req, res, next) => {
             description: 'Tender items (from specification documents)',
             quantity: 1,
             unit: 'NOS',
-            category: 'Piping',
+            category: 'Valves',
             dynamicFields: specifications
           }];
         }

@@ -100,8 +100,14 @@ function stripQuotedText(text) {
     if (
       /^>/.test(trimmed) ||
       /^-{3,}\s*(Original Message|Forwarded Message)/i.test(trimmed) ||
-      /^On .+wrote:/i.test(trimmed) ||
-      /^_{5,}/.test(trimmed)
+      /^-{5,}\s*Forwarded message\s*-{5,}/i.test(trimmed) ||
+      /^On .+wrote:\s*$/i.test(trimmed) ||
+      /^On\s+\d{1,2}\s+\w+\s+\d{4}.+wrote:\s*$/i.test(trimmed) ||
+      /^_{5,}/.test(trimmed) ||
+      /^From:\s*.+\s*$/i.test(trimmed) && /Sent:|Date:/i.test(lines[lines.indexOf(line) + 1] || '') ||
+      /^Begin forwarded message:/i.test(trimmed) ||
+      /^\*From:\*/i.test(trimmed) ||
+      /^Sent from my (iPhone|iPad|Galaxy|Android)/i.test(trimmed)
     ) {
       break;
     }
@@ -192,242 +198,88 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
     return;
   }
 
-  // Fetch all active Enquiry field definitions to map key names to human-friendly labels
-  const fieldDefs = await FieldDefinition.find({
-    formContext: 'Enquiry',
-    isDeleted: false,
-    isActive: true
-  });
-
-  let itemsHtml = '';
-  let itemsText = '';
-
-  enquiriesData.forEach((item, idx) => {
-    let statusBadgeColor = '#2563eb'; // Blue for New
-    if (item.status === 'Needs Review') statusBadgeColor = '#d97706'; // Yellow/Orange
-    else if (item.status === 'Verified') statusBadgeColor = '#0d9488'; // Teal
-    else if (item.status === 'Ready for Offer' || item.status === 'Confirmed') statusBadgeColor = '#059669'; // Green
-
-    // Build human-readable list of extracted specifications/dynamicFields
-    let specsHtml = '';
-    let specsText = '';
-    if (item.products && item.products.length > 0) {
-      let prodsHtmlList = [];
-      let prodsTextList = [];
-      item.products.forEach((prod, pIdx) => {
-        let prodSpecLines = [];
-        let prodSpecTextLines = [];
-        if (prod.dynamicFields && Object.keys(prod.dynamicFields).length > 0) {
-          for (const [key, val] of Object.entries(prod.dynamicFields)) {
-            if (val === undefined || val === null || val === '') continue;
-            const displayVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
-            if (displayVal === undefined || displayVal === null || displayVal === '') continue;
-            
-            const def = fieldDefs.find(f => f.fieldName === key);
-            const label = def ? def.fieldLabel : key;
-            const formattedVal = typeof displayVal === 'boolean' ? (displayVal ? 'Yes' : 'No') : displayVal;
-            
-            prodSpecLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${formattedVal}</li>`);
-            prodSpecTextLines.push(`    - ${label}: ${formattedVal}`);
-          }
-        }
-        
-        let prodHtml = `
-          <div style="margin-top: 6px; padding: 6px 10px; background-color: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; font-size: 12px; color: #334155;">
-            <strong style="color: #0f172a;">Product #${pIdx + 1}: ${prod.description} (Qty: ${prod.quantity} ${prod.unit || 'NOS'})</strong>
-        `;
-        if (prodSpecLines.length > 0) {
-          prodHtml += `
-            <ul style="margin: 4px 0 0 0; padding-left: 18px; color: #475569;">
-              ${prodSpecLines.join('')}
-            </ul>
-          `;
-        } else {
-          prodHtml += `<div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">No specific parameters extracted</div>`;
-        }
-        prodHtml += `</div>`;
-        prodsHtmlList.push(prodHtml);
-
-        let prodText = `  * Product #${pIdx + 1}: ${prod.description} (Qty: ${prod.quantity} ${prod.unit || 'NOS'})\n`;
-        if (prodSpecTextLines.length > 0) {
-          prodText += prodSpecTextLines.join('\n') + '\n';
-        }
-        prodsTextList.push(prodText);
-      });
-
-      specsHtml = `
-        <div style="margin-top:8px;">
-          <strong style="color:#1e3a8a;display:block;margin-bottom:4px;font-size:12px;">Product Specifications:</strong>
-          ${prodsHtmlList.join('')}
-        </div>
-      `;
-      specsText = `Product Specifications:\n${prodsTextList.join('\n')}\n`;
-    } else if (item.dynamicFields && Object.keys(item.dynamicFields).length > 0) {
-      const specLines = [];
-      const specTextLines = [];
-      for (const [key, val] of Object.entries(item.dynamicFields)) {
-        if (val === undefined || val === null || val === '') continue;
-        const displayVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
-        if (displayVal === undefined || displayVal === null || displayVal === '') continue;
-
-        const def = fieldDefs.find(f => f.fieldName === key);
-        const label = def ? def.fieldLabel : key;
-        const formattedVal = typeof displayVal === 'boolean' ? (displayVal ? 'Yes' : 'No') : displayVal;
-
-        specLines.push(`<li style="margin: 2px 0;"><strong>${label}:</strong> ${formattedVal}</li>`);
-        specTextLines.push(`  - ${label}: ${formattedVal}`);
-      }
-      if (specLines.length > 0) {
-        specsHtml = `
-          <div style="margin-top:8px;padding:8px 12px;background-color:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;color:#334155;">
-            <strong style="color:#1e3a8a;display:block;margin-bottom:4px;">Extracted Specifications:</strong>
-            <ul style="margin:0;padding-left:18px;">
-              ${specLines.join('')}
-            </ul>
-          </div>
-        `;
-        specsText = `Extracted Specifications:\n${specTextLines.join('\n')}\n`;
-      }
-    }
-
-    const missingSection = item.missingFields && item.missingFields.length > 0
-      ? `<div style="margin-top:8px;padding:8px 12px;background-color:#fffbeb;border:1px solid #fef3c7;border-radius:8px;color:#b45309;font-size:12px;">
-          <strong>Pending Details:</strong> Please reply to this email with: ${item.missingFields.map(f => f.fieldLabel).join(', ')}
-         </div>`
-      : `<div style="margin-top:8px;padding:8px 12px;background-color:#f0fdf4;border:1px solid #dcfce7;border-radius:8px;color:#15803d;font-size:12px;">
-          <strong>Status:</strong> Specifications complete. Ready for offer generation.
-         </div>`;
-
-    itemsHtml += `
-      <div style="border-bottom:1px solid #e2e8f0;padding:15px 0;margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:14px;font-weight:bold;color:#1e293b;">Item #${idx + 1}: ${item.productDescription}</span>
-          <span style="background-color:${statusBadgeColor};color:#ffffff;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:20px;text-transform:uppercase;">${item.status}</span>
-        </div>
-        <div style="font-size:12px;color:#64748b;margin-top:4px;">
-          Ref ID: <strong style="color:#2563eb;">${item.enquiryId}</strong> | Qty: ${item.quantity} ${item.unit || 'NOS'} | Category: ${item.productCategory}
-        </div>
-        ${specsHtml}
-        ${missingSection}
-      </div>
-    `;
-
-    itemsText += `Item #${idx + 1}: ${item.productDescription}\nRef ID: ${item.enquiryId} | Status: ${item.status}\n`;
-    if (specsText) {
-      itemsText += specsText;
-    }
-    if (item.missingFields && item.missingFields.length > 0) {
-      itemsText += `Pending Details: ${item.missingFields.map(f => f.fieldLabel).join(', ')}\n`;
-    } else {
-      itemsText += `Status: Specifications complete.\n`;
-    }
-    itemsText += `\n`;
-  });
-
+  // Build a simple list of reference IDs for the subject line
   const refsSubject = enquiriesData.map(e => e.enquiryId).join(', ');
-  let subject = config.subjectTemplate || 'Acknowledgement: Enquiries Registered [Ref: {refs}]';
-  subject = subject.replace(/{refs}/g, refsSubject);
 
-  // Threading: If we have an incoming email subject containing ENQ-, preserve that subject (ensuring it has Re:)
+  // ── Subject ────────────────────────────────────────────────────────
+  let subject = `Thank You for Your Enquiry [Ref: ${refsSubject}]`;
+
+  // Threading: preserve the original subject if it already mentions an ENQ-
   if (incomingEmailMsg && incomingEmailMsg.subject) {
     const originalSubject = incomingEmailMsg.subject.trim();
     if (originalSubject.toUpperCase().includes('ENQ-')) {
-      if (/^(re|fwd|fw)\s*:/i.test(originalSubject)) {
-        subject = originalSubject;
-      } else {
-        subject = `Re: ${originalSubject}`;
-      }
-    }
-  }
-
-  if (isReminder) {
-    if (incomingEmailMsg && incomingEmailMsg.subject) {
-      const originalSubject = incomingEmailMsg.subject.trim();
-      if (!/^(re|fwd|fw)\s*:/i.test(originalSubject)) {
-        subject = `Re: Follow-Up Reminder: ${originalSubject.replace(/^re:\s*/i, '')}`;
-      } else {
-        subject = originalSubject; // keep same thread
-      }
+      subject = /^(re|fwd|fw)\s*:/i.test(originalSubject)
+        ? originalSubject
+        : `Re: ${originalSubject}`;
     } else {
-      subject = `Follow-Up Reminder: Specs Needed [Ref: ${refsSubject}]`;
+      subject = /^(re|fwd|fw)\s*:/i.test(originalSubject)
+        ? originalSubject
+        : `Re: ${originalSubject}`;
     }
   }
 
-  // Format templates using configured templates
-  let bodyTemplate = config.bodyTemplate || 'Dear {contactName},\n\nThank you for your enquiry. We have successfully registered/updated your requests in our system:\n\n{itemsText}\n\nOur sales team is preparing your commercial quotation and will get in touch shortly.\n\nBest regards,\nPetro Valve Sales Team';
-  if (isReminder) {
-    bodyTemplate = 'Dear {contactName},\n\nThis is a friendly follow-up reminder regarding your enquiry. We still need some additional specifications to process your request:\n\n{itemsText}\n\nPlease reply directly to this email with the requested details.\n\nBest regards,\nPetro Valve Sales Team';
-  }
+  // ── Plain-text body ────────────────────────────────────────────────
+  const textContent = `Dear ${contactName},
 
-  // Build tender intelligence summary block for tender-type enquiries
-  let tenderSummaryHtml = '';
-  let tenderSummaryText = '';
-  if (enquiriesData.length > 0 && enquiriesData[0].tenderIntelligence) {
-    const ti = enquiriesData[0].tenderIntelligence;
-    const td = ti.tenderDetails || {};
-    const tl = ti.tenderTimeline || {};
-    const ct = ti.commercialTerms || {};
+Thank you for reaching out to Petro Valves Pvt. Ltd.
 
-    const tiRows = [];
-    const tiTextLines = [];
-    if (td.tenderName) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Tender</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.tenderName}</td></tr>`); tiTextLines.push(`  Tender: ${td.tenderName}`); }
-    if (td.customer) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Customer</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.customer}</td></tr>`); tiTextLines.push(`  Customer: ${td.customer}`); }
-    if (td.epcmConsultant) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">EPCM</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.epcmConsultant}</td></tr>`); tiTextLines.push(`  EPCM: ${td.epcmConsultant}`); }
-    if (td.gemTenderNo) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">GeM No</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.gemTenderNo}</td></tr>`); tiTextLines.push(`  GeM No: ${td.gemTenderNo}`); }
-    if (td.projectNo) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Project No</td><td style="padding:4px 8px;color:#1e293b;font-size:12px;">${td.projectNo}</td></tr>`); tiTextLines.push(`  Project No: ${td.projectNo}`); }
-    if (tl.bidSubmissionDate) { tiRows.push(`<tr><td style="padding:4px 8px;font-weight:bold;color:#475569;font-size:12px;">Bid Deadline</td><td style="padding:4px 8px;color:#dc2626;font-weight:bold;font-size:12px;">${tl.bidSubmissionDate}</td></tr>`); tiTextLines.push(`  Bid Deadline: ${tl.bidSubmissionDate}`); }
+We have successfully received your enquiry${enquiriesData.length > 1 ? ' comprising ' + enquiriesData.length + ' items' : ''} and it has been registered in our system under reference${enquiriesData.length > 1 ? 's' : ''}: ${refsSubject}.
 
+Our technical and commercial team is currently reviewing your requirements. A detailed quotation will be shared with you at the earliest.
 
-    if (tiRows.length > 0) {
-      tenderSummaryHtml = `
-        <div style="background-color:#fffbeb;border:1px solid #fef3c7;border-radius:12px;padding:15px;margin:15px 0;">
-          <h4 style="margin-top:0;color:#92400e;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">📋 Tender Intelligence Summary</h4>
-          <table style="width:100%;border-collapse:collapse;">${tiRows.join('')}</table>
-        </div>
-      `;
-      tenderSummaryText = `\nTender Intelligence:\n${tiTextLines.join('\n')}\n`;
-    }
-  }
+Should you have any additional specifications, drawings, or documents to share, please feel free to reply to this email.
 
-  const textContent = bodyTemplate
-    .replace(/{contactName}/g, contactName)
-    .replace(/{itemsText}/g, tenderSummaryText + itemsText);
+We appreciate your interest and look forward to working with you.
 
-  const formattedItemsHtml = `
-    <div style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:15px;margin:20px 0;">
-      <h4 style="margin-top:0;color:#475569;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Enquiries Status Summary:</h4>
-      ${itemsHtml}
-    </div>
-  `;
+Warm regards,
+Petro Valves Pvt. Ltd.
+Sales & Technical Team
+Email: ${process.env.EMAIL_USER || 'ai@petrovalves.co.in'}
+`;
 
-  let bodyHtml = bodyTemplate
-    .replace(/{contactName}/g, `<strong>${contactName}</strong>`)
-    .replace(/{itemsText}/g, tenderSummaryHtml + formattedItemsHtml)
-    .split('\n').join('<br/>');
-
+  // ── HTML body ──────────────────────────────────────────────────────
   const htmlContent = `
-    <div style="font-family:'Helvetica Neue',Arial,sans-serif;padding:25px;color:#334155;line-height:1.6;max-width:650px;border:1px solid #e2e8f0;border-radius:16px;">
-      <div style="border-bottom:2px solid #2563eb;padding-bottom:15px;margin-bottom:20px;">
-        <h2 style="color:#1e3a8a;margin:0;font-size:20px;">Petro Valve AI Assistant</h2>
-        <span style="font-size:11px;font-weight:bold;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Multi-Enquiry Registration Summary</span>
+    <div style="font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;max-width:620px;margin:0 auto;color:#334155;line-height:1.7;">
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);padding:24px 28px;border-radius:12px 12px 0 0;">
+        <h2 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;">Petro Valves Pvt. Ltd.</h2>
+        <p style="margin:4px 0 0;color:#93c5fd;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Enquiry Acknowledgement</p>
       </div>
-      
-      ${bodyHtml}
 
-      <p style="margin-top:30px;font-size:12px;color:#94a3b8;">
-        Best regards,<br/>
-        <strong>Petro Valve Sales Team</strong><br/>
-        <a href="mailto:${senderEmail}" style="color:#2563eb;text-decoration:none;">${senderEmail}</a>
-      </p>
+      <!-- Body -->
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 12px 12px;">
+        <p style="font-size:15px;margin-top:0;">Dear <strong>${contactName}</strong>,</p>
+
+        <p style="font-size:14px;">Thank you for reaching out to us. We have successfully received your enquiry and it has been registered in our system.</p>
+
+        <!-- Reference IDs -->
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px 18px;margin:20px 0;">
+          <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:0.04em;">Your Reference${enquiriesData.length > 1 ? 's' : ''}</p>
+          <p style="margin:0;font-size:15px;font-weight:700;color:#0c4a6e;letter-spacing:0.02em;">${refsSubject}</p>
+        </div>
+
+        <p style="font-size:14px;">Our technical and commercial team is currently reviewing your requirements. A detailed quotation will be shared with you at the earliest.</p>
+
+        <p style="font-size:14px;">Should you have any additional specifications, drawings, or documents to share, please feel free to reply directly to this email.</p>
+
+        <p style="font-size:14px;margin-bottom:0;">We appreciate your interest and look forward to working with you.</p>
+
+        <!-- Signature -->
+        <div style="margin-top:28px;padding-top:18px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:14px;font-weight:600;color:#1e293b;">Warm regards,</p>
+          <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#1e3a8a;">Petro Valves Pvt. Ltd.</p>
+          <p style="margin:2px 0 0;font-size:12px;color:#64748b;">Sales & Technical Team</p>
+          <p style="margin:2px 0 0;font-size:12px;">
+            <a href="mailto:${process.env.EMAIL_USER || 'ai@petrovalves.co.in'}" style="color:#2563eb;text-decoration:none;">${process.env.EMAIL_USER || 'ai@petrovalves.co.in'}</a>
+          </p>
+        </div>
+      </div>
     </div>`;
 
-  // Build headers for thread grouping — include full References chain so mail
-  // clients (Gmail, Outlook, etc.) always keep replies in the same thread.
+  // ── Thread headers ─────────────────────────────────────────────────
   const mailHeaders = {};
   if (incomingEmailMsg && incomingEmailMsg.messageId) {
     mailHeaders['In-Reply-To'] = incomingEmailMsg.messageId;
-
-    // Build a References chain: previous References + current message ID
     const prevRefs = incomingEmailMsg.references || '';
     const refParts = prevRefs
       ? [...prevRefs.split(/\s+/).filter(Boolean), incomingEmailMsg.messageId]
@@ -435,7 +287,7 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
     mailHeaders['References'] = [...new Set(refParts)].join(' ');
   }
 
-  // 1. Try SMTP first
+  // ── Send via SMTP (primary) ────────────────────────────────────────
   try {
     const port = parseInt(process.env.SMTP_PORT || 465, 10);
     const transporter = nodemailer.createTransport({
@@ -451,7 +303,7 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
     });
 
     const mailOptions = {
-      from: `"Petro Valve AI Assistant" <${senderEmail}>`,
+      from: `"Petro Valves Pvt. Ltd." <${senderEmail}>`,
       to: recipientEmail,
       subject: subject,
       text: textContent,
@@ -463,8 +315,7 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
     }
 
     const info = await transporter.sendMail(mailOptions);
-
-    console.log(`[Email Bot] Unified reply sent via SMTP to ${recipientEmail}. MessageId: ${info.messageId}`);
+    console.log(`[Email Bot] Acknowledgement reply sent via SMTP to ${recipientEmail}. MessageId: ${info.messageId}`);
     return;
   } catch (smtpErr) {
     console.error(`[Email Bot] SMTP send failed: ${smtpErr.message}. Trying fallback to Brevo HTTP API...`);
@@ -477,13 +328,11 @@ async function sendAutomatedRepliesUnified(recipientEmail, contactName, enquirie
           text: textContent,
           html: htmlContent
         };
-
         if (Object.keys(mailHeaders).length > 0) {
           brevoOptions.headers = mailHeaders;
         }
-
         await sendEmailViaBrevoApi(brevoOptions);
-        console.log(`[Email Bot] Unified reply successfully sent via Brevo HTTP API to ${recipientEmail}`);
+        console.log(`[Email Bot] Acknowledgement reply sent via Brevo HTTP API to ${recipientEmail}`);
       } catch (fallbackErr) {
         console.error(`[Email Bot] Brevo HTTP API fallback also failed: ${fallbackErr.message}`);
       }

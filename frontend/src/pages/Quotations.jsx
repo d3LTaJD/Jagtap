@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileCheck, Filter, Plus, ChevronRight, CheckCircle2, Loader2, X, Trash2, PlusCircle, Download, RefreshCw } from 'lucide-react';
 import api from '../api/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import AutocompleteSelect from '../components/AutocompleteSelect';
 import { Can, useAbility } from '../context/AbilityContext';
 
@@ -100,15 +100,19 @@ const Quotations = () => {
       const defaultItems = selected.products && selected.products.length > 0
         ? selected.products.map(p => ({
             description: p.description || '',
-            productCategory: p.category || selected.productCategory || 'Piping',
+            productCategory: p.category || selected.productCategory || 'Valves',
             quantity: p.quantity || 1,
+            materialGrade: p.dynamicFields?.valve_moc_body?.value || p.dynamicFields?.valve_moc_body || p.dynamicFields?.body_material?.value || p.dynamicFields?.body_material || p.dynamicFields?.moc?.value || p.dynamicFields?.moc || '',
+            applicableStandard: p.standardCode || '',
             unitPrice: 0,
             lineTotalExclGST: 0
           }))
         : [{
             description: selected.productDescription || '',
-            productCategory: selected.productCategory || 'Piping',
+            productCategory: selected.productCategory || 'Valves',
             quantity: selected.quantity || 1,
+            materialGrade: selected.dynamicFields?.valve_moc_body?.value || selected.dynamicFields?.valve_moc_body || selected.dynamicFields?.body_material?.value || selected.dynamicFields?.body_material || selected.dynamicFields?.moc?.value || selected.dynamicFields?.moc || '',
+            applicableStandard: selected.standardCode || '',
             unitPrice: 0,
             lineTotalExclGST: 0
           }];
@@ -126,7 +130,7 @@ const Quotations = () => {
 
   const addItem = () => {
     const selectedEnq = enquiriesForSelect.find(eq => eq._id === formData.enquiry);
-    const category = selectedEnq?.productCategory || 'Piping';
+    const category = selectedEnq?.productCategory || 'Valves';
     setFormData({
       ...formData,
       items: [...formData.items, { description: '', productCategory: category, quantity: 1, unitPrice: 0, lineTotalExclGST: 0 }]
@@ -201,15 +205,19 @@ const Quotations = () => {
         const defaultItems = selected.products && selected.products.length > 0
           ? selected.products.map(p => ({
               description: p.description || '',
-              productCategory: p.category || selected.productCategory || 'Piping',
+              productCategory: p.category || selected.productCategory || 'Valves',
               quantity: p.quantity || 1,
+              materialGrade: p.dynamicFields?.valve_moc_body?.value || p.dynamicFields?.valve_moc_body || p.dynamicFields?.body_material?.value || p.dynamicFields?.body_material || p.dynamicFields?.moc?.value || p.dynamicFields?.moc || '',
+              applicableStandard: p.standardCode || '',
               unitPrice: 0,
               lineTotalExclGST: 0
             }))
           : [{
               description: selected.productDescription || '',
-              productCategory: selected.productCategory || 'Piping',
+              productCategory: selected.productCategory || 'Valves',
               quantity: selected.quantity || 1,
+              materialGrade: selected.dynamicFields?.valve_moc_body?.value || selected.dynamicFields?.valve_moc_body || selected.dynamicFields?.body_material?.value || selected.dynamicFields?.body_material || selected.dynamicFields?.moc?.value || selected.dynamicFields?.moc || '',
+              applicableStandard: selected.standardCode || '',
               unitPrice: 0,
               lineTotalExclGST: 0
             }];
@@ -316,7 +324,21 @@ const Quotations = () => {
                       className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
                     >
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-brand-600">{qt.quotationId || 'QT-PENDING'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium">{qt.enquiry?.enquiryId || 'Unknown'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium">
+                        {qt.enquiry?.enquiryId ? (
+                          <Link
+                            to={`/app/enquiries/${qt.enquiry._id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-brand-600 hover:text-brand-700 font-semibold hover:underline"
+                          >
+                            {qt.enquiry.enquiryId}
+                          </Link>
+                        ) : (
+                          'N/A'
+                        )}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-semibold">{qt.customer?.companyName || 'Unknown'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-700">
                         {ability.can('viewPricing', 'Quotation') 

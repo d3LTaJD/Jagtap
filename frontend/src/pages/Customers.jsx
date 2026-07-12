@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, UserPlus, Search, Loader2, X, Pencil, ShieldAlert, Trash2 } from 'lucide-react';
 import api from '../api/client';
 import AutocompleteSelect from '../components/AutocompleteSelect';
+import ToggleSwitch from '../components/ToggleSwitch';
 import { useAbility } from '../context/AbilityContext';
 
 const Customers = () => {
@@ -266,7 +267,7 @@ const Customers = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
-                    <input type="text" disabled={isFormReadOnly} value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                    <input type="text" disabled={isFormReadOnly} placeholder=" " value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
@@ -281,7 +282,7 @@ const Customers = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                    <input type="text" disabled={isFormReadOnly} value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                    <input type="text" disabled={isFormReadOnly} placeholder=" " value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">GSTIN <span className="text-slate-400 font-normal">(15-char)</span></label>
@@ -346,9 +347,9 @@ const Customers = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mt-4">
-                  <input type="checkbox" id="isActive" disabled={isFormReadOnly} checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="rounded text-brand-600 focus:ring-brand-500 border-slate-300 w-4 h-4" />
-                  <label htmlFor="isActive" className="text-sm font-medium text-slate-700">Account is Active</label>
+                <div className="flex flex-col gap-1.5 mt-4">
+                  <span className="text-sm font-medium text-slate-700">Account Status</span>
+                  <ToggleSwitch checked={formData.isActive} disabled={isFormReadOnly} onChange={v => setFormData({...formData, isActive: v})} label="Account is Active" />
                 </div>
               </form>
             </div>

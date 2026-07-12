@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/client';
 import AutocompleteSelect from './AutocompleteSelect';
+import ToggleSwitch from './ToggleSwitch';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import SignatureCanvas from 'react-signature-canvas';
@@ -107,19 +108,56 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
     sections[group].push(f);
   });
 
+  const isEmpty = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+
   const renderInput = (field) => {
     const val = getFieldValue(field.fieldName) ?? '';
     const canEdit = isEditable(field);
-    const baseClass = `w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm 
-      font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors outline-none disabled:bg-slate-100 disabled:text-slate-500`;
+    const emptyHighlight = isEmpty(val) ? 'bg-yellow-50 border-yellow-300' : 'bg-slate-50 border-slate-200';
+    const baseClass = `w-full px-3.5 py-2.5 border rounded-xl text-sm 
+      font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors outline-none disabled:bg-slate-100 disabled:text-slate-500 ${emptyHighlight}`;
+
+    const isYesNo = (f) => {
+      if (f.fieldType === 'Checkbox (Boolean)') return true;
+      if (f.options && f.options.length === 2) {
+        const opts = f.options.map(o => String(o).toUpperCase().trim());
+        return opts.includes('YES') && opts.includes('NO');
+      }
+      return false;
+    };
+
+    if (isYesNo(field)) {
+      let isTrue = false;
+      if (field.fieldType === 'Checkbox (Boolean)') {
+        isTrue = !!val;
+      } else {
+        isTrue = String(val).toUpperCase().trim() === 'YES';
+      }
+
+      return (
+        <ToggleSwitch
+          checked={isTrue}
+          disabled={!canEdit}
+          onChange={(newChecked) => {
+            if (field.fieldType === 'Checkbox (Boolean)') {
+              handle(field.fieldName, newChecked);
+            } else {
+              const yesOption = field.options.find(o => String(o).toUpperCase().trim() === 'YES') || 'Yes';
+              const noOption = field.options.find(o => String(o).toUpperCase().trim() === 'NO') || 'No';
+              handle(field.fieldName, newChecked ? yesOption : noOption);
+            }
+          }}
+        />
+      );
+    }
 
     if (!canEdit) {
       if (field.fieldType === 'Rich Text') {
-        return <div className="prose prose-sm max-w-none p-4 bg-slate-50 border border-slate-100 rounded-xl" dangerouslySetInnerHTML={{ __html: val }} />;
+        return <div className={`prose prose-sm max-w-none p-4 border rounded-xl ${isEmpty(val) ? 'bg-yellow-50/80 border-yellow-300' : 'bg-slate-50 border-slate-100'}`} dangerouslySetInnerHTML={{ __html: val }} />;
       }
       if (field.fieldType === 'Signature') {
         return (
-          <div className="p-2 bg-slate-50 border border-slate-100 rounded-xl h-24 flex items-center justify-center">
+          <div className={`p-2 border rounded-xl h-24 flex items-center justify-center ${isEmpty(val) ? 'bg-yellow-50/80 border-yellow-300' : 'bg-slate-50 border-slate-100'}`}>
             {val ? <img src={val} alt="Signature" className="max-h-full object-contain" /> : <span className="text-slate-400 italic">No signature</span>}
           </div>
         );
@@ -141,7 +179,7 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
       };
 
       return (
-        <div className="px-3.5 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-sm text-slate-700 min-h-[40px] flex items-center">
+        <div className={`px-3.5 py-2.5 border rounded-xl text-sm text-slate-700 min-h-[40px] flex items-center ${isEmpty(val) ? 'bg-yellow-50/80 border-yellow-300' : 'bg-slate-50 border-slate-100'}`}>
           {getDisplayValue()}
         </div>
       );

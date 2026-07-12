@@ -3,6 +3,7 @@ import {
   CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Building2, MapPin,
   Calendar, DollarSign, Users, Award, BookOpen, FileText, Layers, ClipboardList
 } from 'lucide-react';
+import { formatSizeToMm, formatTextToMm } from '../utils/valveFormatter';
 
 const FieldValue = ({ value, label }) => {
   const isEmpty = value === null || value === undefined || value === '' ||
@@ -164,8 +165,8 @@ const TenderIntelligencePanel = ({ tenderIntelligence }) => {
                         {(sch.items || []).map((item, itemIdx) => (
                           <tr key={itemIdx} className="hover:bg-blue-50/30 transition-colors text-slate-700">
                             <td className="px-3 py-2 text-slate-400 font-bold">{item.srNo || itemIdx + 1}</td>
-                            <td className="px-3 py-2 font-bold text-slate-900 whitespace-nowrap">{item.size || '—'}</td>
-                            <td className="px-3 py-2 max-w-[200px] truncate" title={item.description}>{item.description || '—'}</td>
+                            <td className="px-3 py-2 font-bold text-slate-900 whitespace-nowrap">{formatSizeToMm(item.size)}</td>
+                            <td className="px-3 py-2 max-w-[200px] truncate" title={item.description}>{formatTextToMm(item.description)}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{item.bodyMaterial || '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{item.ballStemMaterial || '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{item.endConnection || '—'}</td>
@@ -191,7 +192,7 @@ const TenderIntelligencePanel = ({ tenderIntelligence }) => {
                         <div className="font-bold text-xs text-slate-800">{s.scheduleNo}</div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
                           {s.totalItems} items • {s.totalQuantity} qty
-                          {s.sizeRange && ` • ${s.sizeRange}`}
+                          {s.sizeRange && ` • ${formatTextToMm(s.sizeRange)}`}
                           {s.classRange && ` • ${s.classRange}`}
                         </div>
                       </div>

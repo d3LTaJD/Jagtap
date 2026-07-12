@@ -103,3 +103,14 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ── Empty-field yellow highlights (only in forms and marked detail fields) ── */
+form input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="file"]):not([type="hidden"]):placeholder-shown,
+form textarea:placeholder-shown,
+.highlight-empty input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="file"]):not([type="hidden"]):placeholder-shown,
+.highlight-empty textarea:placeholder-shown,
+.detail-field input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="file"]):not([type="hidden"]):placeholder-shown,
+.detail-field textarea:placeholder-shown {
+  background-color: #fefce8 !important;
+  border-color: #fde047 !important;
+}

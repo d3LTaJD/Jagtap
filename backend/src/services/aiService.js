@@ -26,7 +26,7 @@ const PRODUCT_CATEGORIES = [
   'Pressure Vessel',
   'Heat Exchanger',
   'Storage Tank',
-  'Piping',
+  'Valves',
   'Structural',
   'Custom',
   'Multiple'
@@ -352,18 +352,25 @@ CRITICAL FOCUS:
 - Search every attachment before concluding a product does not exist.
 - Ignore table of contents, legal clauses, and commercial terms unless they contain product information.
 - Do NOT attempt to extract custom technical specs (e.g. design temperature, MOC, pressure class, head type, shell thickness, capacity) in this pass. Focus solely on building the general catalog list of products.
+- IMPORTANT: Carefully scan ALL attachment content (PDFs, tenders, images) for Client/Owner name and PMC/EPCM/Consultant name. These may appear in:
+  * Document headers, letterheads, or title pages
+  * Fields like "Owner:", "Client:", "End User:", "Project Owner:", "Employer:"
+  * Fields like "PMC:", "EPCM:", "Consultant:", "Project Management Consultant:", "Engineering Consultant:", "EPC Contractor:"
+  * They can be indirectly mentioned — e.g. a company name appearing alongside project details
 
 Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks, explanations, comments, or headers.
 
 Schema:
 {
   "isEnquiry": true/false (true if this is a genuine inquiry for Petro Valve's industrial valves, vessels, piping, or tanks),
-  "companyName": "...", (or "Individual Customer" if unknown),
+  "companyName": "...", (the company/person who SENT the email, or "Individual Customer" if unknown),
   "primaryContactName": "...", (or "Email Sender" if unknown),
   "mobileNumber": "...", (or "0000000000" if unknown),
+  "clientName": "...", (the END CLIENT / OWNER of the project — NOT the sender. Look in attachments. null if not found),
+  "pmcConsultant": "...", (PMC / EPCM / Engineering Consultant for the project. Look in attachments. null if not found),
   "enquiries": [
     {
-      "productCategory": "Piping" / "Pressure Vessel" / "Heat Exchanger" / "Storage Tank" / "Structural" / "Custom" / "Multiple",
+      "productCategory": "Valves" / "Pressure Vessel" / "Heat Exchanger" / "Storage Tank" / "Structural" / "Custom" / "Multiple",
       "productDescription": "...", (max 200 chars summary of product, e.g. "CS Ball Valve 100mm"),
       "quantity": 1,
       "unit": "NOS" / "SET" / "MT" / "KG" / "M" / "M2" / "Job",
@@ -423,11 +430,26 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
   const cleanedEnquiries = data.enquiries.map(item => {
     let category = item.productCategory;
     if (!PRODUCT_CATEGORIES.includes(category)) {
-      category = category?.toLowerCase().includes('valve') ? 'Piping' : 'Custom';
+      category = category?.toLowerCase().includes('valve') ? 'Valves' : 'Custom';
     }
 
     let std = item.standardCode;
-    if (!STANDARD_CODES.includes(std)) {
+    if (std && typeof std === 'string') {
+      const parts = std.split(/[\s,\/&]+/)
+        .map(p => p.trim())
+        .filter(p => {
+          const matched = STANDARD_CODES.find(sc => sc.toLowerCase() === p.toLowerCase());
+          return matched && matched !== 'Not specified' && matched !== 'Custom';
+        })
+        .map(p => STANDARD_CODES.find(sc => sc.toLowerCase() === p.toLowerCase()));
+      if (parts.length > 0) {
+        std = [...new Set(parts)].join(', ');
+      } else if (std.toLowerCase().includes('custom')) {
+        std = 'Custom';
+      } else {
+        std = 'Not specified';
+      }
+    } else {
       std = 'Not specified';
     }
 
@@ -461,6 +483,8 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
     primaryContactName: String(data.primaryContactName || '').trim() || 'Email Sender',
     mobileNumber: mobile,
     emailAddress: extractEmailFromString(defaultFromEmail),
+    clientName: data.clientName ? String(data.clientName).trim() : null,
+    pmcConsultant: data.pmcConsultant ? String(data.pmcConsultant).trim() : null,
     enquiries: cleanedEnquiries
   };
 }
@@ -673,6 +697,9 @@ CRITICAL FOCUS:
 - Ignore specifications of any unrelated products.
 - Never invent or hallucinate values. If a field is not found or not mentioned in the context, you MUST return null for value, 0 for confidence, and null for sourcePage.
 - For each extracted field, include value, confidence, and source page number.
+- If the field is "valve_type" (Valve Type):
+  * Look at the overall email context. If the email context specifies the list is for "Ball Valves" or the item description specifies "Ball Valve", extract "Ball Valve".
+  * Do not extract "Flange Ended Valve" or "Butt Welded Valve" as the valve type — "Flange Ended" and "Butt Welded" are end connections (valve_end_connection), and the valve type itself is "Ball Valve".
 
 Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks (no \`\`\`json). Do not add explanations or text before/after the JSON.
 
@@ -749,7 +776,15 @@ function normalizeExtractedFields(data, fieldDefinitions) {
     // Phase 10: Size Pre-normalization and Validation
     if (isSizeField) {
       const cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
-      if (inchToMmMap[cleanVal]) {
+      
+      // If cleanVal already directly matches one of the options (if it's a dropdown), do NOT convert it!
+      const hasDirectOptionMatch = f.options && f.options.length && f.options.some(opt => {
+        return opt.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanVal.replace(/[^a-z0-9]/g, '');
+      });
+
+      if (hasDirectOptionMatch) {
+        val = cleanVal;
+      } else if (inchToMmMap[cleanVal]) {
         val = inchToMmMap[cleanVal];
       } else {
         val = cleanVal;
@@ -838,7 +873,7 @@ function normalizeExtractedFields(data, fieldDefinitions) {
     }
 
     // 2. Validate Checkbox/Boolean fields
-    if (f.fieldType === 'Checkbox') {
+    if (f.fieldType === 'Checkbox' || f.fieldType === 'Checkbox (Boolean)') {
       let boolVal;
       if (typeof val === 'boolean') {
         boolVal = val;
@@ -863,15 +898,46 @@ function normalizeExtractedFields(data, fieldDefinitions) {
     }
 
     // 4. Dropdown Option matching
-    if (f.fieldType === 'Dropdown' && f.options && f.options.length) {
+    if ((f.fieldType === 'Dropdown' || f.fieldType === 'Dropdown (Single)') && f.options && f.options.length) {
       let matchVal = val;
-      if (key.toLowerCase().includes('size') && inchToMmMap[String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim()]) {
-        matchVal = inchToMmMap[String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim()];
+      const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const valNormalized = normalizeStr(val);
+      
+      // If the value already matches one of the options directly, don't try to convert it!
+      const directMatch = f.options.find(opt => normalizeStr(opt) === valNormalized);
+      if (directMatch) {
+        matchVal = directMatch;
+      } else if (key.toLowerCase().includes('size')) {
+        const cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
+        if (inchToMmMap[cleanVal]) {
+          matchVal = inchToMmMap[cleanVal];
+        }
       }
+
+      const isNumericDropdown = f.options.every(opt => !/[a-zA-Z]/.test(String(opt)));
+
       const matchedOpt = f.options.find(opt => {
-        const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-        return normalizeStr(opt) === normalizeStr(matchVal);
+        const nOpt = normalizeStr(opt);
+        const nVal = normalizeStr(matchVal);
+        
+        // Exact match of normalized strings
+        if (nOpt === nVal) return true;
+        
+        if (isNumericDropdown) return false;
+        
+        // Handle common abbreviations/synonyms:
+        if (nVal === 'sw' && nOpt.includes('socketweld')) return true;
+        if (nVal === 'bw' && nOpt.includes('buttweld')) return true;
+        if (nVal === 'fe' && nOpt.includes('flange')) return true;
+        if (nVal.includes('flange') && nOpt.includes('flange')) return true;
+        if (nVal === 'npt' && nOpt.includes('npt')) return true;
+        
+        // If the option contains the value (e.g. opt="ASTM A105", val="A105")
+        if (nOpt.includes(nVal) || nVal.includes(nOpt)) return true;
+        
+        return false;
       });
+
       if (matchedOpt) {
         normalized[key] = { value: matchedOpt, confidence, sourcePage };
       } else {
@@ -913,10 +979,16 @@ function runHeuristicExtraction(text, from, subject) {
   }
 
   let standard = 'Not specified';
-  if (/asme/i.test(text)) standard = 'ASME';
-  else if (/api/i.test(text)) standard = 'API';
-  else if (/ibr/i.test(text)) standard = 'IBR';
-  else if (/is\s*\d+/i.test(text)) standard = 'IS';
+  const found = [];
+  if (/asme/i.test(text)) found.push('ASME');
+  if (/api/i.test(text)) found.push('API');
+  if (/ibr/i.test(text)) found.push('IBR');
+  if (/is\s*\d+/i.test(text) || /\bis\b/i.test(text)) found.push('IS');
+  if (/\bbs\b/i.test(text)) found.push('BS');
+  if (/\ben\b/i.test(text)) found.push('EN');
+  if (found.length > 0) {
+    standard = found.join(', ');
+  }
 
   let desc = subject.substring(0, 100);
   if (text.length > 0) {

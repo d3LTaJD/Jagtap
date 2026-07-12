@@ -23,6 +23,8 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       sessionStorage.removeItem('token');
       sessionStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
       // Redirect to login page
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';

@@ -9,10 +9,12 @@ import api from '../api/client';
 import { getRoleCode, useAbility } from '../context/AbilityContext';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import AutocompleteSelect from '../components/AutocompleteSelect';
+import ToggleSwitch from '../components/ToggleSwitch';
 import FollowUpPanel from '../components/FollowUpPanel';
 import TaskPanel from '../components/TaskPanel';
 import AttachmentManager from '../components/AttachmentManager';
 import TenderIntelligencePanel from '../components/TenderIntelligencePanel';
+import { formatSizeToMm, formatTextToMm } from '../utils/valveFormatter';
 
 const renderVal = (val) => {
   if (val && typeof val === 'object' && val.value !== undefined) {
@@ -291,6 +293,8 @@ const EnquiryDetail = () => {
       specialRequirements: enquiry.specialRequirements || '',
       thirdPartyInspection: enquiry.thirdPartyInspection || false,
       estimatedValue:     enquiry.estimatedValue     || '',
+      clientName:         enquiry.clientName         || '',
+      pmcConsultant:      enquiry.pmcConsultant      || '',
     });
     setShowEditPanel(true);
   };
@@ -553,18 +557,67 @@ const EnquiryDetail = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 gap-x-6 text-sm">
               {[
                 ['Product Category',  enquiry.productCategory],
-                ['Description',       enquiry.productDescription],
+                ['Description',       formatTextToMm(enquiry.productDescription)],
                 ['Quantity',          `${enquiry.quantity} ${enquiry.unit || 'NOS'}`],
+                ['Standard/Code',     (() => {
+                  const allStds = new Set();
+                  if (enquiry.standardCode && enquiry.standardCode !== 'Not specified') {
+                    enquiry.standardCode.split(',').map(s => s.trim()).filter(Boolean).forEach(s => allStds.add(s));
+                  }
+                  if (enquiry.products && enquiry.products.length > 0) {
+                    enquiry.products.forEach(p => {
+                      if (p.standardCode && p.standardCode !== 'Not specified') {
+                        p.standardCode.split(',').map(s => s.trim()).filter(Boolean).forEach(s => allStds.add(s));
+                      }
+                    });
+                  }
+                  return allStds.size > 0 ? [...allStds].join(', ') : '—';
+                })()],
+                ...(enquiry.clientName ? [['Client / Owner', enquiry.clientName]] : []),
+                ...(enquiry.pmcConsultant ? [['PMC / Consultant', enquiry.pmcConsultant]] : []),
                 ['Source Channel',    enquiry.sourceChannel],
                 ['Source Type',       enquiry.sourceType || 'Direct Enquiry'],
                 ...(enquiry.sourceType === 'Tender' ? [
                   ['Tender Number',   enquiry.tenderNumber || '—'],
                   ['Tender Deadline', enquiry.tenderDeadline ? new Date(enquiry.tenderDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—']
                 ] : []),
-                ...(enquiry.productCategory === 'Piping' ? [
-                  ['Valve Type',      renderVal(enquiry.dynamicFields?.valve_type) || '—'],
-                  ['Valve Size',      renderVal(enquiry.dynamicFields?.valve_size) ? `${renderVal(enquiry.dynamicFields.valve_size)} mm` : '—'],
-                  ['Pressure Class',  renderVal(enquiry.dynamicFields?.valve_class) || '—']
+                ...(enquiry.productCategory === 'Valves' ? [
+                  ['Valve Type',      (() => {
+                    const types = new Set();
+                    const enqVal = renderVal(enquiry.dynamicFields?.valve_type);
+                    if (enqVal) types.add(enqVal);
+                    if (enquiry.products && enquiry.products.length > 0) {
+                      enquiry.products.forEach(p => {
+                        const v = renderVal(p.dynamicFields?.valve_type);
+                        if (v) types.add(v);
+                      });
+                    }
+                    return types.size > 0 ? [...types].join(', ') : 'Ball Valve';
+                  })()],
+                  ['Valve Size',      (() => {
+                    const sizes = new Set();
+                    const enqVal = renderVal(enquiry.dynamicFields?.valve_size);
+                    if (enqVal) sizes.add(formatSizeToMm(enqVal));
+                    if (enquiry.products && enquiry.products.length > 0) {
+                      enquiry.products.forEach(p => {
+                        const v = renderVal(p.dynamicFields?.valve_size);
+                        if (v) sizes.add(formatSizeToMm(v));
+                      });
+                    }
+                    return sizes.size > 0 ? [...sizes].join(', ') : '—';
+                  })()],
+                  ['Pressure Class',  (() => {
+                    const classes = new Set();
+                    const enqVal = renderVal(enquiry.dynamicFields?.valve_class);
+                    if (enqVal) classes.add(enqVal);
+                    if (enquiry.products && enquiry.products.length > 0) {
+                      enquiry.products.forEach(p => {
+                        const v = renderVal(p.dynamicFields?.valve_class);
+                        if (v) classes.add(v);
+                      });
+                    }
+                    return classes.size > 0 ? [...classes].join(', ') : '—';
+                  })()]
                 ] : []),
                 ...(enquiry.sourceChannel === 'IndiaMart' ? [
                   ['IndiaMart Lead ID', enquiry.indiaMartLeadId || '—'],
@@ -573,10 +626,7 @@ const EnquiryDetail = () => {
                   ['Details Shared?', enquiry.detailsSharedByLead ? 'Yes' : 'No'],
                   ['Days Since Lead', enquiry.createdAt ? Math.floor((Date.now() - new Date(enquiry.createdAt)) / (1000 * 60 * 60 * 24)) + ' days' : '—']
                 ] : []),
-                ['Standard/Code',     enquiry.standardCode || '—'],
-                ['Delivery',          enquiry.requiredDeliveryWeeks ? `${enquiry.requiredDeliveryWeeks} wks` : '—'],
                 ['Budget',            enquiry.budgetFrom ? `₹${enquiry.budgetFrom} - ₹${enquiry.budgetTo}` : '—'],
-                ['TPI Req.',          enquiry.thirdPartyInspection ? 'Yes' : 'No'],
                 ['Special Req.',      enquiry.specialRequirements || '—'],
                 ['Created',           new Date(enquiry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })],
                 ['Next Follow-up',    enquiry.nextFollowUpDate ? new Date(enquiry.nextFollowUpDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'],
@@ -607,64 +657,76 @@ const EnquiryDetail = () => {
                   <thead>
                     <tr className="border-b border-slate-200 text-slate-400 text-xs font-bold uppercase tracking-wider">
                       <th className="pb-3 pr-4 w-10">#</th>
-                      <th className="pb-3 pr-4">Product Description</th>
+                      <th className="pb-3 pr-4">Description</th>
+                      <th className="pb-3 pr-4">Valve Type</th>
+                      <th className="pb-3 pr-4">Size</th>
+                      <th className="pb-3 pr-4">Class</th>
+                      <th className="pb-3 pr-4">End Connection</th>
+                      <th className="pb-3 pr-4">MOC</th>
                       <th className="pb-3 pr-4">Category</th>
-                      <th className="pb-3 pr-4">Quantity</th>
+                      <th className="pb-3 pr-4">Qty</th>
                       <th className="pb-3 pr-4">Standard</th>
                       {enquiry.isUnverified && <th className="pb-3 text-right">Confidence</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {enquiry.products.map((prod, idx) => (
-                      <tr key={prod._id || idx} className="text-slate-700 hover:bg-slate-50/50 transition-colors">
-                        <td className="py-3.5 font-bold pr-4 text-slate-400">{idx + 1}</td>
-                        <td className="py-3.5 pr-4">
-                          <div className="font-semibold text-slate-900">{prod.description}</div>
-                          {prod.dynamicFields && Object.keys(prod.dynamicFields).length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mt-1.5">
-                              {Object.entries(prod.dynamicFields).map(([key, val]) => {
-                                if (val === undefined || val === null || val === '') return null;
-                                const hasRichData = typeof val === 'object' && val !== null;
-                                const displayVal = hasRichData ? val.value : val;
-                                if (displayVal === undefined || displayVal === null || displayVal === '') return null;
+                    {enquiry.products.map((prod, idx) => {
+                      const getDynVal = (key) => {
+                        const val = prod.dynamicFields?.[key];
+                        if (val === undefined || val === null || val === '') return null;
+                        if (typeof val === 'object' && val !== null && val.value !== undefined) return val.value || null;
+                        return val || null;
+                      };
 
-                                return (
-                                  <span key={key} className="inline-flex items-center gap-1.5 rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">
-                                    <span className="text-slate-400">{formatFieldName(key)}:</span>
-                                    <span>{displayVal}</span>
-                                    {hasRichData && val.confidence !== undefined && val.confidence > 0 && (
-                                      <span className="text-[10px] text-slate-400 font-normal">({val.confidence}%)</span>
-                                    )}
-                                    {hasRichData && val.sourcePage !== undefined && val.sourcePage !== null && (
-                                      <span className="text-[9px] bg-slate-200/70 text-slate-500 rounded px-1 ml-0.5 font-semibold cursor-help" title={`Page ${val.sourcePage}`}>
-                                        p.{val.sourcePage}
-                                      </span>
-                                    )}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3.5 pr-4">
-                          <span className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">
-                            {prod.category || enquiry.productCategory}
-                          </span>
-                        </td>
-                        <td className="py-3.5 font-black pr-4 text-brand-600">{prod.quantity} {prod.unit || 'NOS'}</td>
-                        <td className="py-3.5 pr-4 text-slate-500 font-semibold">{prod.standardCode || 'Not specified'}</td>
-                        {enquiry.isUnverified && (
-                          <td className="py-3.5 text-right font-bold pr-2">
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                              (prod.confidence || 100) >= 80 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
-                              (prod.confidence || 100) >= 50 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
-                            }`}>
-                              {prod.confidence || 100}%
+                      const valveType = getDynVal('valve_type') || getDynVal('valve_ball_type') || 'Ball Valve';
+                      const valveSize = getDynVal('valve_size') ? formatSizeToMm(getDynVal('valve_size')) : 'N/A';
+                      const valveClass = getDynVal('valve_class') || 'N/A';
+                      const endConn = getDynVal('valve_end_connection') || getDynVal('end_connection') || 'N/A';
+                      const moc = getDynVal('valve_moc_body') || getDynVal('body_material') || getDynVal('material') || getDynVal('moc') || 'N/A';
+
+                      return (
+                        <tr key={prod._id || idx} className="text-slate-700 hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3.5 font-bold pr-4 text-slate-400">{idx + 1}</td>
+                          <td className="py-3.5 pr-4">
+                            <div className="font-semibold text-slate-900">{formatTextToMm(prod.description) || 'N/A'}</div>
+                          </td>
+                          <td className="py-3.5 pr-4 font-medium text-slate-700">{valveType}</td>
+                          <td className="py-3.5 pr-4 font-bold text-slate-800">{valveSize}</td>
+                          <td className="py-3.5 pr-4 font-medium text-slate-700">{valveClass}</td>
+                          <td className="py-3.5 pr-4 font-medium text-slate-700">{endConn}</td>
+                          <td className="py-3.5 pr-4 font-medium text-slate-700">{moc}</td>
+                          <td className="py-3.5 pr-4">
+                            <span className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">
+                              {prod.category || enquiry.productCategory || 'N/A'}
                             </span>
                           </td>
-                        )}
-                      </tr>
-                    ))}
+                          <td className="py-3.5 font-black pr-4 text-brand-600">{prod.quantity} {prod.unit || 'NOS'}</td>
+                          <td className="py-3.5 pr-4">
+                            {prod.standardCode && prod.standardCode !== 'Not specified' ? (
+                              <div className="flex flex-wrap gap-1">
+                                {prod.standardCode.split(',').map(s => s.trim()).filter(Boolean).map(std => (
+                                  <span key={std} className="inline-flex items-center rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-bold text-indigo-700">
+                                    {std}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-xs font-medium">N/A</span>
+                            )}
+                          </td>
+                          {enquiry.isUnverified && (
+                            <td className="py-3.5 text-right font-bold pr-2">
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                (prod.confidence || 100) >= 80 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                                (prod.confidence || 100) >= 50 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
+                              }`}>
+                                {prod.confidence || 100}%
+                              </span>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -696,26 +758,7 @@ const EnquiryDetail = () => {
             </div>
           </div>
 
-          {/* Custom Fields */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-bold tracking-tight">Custom Fields</h2>
-              {canEdit && (
-                <button onClick={saveDynamicFields} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-60">
-                  {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                  Save Fields
-                </button>
-              )}
-            </div>
-            <DynamicFormRenderer
-              formContext="Enquiry"
-              values={{ productCategory: enquiry.productCategory, sourceChannel: enquiry.sourceChannel, standardCode: enquiry.standardCode, ...dynamicValues }}
-              onChange={(fieldName, value) => setDynamicValues(prev => ({ ...prev, [fieldName]: value }))}
-              readOnly={!canEdit}
-              currentUserRole={currentUser.role}
-            />
-          </div>
+
           
           {/* Attachments & Files */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -970,7 +1013,7 @@ const EnquiryDetail = () => {
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Product Category</label>
                   <AutocompleteSelect
-                    options={['Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Piping', 'Structural', 'Custom', 'Multiple']}
+                    options={['Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Valves', 'Structural', 'Custom', 'Multiple']}
                     value={editForm.productCategory}
                     onChange={v => setEditForm(prev => ({ ...prev, productCategory: v }))}
                     placeholder="Select category..."
@@ -1039,29 +1082,17 @@ const EnquiryDetail = () => {
                         allowClear={false}
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">&nbsp;</label>
-                      <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm font-medium text-slate-700">
-                        <input type="checkbox" checked={editForm.detailsSharedByLead} onChange={e => setEditForm(prev => ({ ...prev, detailsSharedByLead: e.target.checked }))} className="rounded text-brand-600 focus:ring-brand-500 border-slate-300 w-4 h-4" />
-                        Details Shared by Lead?
-                      </label>
+                    <div className="flex flex-col gap-1.5 mt-1.5">
+                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Details Shared by Lead?</span>
+                      <ToggleSwitch checked={editForm.detailsSharedByLead} onChange={v => setEditForm(prev => ({ ...prev, detailsSharedByLead: v }))} />
                     </div>
                   </>
                 )}
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Standard / Code</label>
-                  <AutocompleteSelect
-                    options={['ASME', 'IS', 'BS', 'EN', 'API', 'IBR', 'Custom', 'Not specified']}
-                    value={editForm.standardCode}
-                    onChange={v => setEditForm(prev => ({ ...prev, standardCode: v }))}
-                    placeholder="Select standard..."
-                    allowClear={false}
-                  />
-                </div>
+
 
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Quantity</label>
-                  <input type="number" min="1" step="any" value={editForm.quantity} onChange={e => setEditForm(prev => ({ ...prev, quantity: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                  <input type="number" min="1" step="any" placeholder=" " value={editForm.quantity} onChange={e => setEditForm(prev => ({ ...prev, quantity: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Unit</label>
@@ -1074,29 +1105,27 @@ const EnquiryDetail = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Delivery Time (Weeks)</label>
-                  <input type="number" min="1" value={editForm.requiredDeliveryWeeks} onChange={e => setEditForm(prev => ({ ...prev, requiredDeliveryWeeks: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">TPI Requirement</label>
-                  <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm font-medium text-slate-700">
-                    <input type="checkbox" checked={editForm.thirdPartyInspection} onChange={e => setEditForm(prev => ({ ...prev, thirdPartyInspection: e.target.checked }))} className="rounded text-brand-600 focus:ring-brand-500 border-slate-300 w-4 h-4" />
-                    Inspection needed
-                  </label>
-                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Budget From (₹)</label>
-                  <input type="number" value={editForm.budgetFrom} onChange={e => setEditForm(prev => ({ ...prev, budgetFrom: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                  <input type="number" placeholder=" " value={editForm.budgetFrom} onChange={e => setEditForm(prev => ({ ...prev, budgetFrom: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Budget To (₹)</label>
-                  <input type="number" value={editForm.budgetTo} onChange={e => setEditForm(prev => ({ ...prev, budgetTo: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                  <input type="number" placeholder=" " value={editForm.budgetTo} onChange={e => setEditForm(prev => ({ ...prev, budgetTo: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
                 </div>
 
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Special Requirements</label>
-                  <textarea rows={2} maxLength="400" value={editForm.specialRequirements} onChange={e => setEditForm(prev => ({ ...prev, specialRequirements: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none resize-none" />
+                  <textarea rows={2} maxLength="400" placeholder=" " value={editForm.specialRequirements} onChange={e => setEditForm(prev => ({ ...prev, specialRequirements: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none resize-none" />
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Client / Owner Name</label>
+                  <input type="text" value={editForm.clientName || ''} onChange={e => setEditForm(prev => ({ ...prev, clientName: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">PMC / Consultant Name</label>
+                  <input type="text" value={editForm.pmcConsultant || ''} onChange={e => setEditForm(prev => ({ ...prev, pmcConsultant: e.target.value }))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none" />
                 </div>
               </div>
 

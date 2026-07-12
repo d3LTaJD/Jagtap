@@ -15,7 +15,7 @@ const connectDB = async () => {
 
 const makeField = (context, label, fieldName, fieldType, options = [], extras = {}) => ({
   formContext: context,
-  productCategory: 'Piping',
+  productCategory: 'Valves',
   fieldName,
   fieldLabel: label,
   fieldType,
@@ -26,7 +26,7 @@ const makeField = (context, label, fieldName, fieldType, options = [], extras = 
   editableByRoles: [],
   conditionalLogic: {
     dependsOnField: 'productCategory',
-    requiredValue: 'Piping'
+    requiredValue: 'Valves'
   },
   ...extras
 });
@@ -49,7 +49,7 @@ const getPipingFieldsForContext = (context) => {
     // Design parameters
     makeField(context, 'Design Type', 'valve_design_type', 'Dropdown (Single)', ['2 Piece', '3 Piece'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
     makeField(context, 'Bore', 'valve_bore', 'Dropdown (Single)', ['Full Bore', 'Reduced Bore'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
-    makeField(context, 'End Connection', 'valve_end_connection', 'Dropdown (Single)', ['Flange End', 'Butt Weld', 'Socket Weld with Pups', 'NPT', 'Other'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
+    makeField(context, 'End Connection', 'valve_end_connection', 'Dropdown (Single)', ['Flange End', 'Butt Weld', 'Socket Weld', 'Socket Weld with Pups', 'NPT', 'Screwed', 'Flanged RF', 'Other'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
     makeField(context, 'Operating Type', 'valve_operating', 'Dropdown (Single)', ['Handle', 'Gear Box', 'Actuator', 'Hand Wheel'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
     makeField(context, 'Ball Type', 'valve_ball_type', 'Dropdown (Single)', ['Floating', 'Trunnion Mounted (TMBV)'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
     makeField(context, 'Direction', 'valve_direction', 'Dropdown (Single)', ['2 Way', '3 Way', '4 Way', '5 Way'], { groupLabel: 'Valve Specifications', displayOrder: order++ }),
@@ -78,9 +78,9 @@ const getPipingFieldsForContext = (context) => {
     makeField(context, 'Dispatch By', 'valve_dispatch_by', 'Dropdown (Single)', ['Road', 'Air', 'Sea'], { groupLabel: 'Temperature & Accessory Connections', displayOrder: order++ }),
 
     // Materials of Construction (MOC)
-    makeField(context, 'Body/Side PC/Bonnet/Trunnion Material', 'valve_moc_body', 'Dropdown (Single)', ['ASTM A216 Gr. WCB', 'ASTM A105', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
+    makeField(context, 'Body/Side PC/Bonnet/Trunnion Material', 'valve_moc_body', 'Dropdown (Single)', ['ASTM A216 Gr. WCB', 'ASTM A105', 'ASTM A350 LF2', 'ASTM A352 LCB', 'ASTM A182 F316', 'ASTM A351 CF8M', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
     makeField(context, 'Ball/Wedge/Disc Material', 'valve_moc_ball', 'Dropdown (Single)', ['ASTM A216 Gr. WCB + 75 MIC ENP', 'SS316', 'ASTM A216 Gr. WCB + STELLITED', '13% Cr Steel', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
-    makeField(context, 'Stem/Hinge Material', 'valve_moc_stem', 'Dropdown (Single)', ['ASTM A479 Gr. 410', 'ASTM A182 Gr. F6 cl2', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
+    makeField(context, 'Stem/Hinge Material', 'valve_moc_stem', 'Dropdown (Single)', ['ASTM A479 Gr. 410', 'ASTM A182 Gr. F6 cl2', 'SS316', 'ASTM A479 Gr. 316', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
     makeField(context, 'Seat Ring / Seat Holder Material', 'valve_moc_seat', 'Dropdown (Single)', ['PTFE', 'RPTFE', 'PTFE + ASTM A182 Gr. F6 cl1', 'RPTFE + ASTM A182 Gr. F6 cl1', 'ASTM A216 Gr. WCB + STELLITED', '13% Cr Steel', 'SS316', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
     makeField(context, 'Stud & Nuts Material', 'valve_moc_stud_nuts', 'Dropdown (Single)', ['ASTM A193 Gr. B7 & ASTM A194 Gr. 2H', 'Other'], { groupLabel: 'Materials of Construction (MOC)', displayOrder: order++ }),
 
@@ -119,8 +119,8 @@ const run = async () => {
   let errors = 0;
 
   // Clear any existing piping fields to avoid junk options clashing
-  await FieldDefinition.deleteMany({ productCategory: 'Piping' });
-  console.log(`🧹 Cleared old Piping fields from database.`);
+  await FieldDefinition.deleteMany({ productCategory: { $in: ['Piping', 'Piping / Valves', 'Valves'] } });
+  console.log(`🧹 Cleared old Piping, Piping / Valves, and Valves fields from database.`);
 
   for (const field of allFields) {
     try {

@@ -20,12 +20,14 @@ const enquirySchema = new mongoose.Schema({
   },
   tenderNumber: { type: String },
   tenderDeadline: { type: Date },
+  clientName: { type: String },         // End Client / Owner (extracted from PDF/tender)
+  pmcConsultant: { type: String },       // PMC / EPCM / Project Management Consultant
 
   contactPerson: { type: String, required: true },
   contactMobile: { type: String, required: true },
   contactEmail: { type: String },
 
-  productCategory: { type: String, required: true }, // 'Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Piping', 'Structural', 'Custom', 'Multiple'
+  productCategory: { type: String, required: true }, // 'Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Valves', 'Structural', 'Custom', 'Multiple'
   productDescription: { type: String, required: true, maxlength: 200 },
   quantity: { type: Number, required: true, default: 1 },
   unit: { type: String, enum: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'], default: 'NOS' },
@@ -130,14 +132,19 @@ enquirySchema.pre('save', async function(next) {
       if (!dynamicFields || typeof dynamicFields !== 'object') return {};
       if (!targetCategory || targetCategory === 'Multiple') return dynamicFields;
 
-      // Map common synonyms: e.g. "valves" -> "piping"
-      const normalizedTarget = targetCategory.toLowerCase() === 'valves' ? 'piping' : targetCategory.toLowerCase();
+      // Map common synonyms: e.g. "piping" -> "valves"
+      const normalize = c => {
+        const s = String(c).toLowerCase().replace(/[\s\/]+/g, '');
+        if (s === 'valves' || s === 'piping' || s === 'pipingvalves') return 'valves';
+        return s;
+      };
+      const normalizedTarget = normalize(targetCategory);
 
       const cleaned = {};
       for (const [key, val] of Object.entries(dynamicFields)) {
         const fieldCat = fieldCatMap[key];
         if (fieldCat) {
-          const normalizedFieldCat = fieldCat.toLowerCase() === 'valves' ? 'piping' : fieldCat.toLowerCase();
+          const normalizedFieldCat = normalize(fieldCat);
           if (normalizedFieldCat !== normalizedTarget) {
             console.log(`[Schema-Aware Validation] Stripping field "${key}" (belongs to: "${fieldCat}") from category "${targetCategory}"`);
             continue;

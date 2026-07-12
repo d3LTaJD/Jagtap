@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
 import AutocompleteSelect from '../components/AutocompleteSelect';
+import ToggleSwitch from '../components/ToggleSwitch';
 import { Can } from '../context/AbilityContext';
 
 const StatusBadge = ({ status }) => {
@@ -509,7 +510,7 @@ const Enquiries = () => {
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Product Category</label>
             <AutocompleteSelect
-              options={['Pressure Vessel','Heat Exchanger','Storage Tank','Piping / Pipe Fabrication','Structural Fabrication','Custom Fabrication']}
+              options={['Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Valves', 'Piping / Pipe Fabrication', 'Structural Fabrication', 'Custom Fabrication', 'Structural', 'Custom', 'Multiple']}
               value={filterCategory}
               onChange={v => setFilterCategory(v)}
               placeholder="All Categories"
@@ -832,7 +833,7 @@ const Enquiries = () => {
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Product Category</label>
                       <AutocompleteSelect
-                        options={['Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Piping', 'Structural', 'Custom', 'Multiple']}
+                        options={['Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Valves', 'Structural', 'Custom', 'Multiple']}
                         value={formData.productCategory}
                         onChange={v => setFormData({...formData, productCategory: v})}
                         placeholder="Select category..."
@@ -914,9 +915,9 @@ const Enquiries = () => {
                               allowClear={false}
                             />
                           </div>
-                          <div className="flex items-center gap-2 mt-6">
-                            <input type="checkbox" id="detailsShared" checked={formData.detailsSharedByLead} onChange={e => setFormData({...formData, detailsSharedByLead: e.target.checked})} className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4 border-slate-300" />
-                            <label htmlFor="detailsShared" className="text-sm text-orange-800 font-medium">Details Shared by Lead?</label>
+                          <div className="flex flex-col gap-1.5 mt-6">
+                            <span className="text-sm text-slate-700 font-medium">Details Shared by Lead?</span>
+                            <ToggleSwitch checked={formData.detailsSharedByLead} onChange={v => setFormData({...formData, detailsSharedByLead: v})} />
                           </div>
                         </div>
                       </>
@@ -939,28 +940,12 @@ const Enquiries = () => {
                       <textarea required maxLength="200" value={formData.productDescription} onChange={e => setFormData({...formData, productDescription: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 min-h-[80px]" placeholder="Briefly describe the requested equipment (Max 200 chars)"></textarea>
                     </div>
 
-                    {/* Standard & Specs */}
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Standard / Code</label>
-                      <AutocompleteSelect
-                        options={['ASME', 'IS', 'BS', 'EN', 'API', 'IBR', 'Custom', 'Not specified']}
-                        value={formData.standardCode}
-                        onChange={v => setFormData({...formData, standardCode: v})}
-                        placeholder="Select standard..."
-                        allowClear={false}
-                      />
-                    </div>
-                    <div className="flex items-center mt-6">
-                      <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-700">
-                        <input type="checkbox" checked={formData.thirdPartyInspection} onChange={e => setFormData({...formData, thirdPartyInspection: e.target.checked})} className="rounded text-brand-600 focus:ring-brand-500 border-slate-300 w-4 h-4" />
-                        Third Party Inspection Required
-                      </label>
-                    </div>
+
 
                     <div className="flex gap-4">
                       <div className="flex-1">
                         <label className="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
-                        <input type="number" min="1" step="any" required value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                        <input type="number" min="1" step="any" required placeholder=" " value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
                       </div>
                       <div className="flex-1">
                         <label className="block text-sm font-medium text-slate-700 mb-1">Unit</label>
@@ -984,15 +969,7 @@ const Enquiries = () => {
                       />
                     </div>
 
-                    {/* Delivery & Budget */}
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Delivery Lead Time (Weeks)</label>
-                      <input type="number" min="1" value={formData.requiredDeliveryWeeks} onChange={e => setFormData({...formData, requiredDeliveryWeeks: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" placeholder="e.g. 12" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Target Delivery Date</label>
-                      <input type="date" value={formData.requiredDeliveryDate} onChange={e => setFormData({...formData, requiredDeliveryDate: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                    </div>
+                    {/* Budget */}
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Budget From (₹)</label>
                       <input type="number" min="0" value={formData.budgetFrom} onChange={e => setFormData({...formData, budgetFrom: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" placeholder="Optional" />
@@ -1016,26 +993,6 @@ const Enquiries = () => {
                       <textarea maxLength="300" value={formData.internalNotes} onChange={e => setFormData({...formData, internalNotes: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 min-h-[60px]" placeholder="Max 300 chars"></textarea>
                     </div>
 
-                  </div>
-                </section>
-
-                <hr className="border-slate-100" />
-
-                {/* Dynamic Fields Section */}
-                <section>
-                  <h3 className="text-sm font-bold text-brand-600 uppercase tracking-wider mb-4">Technical Specifications</h3>
-                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200">
-                    <DynamicFormRenderer
-                      formContext="Enquiry"
-                      values={{ 
-                        productCategory: formData.productCategory, 
-                        sourceChannel: formData.sourceChannel, 
-                        standardCode: formData.standardCode, 
-                        ...formData.dynamicFields 
-                      }}
-                      onChange={handleDynamicChange}
-                      currentUserRole={JSON.parse(sessionStorage.getItem('user') || '{}').role}
-                    />
                   </div>
                 </section>
               </form>

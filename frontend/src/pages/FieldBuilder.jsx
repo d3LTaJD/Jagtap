@@ -316,7 +316,7 @@ const FieldBuilder = () => {
                 <div className="col-span-2">
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">
                     <span>{FIELD_TYPE_ICONS[field.fieldType] || '?'}</span>
-                    <span className="truncate max-w-[80px]">{field.fieldType.replace(' (Single)', '').replace(' (Boolean)', '').replace(' (Multi)', ' Multi').replace(' (Long)', ' Long').replace(' (Short)', '')}</span>
+                    <span className="truncate max-w-[80px]">{(field.fieldType || 'Unknown').replace(' (Single)', '').replace(' (Boolean)', '').replace(' (Multi)', ' Multi').replace(' (Long)', ' Long').replace(' (Short)', '')}</span>
                   </span>
                 </div>
                 <div className="col-span-2">

@@ -105,7 +105,9 @@ exports.createQuotation = async (req, res, next) => {
           if (extractedTerms.technicalDeviations) {
             item.technicalDeviations = item.technicalDeviations || extractedTerms.technicalDeviations;
           }
-          if (enquiry.standardCode) {
+          if (matchedProd && matchedProd.standardCode) {
+            item.applicableStandard = item.applicableStandard || matchedProd.standardCode;
+          } else if (enquiry.standardCode) {
             item.applicableStandard = item.applicableStandard || enquiry.standardCode;
           }
           if (enquiry.requiredDeliveryWeeks) {
@@ -201,6 +203,7 @@ exports.getQuotations = async (req, res, next) => {
     const filter = req.query.enquiry ? { enquiry: req.query.enquiry } : {};
     const quotations = await Quotation.find(filter)
       .populate('customer', 'companyName')
+      .populate('enquiry', 'enquiryId')
       .populate('preparedBy', 'fullName')
       .populate('files')
       .sort('-createdAt');

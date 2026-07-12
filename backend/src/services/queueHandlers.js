@@ -443,7 +443,11 @@ async function handleAIExtraction({ emailMessageId }) {
 
   // Re-fetch attachments fresh from DB
   const freshAttachmentsForAI = await Attachment.find({ _id: { $in: emailMsg.attachments } });
-  const bodyText = emailMsg.bodyText || '';
+  // Strip quoted content for REPLY emails only (Re:). For forwards (Fwd:/Fw:), keep full body
+  // since the forwarded content IS the actual enquiry.
+  const { stripQuotedText } = require('./emailBotService');
+  const isForward = /^(fwd|fw)\s*:/i.test((emailMsg.subject || '').trim());
+  const bodyText = isForward ? (emailMsg.bodyText || '') : stripQuotedText(emailMsg.bodyText || '');
   const savedAttachments = freshAttachmentsForAI;
 
   // ──────────────────────────────────────────────────────────────
@@ -683,6 +687,8 @@ async function handleAIExtraction({ emailMessageId }) {
         sourceType: classification.category === 'Tender' ? 'Tender' : 'Direct Enquiry',
         tenderNumber: classification.tenderNumber || undefined,
         tenderDeadline: classification.tenderDeadline ? new Date(classification.tenderDeadline) : undefined,
+        clientName: extractedResult?.clientName || undefined,
+        pmcConsultant: extractedResult?.pmcConsultant || undefined,
         contactPerson: customer.primaryContactName,
         contactMobile: customer.mobileNumber,
         contactEmail: emailMsg.sender.toLowerCase(),
@@ -805,8 +811,16 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
 
         // Apply any newly extracted fields to ALL products that were missing them
         // (e.g. customer replied "150#" without specifying which product — apply to all)
+        const PRODUCT_SPECIFIC_FIELDS = [
+          'valve_type', 'valve_size', 'valve_class', 'valve_bore', 'valve_design_type',
+          'valve_end_connection', 'valve_operating', 'valve_ball_type', 'valve_moc_body',
+          'valve_moc_ball', 'valve_moc_stem', 'valve_moc_seat', 'valve_moc_stud_nuts', 'valve_qty'
+        ];
+
         for (const [key, val] of Object.entries(newlyExtractedGlobal)) {
           if (!val) continue;
+          if (PRODUCT_SPECIFIC_FIELDS.includes(key)) continue;
+
           for (const prod of enquiry.products) {
             const prodCat = prod.category || enquiry.productCategory;
             // Only fill if this product's category matches the field's category

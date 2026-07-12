@@ -29,6 +29,8 @@ const Register = () => {
       if (response.data.token) {
         sessionStorage.setItem('token', response.data.token);
         sessionStorage.setItem('user', JSON.stringify(response.data.data.user || {}));
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.data.user || {}));
         navigate('/app');
       }
     } catch (err) {
