@@ -10,6 +10,7 @@ const attachmentSchema = new mongoose.Schema({
   fileSize: { type: Number, required: true },
   storagePath: { type: String, required: true }, // Local storage file path / filename key
   fileHash: { type: String, index: true }, // Hash of the file buffer for OCR caching
+  contentHash: { type: String, index: true }, // SHA256 of file content for dedup & similarity scoring
   extractedText: { type: String, default: '' }, // Extracted text/OCR content stored permanently
   extractionStatus: { type: String, enum: ['PENDING', 'SUCCESS', 'FAILED', 'NOT_SUPPORTED'], default: 'PENDING' },
   ocrConfidence: { type: Number }, // Raw OCR confidence (0-100)

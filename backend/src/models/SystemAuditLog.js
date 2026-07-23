@@ -12,7 +12,8 @@ const systemAuditLogSchema = new mongoose.Schema({
       'STATUS_TRANSITION', 
       'VERIFICATION', 
       'FILE_UPLOAD', 
-      'QUOTATION_GENERATION'
+      'QUOTATION_GENERATION',
+      'ENQUIRY_DECISION'
     ], 
     index: true 
   },

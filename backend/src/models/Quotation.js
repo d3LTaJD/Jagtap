@@ -56,6 +56,7 @@ const quotationSchema = new mongoose.Schema({
   scopeOfSupply: String,
   exclusions: String,
   deliverySchedule: String,
+  pmcConsultant: String,
   currency: { type: String, default: 'INR' },
   
   items: [quotationItemSchema],

@@ -415,37 +415,45 @@ async function processEmailMessage(parsed) {
     else parentMessageIds.push(parsed.references);
   }
 
-  // A. Reference IDs in subject/body
+  const isForwardSubject = /^(fwd|fw)\s*:/i.test(subject.trim());
+  const isReplySubject = /^re\s*:/i.test(subject.trim()) && !isForwardSubject;
+
+  // A. Reference IDs in subject/body (works for both RE: and FW: — explicit ENQ-XXXX refs)
   const refMatch = (subject + ' ' + bodyText).match(/ENQ-\d{4}-\d{2}-\d{4}/gi);
   if (refMatch) {
     const matchedIds = [...new Set(refMatch.map(id => id.toUpperCase()))];
     matchedEnquiries = await Enquiry.find({ enquiryId: { $in: matchedIds } }).populate('customer');
   }
 
-  // B. Fallback to thread headers
-  if (matchedEnquiries.length === 0 && parentMessageIds.length > 0) {
+  // B. Fallback to thread headers (structural match via In-Reply-To / References)
+  if (matchedEnquiries.length === 0 && parentMessageIds.length > 0 && !isForwardSubject) {
+    // Only use structural thread matching for genuine replies, NOT forwards
     const parentMsg = await EmailMessage.findOne({ messageId: { $in: parentMessageIds } });
     if (parentMsg && parentMsg.threadId) {
       matchedEnquiries = await Enquiry.find({ threadId: parentMsg.threadId }).populate('customer');
     }
   }
 
-  // C. Fallback to sender email
-  if (matchedEnquiries.length === 0) {
-    const isReplySubject = /^(re|fwd|fw)\s*:/i.test(subject.trim());
-    if (isReplySubject) {
-      const activeEnquiries = await Enquiry.find({
-        customer: customer._id,
-        status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified'] }
-      }).populate('customer');
+  // C. Fallback: ONLY for genuine RE: replies (NOT forwards)
+  // Forwarded emails must NEVER be matched to existing enquiries by customer alone —
+  // the Decision Engine in queueHandlers will evaluate them with similarity scoring.
+  if (matchedEnquiries.length === 0 && isReplySubject) {
+    const activeEnquiries = await Enquiry.find({
+      customer: customer._id,
+      status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified'] }
+    }).populate('customer');
 
-      if (activeEnquiries.length === 1) {
-        matchedEnquiries = [activeEnquiries[0]];
-      }
+    if (activeEnquiries.length === 1) {
+      matchedEnquiries = [activeEnquiries[0]];
     }
   }
 
-  const threadId = matchedEnquiries.length > 0 ? matchedEnquiries[0].threadId : crypto.randomBytes(16).toString('hex');
+  // For forwards: always generate a NEW threadId (don't reuse existing enquiry's thread)
+  // For replies that matched: reuse existing enquiry's threadId
+  // For fresh emails: generate new threadId
+  const threadId = (!isForwardSubject && matchedEnquiries.length > 0)
+    ? matchedEnquiries[0].threadId
+    : crypto.randomBytes(16).toString('hex');
 
   // 3. Save incoming attachments immediately
   const savedAttachments = [];
@@ -455,6 +463,10 @@ async function processEmailMessage(parsed) {
       try {
         const storagePath = await uploadFile(att.content, att.filename, att.contentType);
 
+        // Compute SHA256 hash for dedup & similarity scoring (Stage 5 of Decision Engine)
+        const { computeSHA256 } = require('./enquiryDecisionEngine');
+        const contentHash = computeSHA256(att.content);
+
         const parentAttachment = await Attachment.create({
           customerId: customer._id,
           threadId,
@@ -463,6 +475,7 @@ async function processEmailMessage(parsed) {
           fileType: att.contentType,
           fileSize: att.size,
           storagePath,
+          contentHash,
           extractedText: '',
           extractionStatus: 'PENDING',
           processingStatus: 'Pending'

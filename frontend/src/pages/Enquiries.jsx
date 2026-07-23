@@ -72,6 +72,7 @@ const Enquiries = () => {
 
   const [formData, setFormData] = useState({
     companyName: '', primaryContactName: '', mobileNumber: '', emailAddress: '',
+    pmcConsultant: '', clientName: '',
     sourceChannel: 'Email', emailAccount: 'info@', indiaMartLeadId: '', exhibitionName: '', gemTenderNo: '',
     sourceType: 'Manual Entry', tenderNumber: '', tenderDeadline: '',
     productCategory: 'Pressure Vessel',
@@ -568,7 +569,7 @@ const Enquiries = () => {
                         {enq.enquiryId}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-semibold">
-                        {enq.customer?.companyName || 'Unknown Customer'}
+                        {enq.senderCompany || enq.customer?.companyName || 'Unknown Customer'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
                         {enq.productCategory || 'N/A'}
@@ -802,6 +803,14 @@ const Enquiries = () => {
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Email <span className="text-slate-400 font-normal">(Optional)</span></label>
                       <input type="email" value={formData.emailAddress} onChange={e => setFormData({...formData, emailAddress: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors" placeholder="john@acme.com" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">PMC / Consultant <span className="text-slate-400 font-normal">(Optional)</span></label>
+                      <input type="text" value={formData.pmcConsultant || ''} onChange={e => setFormData({...formData, pmcConsultant: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors" placeholder="e.g. EIL, Technip, Toyo" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Client / End Owner <span className="text-slate-400 font-normal">(Optional)</span></label>
+                      <input type="text" value={formData.clientName || ''} onChange={e => setFormData({...formData, clientName: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors" placeholder="e.g. IOCL, ONGC, HPCL" />
                     </div>
                   </div>
                 </section>

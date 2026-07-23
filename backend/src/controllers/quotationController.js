@@ -45,15 +45,17 @@ exports.createQuotation = async (req, res, next) => {
       if (!enquiry) {
         return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
       }
-      if (!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)) {
+      const BLOCKED_STATUSES = ['Needs Review', 'Lost', 'On Hold', 'Abandoned'];
+      if (BLOCKED_STATUSES.includes(enquiry.status)) {
         return res.status(400).json({
           status: 'error',
-          message: `Quotation generation is blocked. The associated enquiry is in '${enquiry.status}' status and must be promoted to 'Confirmed' or 'Technical Review' before creating a quotation.`
+          message: `Quotation generation is blocked. The associated enquiry is in '${enquiry.status}' status and requires human review or status promotion before creating a quotation.`
         });
       }
 
       req.body.productCategory = enquiry.productCategory;
       req.body.customer = enquiry.customer;
+      req.body.pmcConsultant = req.body.pmcConsultant || enquiry.pmcConsultant;
 
       // Extract details if it is a Tender OR has attachments
       if (enquiry.sourceType === 'Tender' || (enquiry.attachmentsList && enquiry.attachmentsList.length > 0)) {

@@ -53,7 +53,8 @@ const QuotationDetail = () => {
     originOfGoods: '',
     weightDimensions: '',
     technicalDocuments: '',
-    deliveryTimeHeader: ''
+    deliveryTimeHeader: '',
+    pmcConsultant: ''
   });
   const [commFields, setCommFields] = useState({
     priceBasis: '',
@@ -90,7 +91,8 @@ const QuotationDetail = () => {
             originOfGoods: q.originOfGoods || 'INDIA',
             weightDimensions: q.weightDimensions || 'This details given at the time of dispatch',
             technicalDocuments: q.technicalDocuments || 'This is share after receiving of techno-commercial order',
-            deliveryTimeHeader: q.deliveryTimeHeader || 'Provided in COMMERCIAL PART - III'
+            deliveryTimeHeader: q.deliveryTimeHeader || 'Provided in COMMERCIAL PART - III',
+            pmcConsultant: q.pmcConsultant || q.enquiry?.pmcConsultant || ''
           });
           setCommFields({
             priceBasis: q.priceBasis || 'Ex Works Ahmedabad.',
@@ -203,13 +205,32 @@ const QuotationDetail = () => {
     await handleUpdate({ status: 'APPROVED', approvedBy: currentUser.id || currentUser._id });
   };
 
+  const handleDownloadPdf = async () => {
+    try {
+      showToast('Preparing PDF download...', 'success');
+      const res = await api.get(`/quotations/${id}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${quotation?.quotationId || 'Quotation'}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      showToast('PDF download failed: ' + (err.response?.data?.message || err.message), 'error');
+    }
+  };
+
   const handleGeneratePdf = async () => {
     setUpdateLoading(true);
     try {
       showToast('Generating official modern PDF...', 'success');
       const res = await api.post(`/quotations/${id}/generate-pdf`);
       setQuotation(res.data.data.quotation);
-      showToast('Official PDF generated and attached!', 'success');
+      showToast('Official PDF generated! Opening & downloading...', 'success');
+      await handleDownloadPdf();
     } catch (err) {
       showToast('Generation failed: ' + (err.response?.data?.message || err.message), 'error');
     } finally {
@@ -272,20 +293,27 @@ const QuotationDetail = () => {
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{quotation.quotationId || 'Draft'}</h1>
             <StatusBadge status={quotation.status} />
           </div>
-          <p className="text-sm text-slate-500 font-medium mt-1">
-            Ref Enquiry:{' '}
-            {quotation.enquiry?.enquiryId ? (
-              <Link
-                to={`/app/enquiries/${quotation.enquiry._id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-brand-600 hover:text-brand-700 font-semibold hover:underline ml-1 inline-flex items-center gap-1"
-              >
-                {quotation.enquiry.enquiryId}
-                <span className="text-[10px] text-slate-400 font-normal">(opens in new tab)</span>
-              </Link>
-            ) : (
-              'N/A'
+          <p className="text-sm text-slate-500 font-medium mt-1 flex flex-wrap items-center gap-x-4">
+            <span>
+              Ref Enquiry:{' '}
+              {quotation.enquiry?.enquiryId ? (
+                <Link
+                  to={`/app/enquiries/${quotation.enquiry._id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-600 hover:text-brand-700 font-semibold hover:underline ml-1 inline-flex items-center gap-1"
+                >
+                  {quotation.enquiry.enquiryId}
+                  <span className="text-[10px] text-slate-400 font-normal">(opens in new tab)</span>
+                </Link>
+              ) : (
+                'N/A'
+              )}
+            </span>
+            {(quotation.pmcConsultant || quotation.enquiry?.pmcConsultant || techFields.pmcConsultant) && (
+              <span>
+                PMC / Consultant: <strong className="text-slate-700">{quotation.pmcConsultant || quotation.enquiry?.pmcConsultant || techFields.pmcConsultant}</strong>
+              </span>
             )}
           </p>
         </div>
@@ -325,6 +353,12 @@ const QuotationDetail = () => {
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-60">
             {updateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
             Generate PDF
+          </button>
+
+          <button onClick={handleDownloadPdf} disabled={updateLoading}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-60"
+            title="Download or view generated PDF">
+            <Download className="w-4 h-4 text-slate-600" /> View / Download PDF
           </button>
         </div>
       </div>
@@ -548,6 +582,18 @@ const QuotationDetail = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">PMC / Consultant Name</label>
+                  <input
+                    type="text"
+                    disabled={isApproved || !ability.can('editTechnical', 'Quotation')}
+                    value={techFields.pmcConsultant || ''}
+                    onChange={e => setTechFields({ ...techFields, pmcConsultant: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                    placeholder="e.g. EIL, Technip, Toyo"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Manufacturer Name</label>
                   <input

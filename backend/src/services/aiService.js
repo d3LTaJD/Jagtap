@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const { logActivity } = require('../utils/logger');
 const aiConfig = require('../config/aiConfig');
 const aiLogger = require('../utils/aiLogger');
+const extractionPipeline = require('./extraction/ExtractionPipeline');
+const normalizationService = require('./extraction/NormalizationService');
 
 // Part 2: Custom Production-Grade Errors
 class RetryableError extends Error {
@@ -145,7 +147,7 @@ async function callAIServiceWithFallback({ prompt, validateFn = () => true, logT
             });
             parsedResult = parsed;
             anySucceeded = true;
-            
+
             aiLogger.logAIRequestResponse(
               enquiryId,
               `${logTag}_${providerName}_Attempt${attemptNum}`,
@@ -157,7 +159,7 @@ async function callAIServiceWithFallback({ prompt, validateFn = () => true, logT
           } else {
             errorReason = 'JSON_VALIDATE_FAILED';
             console.warn(`[${logTag}] ${providerName} (${modelName}) returned invalid JSON format or failed custom validation.`);
-            
+
             aiLogger.logAIRequestResponse(
               enquiryId,
               `${logTag}_${providerName}_Attempt${attemptNum}_Validation_Failed`,
@@ -169,7 +171,7 @@ async function callAIServiceWithFallback({ prompt, validateFn = () => true, logT
           anyRateLimited = true;
           errorReason = '429 Rate Limited';
           console.warn(`[${logTag}] ${providerName} (${modelName}) rate limited.`);
-          
+
           aiLogger.logAIRequestResponse(
             enquiryId,
             `${logTag}_${providerName}_Attempt${attemptNum}_429`,
@@ -183,7 +185,7 @@ async function callAIServiceWithFallback({ prompt, validateFn = () => true, logT
           errorReason = `HTTP Error ${res.status}`;
           const errText = await res.text().catch(() => '');
           console.error(`[${logTag}] ${providerName} (${modelName}) error: ${errText.substring(0, 200)}`);
-          
+
           aiLogger.logAIRequestResponse(
             enquiryId,
             `${logTag}_${providerName}_Attempt${attemptNum}_Error`,
@@ -315,7 +317,7 @@ async function callAIServiceWithFallback({ prompt, validateFn = () => true, logT
 exports.extractEnquiries = async (emailText, attachments = [], metadata = {}) => {
   const fromAddress = metadata.from || '';
   const subjectText = metadata.subject || '';
-  
+
   console.log(`[AI Multi-Extraction] Processing email from "${fromAddress}"`);
 
   // Format attachments list for prompt context (capped per attachment to prevent token overflow)
@@ -502,7 +504,7 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
   const chunkSize = 3000;
   const overlap = 500;
   const chunks = [];
-  
+
   for (let i = 0; i < text.length; i += (chunkSize - overlap)) {
     const chunk = text.substring(i, i + chunkSize);
     chunks.push({
@@ -527,7 +529,7 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
   ];
 
   const searchTerms = new Set();
-  
+
   if (productDescription) {
     productDescription.toLowerCase().split(/\s+/).forEach(word => {
       if (word.length > 2) searchTerms.add(word);
@@ -555,7 +557,7 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
   // Score each chunk (Phase 2)
   for (const chunk of chunks) {
     const chunkLower = chunk.text.toLowerCase();
-    
+
     // Exact description match
     if (productDescription && chunkLower.includes(productDescription.toLowerCase())) {
       chunk.score += 200;
@@ -625,7 +627,7 @@ function getRelevantContext(text, productDescription, relevantFields, maxChars =
   - Original chars: ${text.length}
   - Selected chunks: ${selectedChunks.length}
   - Final chars: ${filteredText.length}`);
-  
+
   return filteredText;
 }
 
@@ -698,8 +700,8 @@ CRITICAL FOCUS:
 - Never invent or hallucinate values. If a field is not found or not mentioned in the context, you MUST return null for value, 0 for confidence, and null for sourcePage.
 - For each extracted field, include value, confidence, and source page number.
 - If the field is "valve_type" (Valve Type):
-  * Look at the overall email context. If the email context specifies the list is for "Ball Valves" or the item description specifies "Ball Valve", extract "Ball Valve".
-  * Do not extract "Flange Ended Valve" or "Butt Welded Valve" as the valve type — "Flange Ended" and "Butt Welded" are end connections (valve_end_connection), and the valve type itself is "Ball Valve".
+  * Extract the exact type of valve requested in the item description or context (e.g. "Ball Valve", "Gate Valve", "Globe Valve", "Check Valve", "Butterfly Valve", "Plug Valve", "Control Valve", "Needle Valve", "Safety Valve").
+  * Do not extract end connection terms like "Flange Ended Valve" or "Butt Welded Valve" as the valve type — "Flange Ended" and "Butt Welded" belong to valve_end_connection.
 
 Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks (no \`\`\`json). Do not add explanations or text before/after the JSON.
 
@@ -724,233 +726,40 @@ ${relevantFields.map(f => `  "${f.fieldName}": {
     enquiryId
   });
 
-  return normalizeExtractedFields(result, fieldDefinitions);
+  // Zero-Hallucination Pipeline Overlay: Deterministic canonical extractions override LLM estimates
+  try {
+    const textToScan = `${productDescription}\n${emailText}`;
+    const pipelineRes = extractionPipeline.processDocument(textToScan, { documentId: enquiryId });
+    const legacy = pipelineRes.legacySpecifications || {};
+
+    fieldDefinitions.forEach(f => {
+      const k = f.fieldName;
+      const lk = k.toLowerCase();
+      let canonicalVal = null;
+
+      if (lk.includes('size')) canonicalVal = legacy.valve_size;
+      else if (lk.includes('class') || lk.includes('rating')) canonicalVal = legacy.valve_class;
+      else if (lk.includes('type') && lk.includes('valve')) canonicalVal = legacy.valve_type;
+      else if (lk.includes('material') || lk.includes('moc')) canonicalVal = legacy.shellMaterial;
+      else if (lk.includes('standard')) canonicalVal = legacy.designStandard;
+
+      if (canonicalVal) {
+        result[k] = { value: canonicalVal, confidence: 100, sourcePage: 1 };
+      }
+    });
+  } catch (pipeErr) {
+    console.warn('[ExtractionPipeline Overlay Error]', pipeErr.message);
+  }
+
+  return normalizationService.normalizeExtractedFields(result, fieldDefinitions);
 };
 
 /**
  * Validates and normalizes extracted fields.
- * Part 20: Rejects negative values for sizes/pressure ratings, validates date objects.
- * Phase 7: Returns rich object `{ value, confidence, sourcePage }`.
+ * Delegated directly to NormalizationService as the single source of truth.
  */
 function normalizeExtractedFields(data, fieldDefinitions) {
-  const normalized = {};
-  for (const f of fieldDefinitions) {
-    const key = f.fieldName;
-    let rawInput = data[key];
-
-    let val = null;
-    let confidence = 90;
-    let sourcePage = null;
-
-    if (rawInput !== undefined && rawInput !== null) {
-      if (typeof rawInput === 'object' && rawInput !== null && rawInput.value !== undefined) {
-        val = rawInput.value;
-        confidence = parseInt(rawInput.confidence, 10);
-        if (isNaN(confidence)) confidence = 90;
-        sourcePage = (rawInput.sourcePage !== undefined && rawInput.sourcePage !== null) ? parseInt(rawInput.sourcePage, 10) : null;
-        if (isNaN(sourcePage)) sourcePage = null;
-      } else {
-        val = rawInput;
-        confidence = 90;
-        sourcePage = null;
-      }
-    }
-
-    const nullResult = {
-      value: null,
-      confidence: 0,
-      sourcePage: null
-    };
-
-    if (val === undefined || val === null) {
-      normalized[key] = nullResult;
-      continue;
-    }
-
-    const lowerKey = key.toLowerCase();
-    const lowerLabel = (f.fieldLabel || '').toLowerCase();
-    const isSizeField = lowerKey.includes('size') || lowerLabel.includes('size');
-    const isPressureField = lowerKey.includes('pressure') || lowerKey.includes('class') || lowerKey.includes('bar') || lowerLabel.includes('pressure') || lowerLabel.includes('class') || lowerLabel.includes('bar');
-    const isMocOrActuatorField = lowerKey.includes('moc') || lowerKey.includes('material') || lowerKey.includes('actuator') || lowerKey.includes('actuation') || lowerLabel.includes('moc') || lowerLabel.includes('material') || lowerLabel.includes('actuator') || lowerLabel.includes('actuation');
-
-    // Phase 10: Size Pre-normalization and Validation
-    if (isSizeField) {
-      const cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
-      
-      // If cleanVal already directly matches one of the options (if it's a dropdown), do NOT convert it!
-      const hasDirectOptionMatch = f.options && f.options.length && f.options.some(opt => {
-        return opt.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanVal.replace(/[^a-z0-9]/g, '');
-      });
-
-      if (hasDirectOptionMatch) {
-        val = cleanVal;
-      } else if (inchToMmMap[cleanVal]) {
-        val = inchToMmMap[cleanVal];
-      } else {
-        val = cleanVal;
-      }
-
-      const sizeInMm = Number(val);
-      if (!isNaN(sizeInMm)) {
-        if (sizeInMm < 15 || sizeInMm > 2000) {
-          console.warn(`[Validation] Rejecting size outside 15mm-2000mm range: ${val} (resolved: ${sizeInMm}mm)`);
-          normalized[key] = nullResult;
-          continue;
-        }
-      }
-    }
-
-    // Phase 10: Pressure Class/Rating Validation
-    if (isPressureField) {
-      const clean = String(val).toLowerCase().replace(/[^0-9.]/g, '').trim();
-      const num = Number(clean);
-      if (!isNaN(num) && num > 0) {
-        const isStrictClass = lowerKey.includes('class') || lowerLabel.includes('class');
-        const isStrictBar = lowerKey.includes('bar') || lowerLabel.includes('bar');
-
-        if (isStrictClass) {
-          if (num < 150 || num > 4500) {
-            console.warn(`[Validation] Rejecting class rating outside 150#-4500# range: ${val}`);
-            normalized[key] = nullResult;
-            continue;
-          }
-        } else if (isStrictBar) {
-          if (num < 10 || num > 400) {
-            console.warn(`[Validation] Rejecting pressure rating outside 10bar-400bar range: ${val}`);
-            normalized[key] = nullResult;
-            continue;
-          }
-        } else {
-          // General pressure field (can be class or bar)
-          if (num >= 150) {
-            if (num < 150 || num > 4500) {
-              console.warn(`[Validation] Rejecting class rating outside 150#-4500# range: ${val}`);
-              normalized[key] = nullResult;
-              continue;
-            }
-          } else {
-            if (num < 10 || num > 400) {
-              console.warn(`[Validation] Rejecting pressure rating outside 10bar-400bar range: ${val}`);
-              normalized[key] = nullResult;
-              continue;
-            }
-          }
-        }
-      }
-    }
-
-    // Phase 10: MOC/Actuator text integrity (rejects negative numbers and junk keywords)
-    if (isMocOrActuatorField) {
-      const sVal = String(val).trim();
-      const cleanLower = sVal.toLowerCase();
-      const isJunk = ['unknown', 'n/a', 'na', 'none', 'not specified', 'not available'].includes(cleanLower) || cleanLower.includes('-') && !isNaN(Number(cleanLower.replace(/[^0-9.-]/g, '')));
-      if (isJunk) {
-        console.warn(`[Validation] Rejecting invalid/junk text for field ${key}: "${sVal}"`);
-        normalized[key] = nullResult;
-        continue;
-      }
-    }
-
-    // 1. Validate Number fields (Part 20)
-    if (f.fieldType === 'Number') {
-      let num = Number(val);
-      if (isNaN(num)) {
-        const match = String(val).match(/[-+]?[0-9]*\.?[0-9]+/);
-        num = match ? Number(match[0]) : NaN;
-      }
-      if (!isNaN(num)) {
-        if (num < 0 && (key.toLowerCase().includes('qty') || key.toLowerCase().includes('quantity') || key.toLowerCase().includes('pressure') || key.toLowerCase().includes('size') || key.toLowerCase().includes('class'))) {
-          console.warn(`[Validation] Rejecting negative value for field ${key}: ${num}`);
-          normalized[key] = nullResult;
-        } else {
-          normalized[key] = { value: num, confidence, sourcePage };
-        }
-      } else {
-        console.warn(`[Validation] Rejected invalid numeric value for field ${key}:`, val);
-        normalized[key] = nullResult;
-      }
-      continue;
-    }
-
-    // 2. Validate Checkbox/Boolean fields
-    if (f.fieldType === 'Checkbox' || f.fieldType === 'Checkbox (Boolean)') {
-      let boolVal;
-      if (typeof val === 'boolean') {
-        boolVal = val;
-      } else {
-        const cleanVal = String(val).toLowerCase();
-        boolVal = ['true', 'yes', '1', 'y', 'checked'].includes(cleanVal);
-      }
-      normalized[key] = { value: boolVal, confidence, sourcePage };
-      continue;
-    }
-
-    // 3. Validate Date fields (Part 20)
-    if (f.fieldType === 'Date') {
-      const parsedDate = Date.parse(val);
-      if (!isNaN(parsedDate)) {
-        normalized[key] = { value: new Date(parsedDate).toISOString(), confidence, sourcePage };
-      } else {
-        console.warn(`[Validation] Rejected invalid date value for field ${key}:`, val);
-        normalized[key] = nullResult;
-      }
-      continue;
-    }
-
-    // 4. Dropdown Option matching
-    if ((f.fieldType === 'Dropdown' || f.fieldType === 'Dropdown (Single)') && f.options && f.options.length) {
-      let matchVal = val;
-      const normalizeStr = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-      const valNormalized = normalizeStr(val);
-      
-      // If the value already matches one of the options directly, don't try to convert it!
-      const directMatch = f.options.find(opt => normalizeStr(opt) === valNormalized);
-      if (directMatch) {
-        matchVal = directMatch;
-      } else if (key.toLowerCase().includes('size')) {
-        const cleanVal = String(val).toLowerCase().replace(/(?:inch|inches|nb|mm|["'\s])+/g, '').trim();
-        if (inchToMmMap[cleanVal]) {
-          matchVal = inchToMmMap[cleanVal];
-        }
-      }
-
-      const isNumericDropdown = f.options.every(opt => !/[a-zA-Z]/.test(String(opt)));
-
-      const matchedOpt = f.options.find(opt => {
-        const nOpt = normalizeStr(opt);
-        const nVal = normalizeStr(matchVal);
-        
-        // Exact match of normalized strings
-        if (nOpt === nVal) return true;
-        
-        if (isNumericDropdown) return false;
-        
-        // Handle common abbreviations/synonyms:
-        if (nVal === 'sw' && nOpt.includes('socketweld')) return true;
-        if (nVal === 'bw' && nOpt.includes('buttweld')) return true;
-        if (nVal === 'fe' && nOpt.includes('flange')) return true;
-        if (nVal.includes('flange') && nOpt.includes('flange')) return true;
-        if (nVal === 'npt' && nOpt.includes('npt')) return true;
-        
-        // If the option contains the value (e.g. opt="ASTM A105", val="A105")
-        if (nOpt.includes(nVal) || nVal.includes(nOpt)) return true;
-        
-        return false;
-      });
-
-      if (matchedOpt) {
-        normalized[key] = { value: matchedOpt, confidence, sourcePage };
-      } else {
-        console.warn(`[Validation] Option "${val}" not found in options list for ${key}:`, f.options);
-        normalized[key] = nullResult;
-      }
-      continue;
-    }
-
-    // 5. String fields
-    normalized[key] = { value: String(val).trim(), confidence, sourcePage };
-  }
-  return normalized;
+  return normalizationService.normalizeExtractedFields(data, fieldDefinitions);
 }
 
 /**
@@ -959,7 +768,7 @@ function normalizeExtractedFields(data, fieldDefinitions) {
 function runHeuristicExtraction(text, from, subject) {
   const cleanFrom = extractEmailFromString(from);
   const fromName = from.split('<')[0].trim().replace(/"/g, '') || 'Email Sender';
-  
+
   let domain = cleanFrom.split('@')[1] || '';
   let company = 'Individual Customer';
   if (domain && !['gmail.com', 'yahoo.com', 'hotmail.com', 'rediffmail.com', 'outlook.com'].includes(domain.toLowerCase())) {

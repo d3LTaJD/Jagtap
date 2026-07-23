@@ -368,93 +368,71 @@ async function handleAIExtraction({ emailMessageId }) {
   }
 
   // ──────────────────────────────────────────────────────────────
-  // ROUTE: Follow-up → Thread matching (existing logic)
+  // STEP 0.5: Enquiry Decision Engine (Multi-Stage Pipeline)
+  // Replaces naive threadId/subject matching with weighted similarity,
+  // forwarded content isolation, and audit-trailed decisions.
   // ──────────────────────────────────────────────────────────────
-  // Thread matching for Follow-up (AI classified) OR structural thread detection
-  let matchedEnquiries = [];
+  const { makeEnquiryDecision, isolateEmailContent } = require('./enquiryDecisionEngine');
 
-  if (classification.category === 'Follow-up') {
-    // Use AI-extracted ENQ IDs first if available
-    if (classification.referencedEnquiryIds && classification.referencedEnquiryIds.length > 0) {
-      matchedEnquiries = await Enquiry.find({ enquiryId: { $in: classification.referencedEnquiryIds } }).populate('customer');
-    }
-  }
+  // Gather candidate enquiries for comparison (same customer, open status)
+  const candidateEnquiries = await Enquiry.find({
+    customer: customer._id,
+    status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified', 'Ready for Offer'] }
+  }).populate('customer');
 
-  // Fallback: structural thread matching (works for Follow-up and also Enquiry/Tender replies)
-  if (matchedEnquiries.length === 0) {
-    const parentMessageIds = [];
-    if (emailMsg.messageId) {
-      // Match by reference ID in subject/body
-      const refMatch = (emailMsg.subject + ' ' + emailMsg.bodyText).match(/ENQ-\d{4}-\d{2}-\d{4}/gi);
-      if (refMatch) {
-        const matchedIds = [...new Set(refMatch.map(id => id.toUpperCase()))];
-        matchedEnquiries = await Enquiry.find({ enquiryId: { $in: matchedIds } }).populate('customer');
-      }
-    }
-
-    // Fallback to threadId
-    if (matchedEnquiries.length === 0 && emailMsg.threadId) {
-      matchedEnquiries = await Enquiry.find({ threadId: emailMsg.threadId }).populate('customer');
-    }
-
-    // Fallback to customer reply
-    if (matchedEnquiries.length === 0) {
-      const isReplySubject = /^(re|fwd|fw)\s*:/i.test(emailMsg.subject.trim());
-      if (isReplySubject) {
-        const activeEnquiries = await Enquiry.find({
-          customer: customer._id,
-          status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified'] }
-        }).populate('customer');
-        
-        if (activeEnquiries.length === 1) {
-          matchedEnquiries = [activeEnquiries[0]];
-        }
-      }
-    }
-
-    // Fallback: Same customer with an open enquiry in the same product category (Duplicate detection)
-    // IMPORTANT: Only do customer-level matching for Follow-up classified emails.
-    // For new Enquiry/Tender emails, we should always create new enquiries, not merge into existing ones.
-    if (matchedEnquiries.length === 0 && classification.category === 'Follow-up') {
-      const openEnquiries = await Enquiry.find({
-        customer: customer._id,
-        status: { $in: ['New', 'Confirmed', 'Contacted', 'Technical Review', 'Needs Review', 'Verified', 'Ready for Offer'] }
-      }).populate('customer');
-
-      if (openEnquiries.length > 0) {
-        if (openEnquiries.length === 1) {
-          matchedEnquiries = [openEnquiries[0]];
-          console.log(`[AI Extraction] Single open enquiry found for customer (Follow-up). Routing email ${emailMessageId} as follow-up to ${openEnquiries[0].enquiryId}.`);
-        } else {
-          // Match by product category keywords in subject/body
-          const emailContent = (emailMsg.subject + ' ' + (emailMsg.bodyText || '')).toLowerCase();
-          const matched = openEnquiries.find(enq => {
-            const category = (enq.productCategory || '').toLowerCase();
-            return emailContent.includes(category) || category.split(' ').some(word => word.length > 3 && emailContent.includes(word));
-          });
-          if (matched) {
-            matchedEnquiries = [matched];
-            console.log(`[AI Extraction] Open enquiry with matching category "${matched.productCategory}" found (Follow-up). Routing email ${emailMessageId} as follow-up to ${matched.enquiryId}.`);
-          }
-        }
+  // Also add threadId-matched enquiries and ENQ-XXXX referenced enquiries
+  const refMatch = (emailMsg.subject + ' ' + (emailMsg.bodyText || '')).match(/ENQ-\d{4}-\d{2}-\d{4}/gi);
+  if (refMatch) {
+    const matchedIds = [...new Set(refMatch.map(id => id.toUpperCase()))];
+    const refEnquiries = await Enquiry.find({ enquiryId: { $in: matchedIds } }).populate('customer');
+    for (const enq of refEnquiries) {
+      if (!candidateEnquiries.some(c => c._id.toString() === enq._id.toString())) {
+        candidateEnquiries.push(enq);
       }
     }
   }
+  if (emailMsg.threadId) {
+    const threadEnquiries = await Enquiry.find({ threadId: emailMsg.threadId }).populate('customer');
+    for (const enq of threadEnquiries) {
+      if (!candidateEnquiries.some(c => c._id.toString() === enq._id.toString())) {
+        candidateEnquiries.push(enq);
+      }
+    }
+  }
+
+  // Run the Decision Engine
+  const decision = await makeEnquiryDecision(emailMsg, customer, classification, candidateEnquiries);
+  console.log(`[AI Extraction] Decision Engine → ${decision.decision}: ${decision.reason} (score: ${decision.similarityScore}%, intent: ${decision.intent})`);
 
   // Re-fetch attachments fresh from DB
   const freshAttachmentsForAI = await Attachment.find({ _id: { $in: emailMsg.attachments } });
-  // Strip quoted content for REPLY emails only (Re:). For forwards (Fwd:/Fw:), keep full body
-  // since the forwarded content IS the actual enquiry.
-  const { stripQuotedText } = require('./emailBotService');
-  const isForward = /^(fwd|fw)\s*:/i.test((emailMsg.subject || '').trim());
-  const bodyText = isForward ? (emailMsg.bodyText || '') : stripQuotedText(emailMsg.bodyText || '');
   const savedAttachments = freshAttachmentsForAI;
 
+  // Use isolated content from the decision engine for AI extraction
+  const bodyText = decision.bodyTextForExtraction || (emailMsg.bodyText || '');
+
+  // Determine routing based on decision engine output
+  let matchedEnquiries = [];
+  if (decision.decision === 'UPDATE' && decision.matchedEnquiryId) {
+    const matchedEnq = candidateEnquiries.find(e => e._id.toString() === decision.matchedEnquiryId.toString());
+    if (matchedEnq) matchedEnquiries = [matchedEnq];
+  }
+
+  // Handle SKIP decisions (PO, FYI forwards, etc.)
+  if (decision.decision === 'SKIP') {
+    console.log(`[AI Extraction] Decision Engine SKIP: ${decision.reason}`);
+    emailMsg.processingStatus = 'Completed';
+    emailMsg.processingMessage = `Decision Engine: ${decision.reason}`;
+    emailMsg.processingCompletedAt = new Date();
+    await emailMsg.save();
+    return;
+  }
+
   // ──────────────────────────────────────────────────────────────
-  // If thread matched → handle as reply (Follow-up path)
+  // If decision is UPDATE → handle as reply (Follow-up path)
   // ──────────────────────────────────────────────────────────────
-  if (matchedEnquiries.length > 0) {
-    console.log(`[AI Extraction] Identified thread reply for ${matchedEnquiries.length} enquiry(ies). Category: ${classification.category}`);
+  if (decision.decision === 'UPDATE' && matchedEnquiries.length > 0) {
+    console.log(`[AI Extraction] Decision Engine UPDATE: Routing to ${matchedEnquiries.map(e => e.enquiryId).join(', ')}. Intent: ${decision.intent}`);
     
     // Set processing status on enquiries
     for (const enq of matchedEnquiries) {
@@ -489,10 +467,21 @@ async function handleAIExtraction({ emailMessageId }) {
     // Filter out successfully parsed BOQs from files sent to AI
     const remainingAttachmentsForAI = savedAttachments.filter(att => !successfullyParsedBoqIds.has(att._id.toString()));
 
-    console.log(`[AI Extraction] Calling AI extractEnquiries for new ${classification.category}... (Sent ${remainingAttachmentsForAI.length} attachments, skipped ${successfullyParsedBoqIds.size} parsed BOQs)`);
+    // ── Deterministic Email Body Line Item Parsing ──────────────────
+    // Try to split email body text into structured line items BEFORE calling AI.
+    // This handles numbered lists like "1 4" Shut off valve Nos. 16"
+    if (structuredProducts.length === 0) {
+      const emailBodyProducts = boqParserService.parseEmailBodyLineItems(bodyText);
+      if (emailBodyProducts.length > 0) {
+        structuredProducts.push(...emailBodyProducts);
+        console.log(`[AI Extraction] Deterministic email body parser found ${emailBodyProducts.length} line items.`);
+      }
+    }
+
+    console.log(`[AI Extraction] Calling AI extractEnquiries for new ${classification.category}... (Sent ${remainingAttachmentsForAI.length} attachments, skipped ${successfullyParsedBoqIds.size} parsed BOQs, ${structuredProducts.length} deterministic products)`);
     const metadata = { from: emailMsg.sender, subject: emailMsg.subject };
     
-    // Pass 1: AI Catalog building
+    // Pass 1: AI Catalog building (also extracts customer contact info even if we have structured products)
     const extractedResult = await aiService.extractEnquiries(bodyText, remainingAttachmentsForAI, metadata);
 
     // Merge structured products from BOQ with AI products
@@ -550,12 +539,30 @@ async function handleAIExtraction({ emailMessageId }) {
     const defaultAgent = await User.findOne({ is_active: true, role: { $in: ['SUPER_ADMIN', 'DIRECTOR', 'SA', 'DIR'] } }) || await User.findOne({ is_active: true });
     const agentId = defaultAgent ? defaultAgent._id : null;
 
-    // Update customer company info
-    if (extractedResult && extractedResult.companyName && extractedResult.companyName !== 'Individual Customer' && customer.companyName === 'Individual Customer') {
-      customer.companyName = extractedResult.companyName;
-      customer.primaryContactName = extractedResult.primaryContactName || customer.primaryContactName;
-      customer.mobileNumber = extractedResult.mobileNumber !== '0000000000' ? extractedResult.mobileNumber : customer.mobileNumber;
+    // Update customer company info with public domain isolation guard
+    const PUBLIC_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'rediffmail.com', 'aol.com', 'protonmail.com'];
+    const senderDomain = (emailMsg.sender || '').split('@')[1]?.toLowerCase();
+    const isPublicDomain = PUBLIC_DOMAINS.includes(senderDomain);
+
+    const extractedCompany = (extractedResult && extractedResult.companyName && extractedResult.companyName !== 'Individual Customer') ? extractedResult.companyName : null;
+    const extractedContact = extractedResult?.primaryContactName && extractedResult.primaryContactName !== 'Email Sender' ? extractedResult.primaryContactName : null;
+    const extractedMobile = extractedResult?.mobileNumber && extractedResult.mobileNumber !== '0000000000' ? extractedResult.mobileNumber : null;
+
+    let senderCompany = extractedCompany;
+
+    if (!isPublicDomain && extractedCompany && customer.companyName !== extractedCompany) {
+      customer.companyName = extractedCompany;
+      if (extractedContact) customer.primaryContactName = extractedContact;
+      if (extractedMobile) customer.mobileNumber = extractedMobile;
       await customer.save();
+    } else if (isPublicDomain) {
+      // For public domains (@gmail.com, etc.), do not permanently overwrite Customer companyName
+      // Keep Customer companyName generic ("Individual Customer") and scope company per enquiry
+      if (!senderCompany && customer.companyName !== 'Individual Customer') {
+        senderCompany = customer.companyName;
+      }
+    } else if (!senderCompany) {
+      senderCompany = customer.companyName;
     }
 
     // Map products array
@@ -682,6 +689,7 @@ async function handleAIExtraction({ emailMessageId }) {
       const enquiry = await Enquiry.create({
         enquiryId,
         customer: customer._id,
+        senderCompany: senderCompany || customer.companyName || 'Individual Customer',
         sourceChannel: 'Email',
         emailAccount,
         sourceType: classification.category === 'Tender' ? 'Tender' : 'Direct Enquiry',

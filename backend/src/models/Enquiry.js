@@ -22,6 +22,7 @@ const enquirySchema = new mongoose.Schema({
   tenderDeadline: { type: Date },
   clientName: { type: String },         // End Client / Owner (extracted from PDF/tender)
   pmcConsultant: { type: String },       // PMC / EPCM / Project Management Consultant
+  senderCompany: { type: String },       // Specific RFQ Sender Company (e.g. Sri Akshaya Engineering Pvt. Ltd.)
 
   contactPerson: { type: String, required: true },
   contactMobile: { type: String, required: true },

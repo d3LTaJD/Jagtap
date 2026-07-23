@@ -65,6 +65,13 @@ const Quotations = () => {
     }
   };
 
+  const handleCloseModal = () => {
+    setShowNewModal(false);
+    if (window.location.search.includes('createForEnquiry')) {
+      navigate('/app/quotations', { replace: true });
+    }
+  };
+
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     if (!formData.enquiry) return alert('Please select an Enquiry reference');
@@ -79,7 +86,7 @@ const Quotations = () => {
     
     try {
       await api.post('/quotations', payload);
-      setShowNewModal(false);
+      handleCloseModal();
       fetchQuotations();
       setFormData({
         enquiry: '', customer: '', scopeOfSupply: '', status: 'Draft',
@@ -87,7 +94,7 @@ const Quotations = () => {
       });
     } catch(err) {
       console.error(err);
-      alert('Error creating quotation');
+      alert(err.response?.data?.message || 'Error creating quotation');
     } finally {
       setSubmitLoading(false);
     }
@@ -221,17 +228,18 @@ const Quotations = () => {
               unitPrice: 0,
               lineTotalExclGST: 0
             }];
-        setFormData(prev => ({
-          ...prev,
+        setFormData({
           enquiry: createForEnquiryId,
           customer: selected.customer?._id || '',
           scopeOfSupply: selected.productDescription || '',
           items: defaultItems
-        }));
+        });
         setShowNewModal(true);
+        // Clear query param right after initializing form so subsequent re-fetches won't re-trigger modal opening
+        navigate('/app/quotations', { replace: true });
       }
     }
-  }, [enquiriesForSelect]);
+  }, [enquiriesForSelect, navigate]);
 
   const formatCurrency = (amount) => {
     if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
@@ -383,7 +391,7 @@ const Quotations = () => {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
               <h2 className="text-lg font-bold text-slate-900">Create New Quotation</h2>
-              <button onClick={() => setShowNewModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+              <button onClick={handleCloseModal} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -398,10 +406,10 @@ const Quotations = () => {
                       <label className="block text-sm font-medium text-slate-700 mb-1">Select Source Enquiry</label>
                       <AutocompleteSelect
                         options={enquiriesForSelect
-                          .filter(eq => eq.status === 'Ready for Offer' || eq._id === formData.enquiry)
+                          .filter(eq => ['Ready for Offer', 'Confirmed', 'Quoted', 'Verified', 'Technical Review', 'New'].includes(eq.status) || eq._id === formData.enquiry)
                           .map(eq => ({
                             value: eq._id,
-                            label: `${eq.enquiryId} - ${eq.customer?.companyName} (${eq.productCategory || eq.coreFields?.productCategory || 'N/A'})`
+                            label: `${eq.enquiryId} - ${eq.senderCompany || eq.customer?.companyName || 'Individual Customer'} (${eq.productCategory || eq.coreFields?.productCategory || 'N/A'})`
                           }))}
                         value={formData.enquiry}
                         onChange={v => handleEnquirySelect({ target: { value: v } })}
@@ -465,7 +473,7 @@ const Quotations = () => {
             </div>
             
             <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-              <button type="button" onClick={() => setShowNewModal(false)} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
+              <button type="button" onClick={handleCloseModal} className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Cancel</button>
               <button type="submit" form="new-quote-form" disabled={submitLoading} className="px-5 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed flex items-center">
                 {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 Save Draft Quote

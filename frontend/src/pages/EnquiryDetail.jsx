@@ -407,7 +407,7 @@ const EnquiryDetail = () => {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">{enquiry.enquiryId}</h1>
           <p className="text-sm font-medium text-slate-500 mt-1">
-            {enquiry.customer?.companyName || 'Unknown'} • {enquiry.productCategory || 'N/A'}
+            {enquiry.senderCompany || enquiry.customer?.companyName || 'Unknown'} • {enquiry.productCategory || 'N/A'}
           </p>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {/* Status Badge + Dropdown */}
@@ -674,7 +674,11 @@ const EnquiryDetail = () => {
                       const getDynVal = (key) => {
                         const val = prod.dynamicFields?.[key];
                         if (val === undefined || val === null || val === '') return null;
-                        if (typeof val === 'object' && val !== null && val.value !== undefined) return val.value || null;
+                        if (typeof val === 'object' && val !== null) {
+                          if (val.normalizedValue !== undefined && val.normalizedValue !== null && val.normalizedValue !== '') return val.normalizedValue;
+                          if (val.value !== undefined && val.value !== null && val.value !== '') return val.value;
+                          return null;
+                        }
                         return val || null;
                       };
 
@@ -743,7 +747,7 @@ const EnquiryDetail = () => {
             <h2 className="text-base font-bold mb-5 tracking-tight">Customer Information</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 gap-x-6 text-sm">
               {[
-                ['Company',  enquiry.customer?.companyName],
+                ['Company',  enquiry.senderCompany || enquiry.customer?.companyName],
                 ['Contact',  enquiry.customer?.primaryContactName],
                 ['Mobile',   enquiry.customer?.mobileNumber],
                 ['Email',    enquiry.customer?.emailAddress],

@@ -247,8 +247,8 @@ function parsePdfTableBOQ(text) {
     }
   }
 
-  // Only consider structured parse successful if we find at least 3 matching rows
-  if (products.length >= 3) {
+  // Return any structured matches found (even 1 valid row is a real product)
+  if (products.length >= 1) {
     return products;
   }
   return [];
@@ -287,12 +287,207 @@ async function parseStructuredBOQ(attachment) {
   }
 }
 
+/**
+ * Strips non-valve/non-enquiry sections from email body text.
+ * Removes everything after boundary markers like "Product Details", "Terms & Conditions", etc.
+ * This prevents lube oil tables, legal clauses, and signatures from polluting valve extraction.
+ */
+function stripNonValveSections(text) {
+  if (!text) return '';
+
+  const boundaries = [
+    /^\s*product\s+details\s*[-:]/im,
+    /^\s*terms\s+(?:&|and)\s+conditions/im,
+    /^\s*commercial\s+terms/im,
+    /^\s*general\s+notes?\s*:/im,
+    /^\s*payment\s+terms/im,
+    /^\s*delivery\s+terms/im,
+    /^\s*\*?regards\*?\s*,?\s*$/im,
+    /^\s*\*?thank(?:s|ing)\s+you\*?/im,
+    /^\s*\*?best\s+regards\*?/im,
+    /^\s*\*?warm\s+regards\*?/im
+  ];
+
+  let endIndex = text.length;
+  for (const boundary of boundaries) {
+    const match = text.match(boundary);
+    if (match && match.index < endIndex) {
+      endIndex = match.index;
+    }
+  }
+
+  return text.substring(0, endIndex).trim();
+}
+
+/**
+ * Deterministic email body line item parser.
+ * Splits numbered/bulleted line items from email body text into separate products.
+ *
+ * Handles real-world formats:
+ *   1  4" Shut off valve - pneumatic type  Suitable for 60 m3/hr  Nos. 16
+ *   2. CS Ball Valve 100mm    15  Nos
+ *   1) 100mm Gate Valve ... 8 Nos
+ *
+ * Also handles multi-line items where serial number, description, and quantity
+ * are on separate lines.
+ *
+ * Returns [] if no serial-numbered items found (falls through to AI).
+ */
+function parseEmailBodyLineItems(bodyText) {
+  if (!bodyText || typeof bodyText !== 'string') return [];
+
+  // Step 1: Strip non-valve sections (lube oil, terms, signatures)
+  const cleanedText = stripNonValveSections(bodyText);
+  if (!cleanedText || cleanedText.trim().length < 10) return [];
+
+  const lines = cleanedText.split('\n').map(l => l.trim()).filter(Boolean);
+  const products = [];
+
+  // ── Strategy 1: Single-line format ─────────────────────────────────────
+  // Pattern: Sr.No + Description + ... + Nos./Qty + Number (or Number + Nos./Qty)
+  //   1  4" Shut off valve - pneumatic type  Suitable for 60 m3/hr. flow rate  Nos. 16
+  //   2  4" On Off Type Valve along with NO + NC contacts  Nos. 8
+  //   3  4" Isolation Ball Valve  Nos. 8
+
+  // Match: starts with a serial number, has description text, ends with quantity indicator
+  // Pattern A: ... Nos./Qty.  <number>  (quantity at end after unit)
+  const patternA = /^\s*(\d{1,3})\s*[.)\s]\s*(.+?)\s+(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?\s*(\d+)\s*$/i;
+  // Pattern B: ... <number>  Nos./Qty  (quantity before unit)
+  const patternB = /^\s*(\d{1,3})\s*[.)\s]\s*(.+?)\s+(\d+)\s+(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?\s*$/i;
+  // Pattern C: ... Nos.  <number> (with period/colon after unit word, flexible spacing)
+  const patternC = /^\s*(\d{1,3})\s*[.)\s]\s*(.+?)\s+(?:nos|qty|quantity)[.:]\s*(\d+)\s*$/i;
+
+  for (const line of lines) {
+    // Skip header-like lines
+    if (/^\s*(?:sr\.?\s*no|sl\.?\s*no|s\.?\s*no|item|#|description|particular|detail)/i.test(line)) continue;
+    if (/^\s*(?:unit|qty|quantity|nos|uom)\s*$/i.test(line)) continue;
+
+    let match = line.match(patternA) || line.match(patternB) || line.match(patternC);
+    if (match) {
+      const desc = match[2].trim();
+      const qty = parseInt(match[3], 10) || 1;
+
+      // Validate: description must be at least 5 chars and contain letters
+      if (desc.length >= 5 && /[a-zA-Z]/.test(desc)) {
+        products.push({
+          productDescription: desc,
+          quantity: qty,
+          unit: normalizeUnit('NOS'),
+          productCategory: detectProductCategory(desc),
+          standardCode: detectStandardCode(desc)
+        });
+      }
+    }
+  }
+
+  // If single-line strategy found items, return them
+  if (products.length > 0) {
+    console.log(`[Email Body Parser] Single-line strategy found ${products.length} line items.`);
+    return products;
+  }
+
+  // ── Strategy 2: Multi-line format ──────────────────────────────────────
+  // Some emails break items across lines:
+  //   1
+  //   4" Shut off valve - pneumatic type
+  //   Nos.
+  //   16
+  //
+  // Detect sequences: [serial_number_line] [description_line(s)] [unit_line] [qty_line]
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Check if this line is a standalone serial number (1-3 digits, nothing else)
+    if (/^\d{1,3}$/.test(line.trim())) {
+      const serialNum = parseInt(line.trim(), 10);
+      // Collect subsequent description lines until we hit a unit/qty indicator
+      let descParts = [];
+      let qty = 1;
+      let foundQty = false;
+      let j = i + 1;
+
+      while (j < lines.length) {
+        const nextLine = lines[j].trim();
+
+        // Check if this line is a unit indicator ("Nos.", "Qty", etc.)
+        if (/^(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?$/i.test(nextLine)) {
+          // Next line should be the quantity number
+          if (j + 1 < lines.length && /^\d+$/.test(lines[j + 1].trim())) {
+            qty = parseInt(lines[j + 1].trim(), 10) || 1;
+            foundQty = true;
+            j += 2;
+          } else {
+            j++;
+          }
+          break;
+        }
+
+        // Check if this line is just a number (could be quantity)
+        if (/^\d+$/.test(nextLine) && descParts.length > 0) {
+          qty = parseInt(nextLine, 10) || 1;
+          foundQty = true;
+          j++;
+          // Check if next line is a unit
+          if (j < lines.length && /^(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?$/i.test(lines[j].trim())) {
+            j++;
+          }
+          break;
+        }
+
+        // Check if we hit another serial number (start of next item)
+        if (/^\d{1,3}$/.test(nextLine) && parseInt(nextLine, 10) === serialNum + 1) {
+          break;
+        }
+
+        // Check if we hit a section boundary
+        if (/^(?:product\s+details|terms|regards|thank)/i.test(nextLine)) {
+          break;
+        }
+
+        // Otherwise it's part of the description
+        if (nextLine.length > 0 && /[a-zA-Z]/.test(nextLine)) {
+          descParts.push(nextLine);
+        }
+        j++;
+      }
+
+      if (descParts.length > 0) {
+        const fullDesc = descParts.join(' ').trim();
+        if (fullDesc.length >= 5) {
+          products.push({
+            productDescription: fullDesc,
+            quantity: qty,
+            unit: normalizeUnit('NOS'),
+            productCategory: detectProductCategory(fullDesc),
+            standardCode: detectStandardCode(fullDesc)
+          });
+        }
+      }
+
+      i = j;
+      continue;
+    }
+
+    i++;
+  }
+
+  if (products.length > 0) {
+    console.log(`[Email Body Parser] Multi-line strategy found ${products.length} line items.`);
+  }
+
+  return products;
+}
+
 module.exports = {
   parseExcelBOQ,
   parsePdfTableBOQ,
   parseStructuredBOQ,
   mergeEnquiryProducts,
-  normalizeUnit
+  normalizeUnit,
+  parseEmailBodyLineItems,
+  stripNonValveSections
 };
 
 /**

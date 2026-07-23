@@ -36,7 +36,7 @@ const getPipingFieldsForContext = (context) => {
   let order = 100;
   return [
     // General Valve Details
-    makeField(context, 'Valve Type', 'valve_type', 'Dropdown (Single)', ['Ball Valve', 'Check Valve', 'Globe Valve'], { groupLabel: 'Valve Specifications', displayOrder: order++, isRequired: true }),
+    makeField(context, 'Valve Type', 'valve_type', 'Dropdown (Single)', ['Ball Valve', 'Gate Valve', 'Globe Valve', 'Check Valve', 'Butterfly Valve', 'Plug Valve', 'Control Valve', 'Needle Valve', 'Safety Valve'], { groupLabel: 'Valve Specifications', displayOrder: order++, isRequired: true }),
     makeField(context, 'Valve Size (DN)', 'valve_size', 'Dropdown (Single)', [
       '15', '20', '25', '32', '40', '50', '65', '80', '100', '150', '200', '250', '300',
       '350', '400', '450', '500', '550', '600', '650', '700', '750', '800', '850', '900',
