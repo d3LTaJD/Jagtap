@@ -398,15 +398,17 @@ exports.downloadPDF = async (req, res, next) => {
     }
 
     const htmlContent = `
-      <html>
+      <!DOCTYPE html>
+      <html lang="en">
         <head>
+          <meta charset="UTF-8">
           <style>
-            body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #333; }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
             .header { border-bottom: 2px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
             .header h1 { margin: 0; color: #1e40af; }
             .details { margin-bottom: 40px; }
             .details p { margin: 5px 0; }
-            .items-table { w-full border-collapse; width: 100%; margin-bottom: 40px; }
+            .items-table { border-collapse: collapse; width: 100%; margin-bottom: 40px; }
             .items-table th, .items-table td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
             .items-table th { background-color: #f8fafc; color: #475569; }
             .total { text-align: right; font-size: 1.25rem; font-weight: bold; color: #0f172a; }
@@ -419,7 +421,7 @@ exports.downloadPDF = async (req, res, next) => {
           </div>
           <div class="details">
             <p><strong>Quotation Ref:</strong> ${quotation.quotationId}</p>
-            <p><strong>Date:</strong> ${new Date(quotation.createdAt).toLocaleDateString()}</p>
+            <p><strong>Date:</strong> ${new Date(quotation.createdAt).toLocaleDateString('en-IN')}</p>
             <p><strong>Customer:</strong> ${quotation.customer?.companyName || 'N/A'}</p>
           </div>
           <table class="items-table">
@@ -436,14 +438,14 @@ exports.downloadPDF = async (req, res, next) => {
                 <tr>
                   <td>${item.description}</td>
                   <td>${item.quantity}</td>
-                  <td>₹${(item.unitPrice || 0).toLocaleString()}</td>
-                  <td>₹${(item.lineTotalExclGST || 0).toLocaleString()}</td>
+                  <td>Rs. ${(item.unitPrice || 0).toLocaleString('en-IN')}</td>
+                  <td>Rs. ${(item.lineTotalExclGST || 0).toLocaleString('en-IN')}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
           <div class="total">
-            Grand Total (Excl. GST): ₹${(quotation.commercialTotals?.grandTotal || 0).toLocaleString()}
+            Grand Total (Excl. GST): Rs. ${(quotation.commercialTotals?.grandTotal || 0).toLocaleString('en-IN')}
           </div>
         </body>
       </html>

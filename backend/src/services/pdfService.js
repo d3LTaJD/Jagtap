@@ -442,12 +442,12 @@ exports.generateQuotationPdf = async (quotation) => {
                   <span style="font-size: 10px; color: #475569;">MOC: ${item.materialGrade} | Std: ${item.standardCode}</span>
                 </td>
                 <td style="text-align: right; font-weight: bold;">${item.qty}</td>
-                <td style="text-align: right;">₹${item.unitPrice.toLocaleString('en-IN')}</td>
-                <td style="text-align: right;">₹${item.ndt.toLocaleString('en-IN')}</td>
-                <td style="text-align: right;">₹${item.specTest.toLocaleString('en-IN')}</td>
-                <td style="text-align: right;">₹${item.spares.toLocaleString('en-IN')}</td>
-                <td style="text-align: right;">₹${item.pf.toLocaleString('en-IN')}</td>
-                <td style="text-align: right; font-weight: 800; color: #1e3a8a;">₹${Math.round(item.lineTotal).toLocaleString('en-IN')}</td>
+                <td style="text-align: right;">Rs. ${item.unitPrice.toLocaleString('en-IN')}</td>
+                <td style="text-align: right;">Rs. ${item.ndt.toLocaleString('en-IN')}</td>
+                <td style="text-align: right;">Rs. ${item.specTest.toLocaleString('en-IN')}</td>
+                <td style="text-align: right;">Rs. ${item.spares.toLocaleString('en-IN')}</td>
+                <td style="text-align: right;">Rs. ${item.pf.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; font-weight: 800; color: #1e3a8a;">Rs. ${Math.round(item.lineTotal).toLocaleString('en-IN')}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -457,15 +457,15 @@ exports.generateQuotationPdf = async (quotation) => {
           <div class="price-summary">
             <div class="summary-row">
               <span>Subtotal (Excl. GST)</span>
-              <strong>₹${Math.round(subtotalExclGST).toLocaleString('en-IN')}</strong>
+              <strong>Rs. ${Math.round(subtotalExclGST).toLocaleString('en-IN')}</strong>
             </div>
             <div class="summary-row">
               <span>CGST + SGST (18%)</span>
-              <span>₹${Math.round(gstAmount).toLocaleString('en-IN')}</span>
+              <span>Rs. ${Math.round(gstAmount).toLocaleString('en-IN')}</span>
             </div>
             <div class="summary-row total-row">
               <span>Grand Total (Incl. GST)</span>
-              <span>₹${Math.round(grandTotal).toLocaleString('en-IN')}</span>
+              <span>Rs. ${Math.round(grandTotal).toLocaleString('en-IN')}</span>
             </div>
           </div>
         </div>
