@@ -712,10 +712,6 @@ const EnquiryDetail = () => {
             onSaveSuccess={(updated) => setEnquiry(updated)} 
           />
 
-          {/* Tender Intelligence Panel */}
-          {enquiry.sourceType === 'Tender' && enquiry.tenderIntelligence && (
-            <TenderIntelligencePanel tenderIntelligence={enquiry.tenderIntelligence} />
-          )}
 
           {/* Customer Info Card (Editable) */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
