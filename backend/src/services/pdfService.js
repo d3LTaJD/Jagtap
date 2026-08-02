@@ -560,9 +560,19 @@ exports.generateQuotationPdf = async (quotation) => {
     </html>
   `;
 
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-zygote'
+  ];
+
   const browser = await puppeteer.launch({ 
     headless: "new",
-    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+    args: launchArgs,
+    ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {})
   });
   
   const page = await browser.newPage();
