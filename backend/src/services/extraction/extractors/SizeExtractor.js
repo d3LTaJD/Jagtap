@@ -1,6 +1,6 @@
 /**
  * SizeExtractor Plugin
- * Deterministically extracts Valve Size (DN / Inches) using regex patterns.
+ * Deterministically extracts Valve Size (DN / Inches / mm) using regex patterns.
  */
 
 const { createEngineeringField, VALIDATION_STATES } = require('../../../types/EngineeringField');
@@ -16,8 +16,10 @@ class SizeExtractor {
 
     // Regex patterns for valve sizes
     const patterns = [
-      /\b(?:size|dn|nps)\s*[:=]?\s*([0-9\/\. -]+(?:"|inch|inches|nb|mm)?)\b/i,
+      /\b(?:size|dn|nps)\s*[:=]?\s*([0-9\/\. -]+(?:"|inch|inches|nb|in|mm)?)\b/i,
+      /\b([0-9]+(?:\/[0-9]+)?(?:\.[0-9]+)?)\s*(?:"|inch|inches|in|nb|mm)\b/i,
       /\b([0-9]+\/[0-9]+"|[0-9\.]+")\s*(?:ball|globe|gate|check|valve)?\b/i,
+      /\b([0-9]+(?:\/[0-9]+)?(?:\.[0-9]+)?)\s*x\s*(?:ansi|class|#|api)\b/i,
       /\bdn\s*([0-9]+)\b/i,
       /\b([0-9]+)\s*mm\b/i
     ];

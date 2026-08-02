@@ -14,6 +14,8 @@ import FollowUpPanel from '../components/FollowUpPanel';
 import TaskPanel from '../components/TaskPanel';
 import AttachmentManager from '../components/AttachmentManager';
 import TenderIntelligencePanel from '../components/TenderIntelligencePanel';
+import EditableLineItemsTable from '../components/EditableLineItemsTable';
+import EmailThreadViewer from '../components/EmailThreadViewer';
 import { formatSizeToMm, formatTextToMm } from '../utils/valveFormatter';
 
 const renderVal = (val) => {
@@ -100,6 +102,17 @@ const EnquiryDetail = () => {
   const [emailsLoading, setEmailsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('emails');
 
+  // Editable Customer Info state
+  const [isEditingCustomer, setIsEditingCustomer] = useState(false);
+  const [customerForm, setCustomerForm] = useState({
+    companyName: '',
+    primaryContactName: '',
+    mobileNumber: '',
+    emailAddress: '',
+    city: '',
+    gstin: ''
+  });
+
   const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
   const userRoleCode = getRoleCode(currentUser.role);
   const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
@@ -147,7 +160,17 @@ const EnquiryDetail = () => {
   }, [id]);
 
   useEffect(() => {
-    if (enquiry?.dynamicFields) setDynamicValues(enquiry.dynamicFields);
+    if (enquiry) {
+      if (enquiry.dynamicFields) setDynamicValues(enquiry.dynamicFields);
+      setCustomerForm({
+        companyName: enquiry.senderCompany || enquiry.customer?.companyName || '',
+        primaryContactName: enquiry.customer?.primaryContactName || '',
+        mobileNumber: enquiry.customer?.mobileNumber || '',
+        emailAddress: enquiry.customer?.emailAddress || '',
+        city: enquiry.customer?.city || '',
+        gstin: enquiry.customer?.gstin || ''
+      });
+    }
   }, [enquiry]);
 
   useEffect(() => {
@@ -202,7 +225,8 @@ const EnquiryDetail = () => {
   const handleUpdate = async (field, value) => {
     setSaving(true);
     try {
-      const res = await api.patch(`/enquiries/${id}`, { [field]: value });
+      const cleanValue = (value === '' && ['assignedTo', 'customer', 'createdBy'].includes(field)) ? null : value;
+      const res = await api.patch(`/enquiries/${id}`, { [field]: cleanValue });
       setEnquiry(res.data.data.enquiry);
       showToast(`${field} updated`);
     } catch (err) {
@@ -329,6 +353,35 @@ const EnquiryDetail = () => {
       showToast('Custom fields saved');
     } catch (err) {
       showToast('Save failed', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveCustomerInfo = async (e) => {
+    if (e) e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        senderCompany: customerForm.companyName,
+        customerData: {
+          companyName: customerForm.companyName,
+          primaryContactName: customerForm.primaryContactName,
+          mobileNumber: customerForm.mobileNumber,
+          emailAddress: customerForm.emailAddress,
+          city: customerForm.city,
+          gstin: customerForm.gstin
+        }
+      };
+      const res = await api.patch(`/enquiries/${id}`, payload);
+      if (res.data?.data?.enquiry) {
+        setEnquiry(res.data.data.enquiry);
+        setIsEditingCustomer(false);
+        showToast('Customer information updated successfully!');
+      }
+    } catch (err) {
+      console.error('[EnquiryDetail] Save customer error:', err);
+      showToast(err.response?.data?.message || 'Failed to update customer info', 'error');
     } finally {
       setSaving(false);
     }
@@ -510,13 +563,13 @@ const EnquiryDetail = () => {
             {ability.can('create', 'Quotation') && (
             <button
               onClick={() => navigate(`/app/quotations?createForEnquiry=${enquiry._id}`)}
-              disabled={!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)}
+              disabled={['Lost', 'Abandoned'].includes(enquiry.status)}
               className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
-                ['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status)
-                  ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                !['Lost', 'Abandoned'].includes(enquiry.status)
+                  ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer shadow-sm shadow-emerald-500/20'
                   : 'bg-slate-300 cursor-not-allowed opacity-60'
               }`}
-              title={!['Confirmed', 'Technical Review', 'Ready for Offer', 'Verified'].includes(enquiry.status) ? "Quotation generation is blocked. Status must be 'Confirmed' or 'Technical Review'." : "Create Quotation"}
+              title={['Lost', 'Abandoned'].includes(enquiry.status) ? "Quotation generation is disabled for Lost or Abandoned enquiries." : "Create Quotation for this enquiry"}
             >
               <FileCheck className="w-3.5 h-3.5" /> Create Quotation
             </button>
@@ -558,7 +611,13 @@ const EnquiryDetail = () => {
               {[
                 ['Product Category',  enquiry.productCategory],
                 ['Description',       formatTextToMm(enquiry.productDescription)],
-                ['Quantity',          `${enquiry.quantity} ${enquiry.unit || 'NOS'}`],
+                ['Total Quantity',    (() => {
+                  const totalQty = enquiry.products && enquiry.products.length > 0
+                    ? enquiry.products.reduce((sum, p) => sum + (p.quantity || 0), 0)
+                    : enquiry.quantity;
+                  return `${totalQty} ${enquiry.unit || 'NOS'}`;
+                })()],
+                ['Line Items',        enquiry.products?.length ? `${enquiry.products.length} Items` : '1 Item'],
                 ['Standard/Code',     (() => {
                   const allStds = new Set();
                   if (enquiry.standardCode && enquiry.standardCode !== 'Not specified') {
@@ -592,7 +651,7 @@ const EnquiryDetail = () => {
                         if (v) types.add(v);
                       });
                     }
-                    return types.size > 0 ? [...types].join(', ') : 'Ball Valve';
+                    return types.size > 0 ? [...types].join(', ') : '—';
                   })()],
                   ['Valve Size',      (() => {
                     const sizes = new Set();
@@ -645,121 +704,141 @@ const EnquiryDetail = () => {
             </div>
           </div>
 
-          {/* Individual Products List */}
-          {enquiry.products && enquiry.products.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-              <h2 className="text-base font-black text-slate-900 mb-4 tracking-tight flex items-center gap-2">
-                <Tag className="w-5 h-5 text-brand-500" />
-                Line Items ({enquiry.products.length})
-              </h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-400 text-xs font-bold uppercase tracking-wider">
-                      <th className="pb-3 pr-4 w-10">#</th>
-                      <th className="pb-3 pr-4">Description</th>
-                      <th className="pb-3 pr-4">Valve Type</th>
-                      <th className="pb-3 pr-4">Size</th>
-                      <th className="pb-3 pr-4">Class</th>
-                      <th className="pb-3 pr-4">End Connection</th>
-                      <th className="pb-3 pr-4">MOC</th>
-                      <th className="pb-3 pr-4">Category</th>
-                      <th className="pb-3 pr-4">Qty</th>
-                      <th className="pb-3 pr-4">Standard</th>
-                      {enquiry.isUnverified && <th className="pb-3 text-right">Confidence</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {enquiry.products.map((prod, idx) => {
-                      const getDynVal = (key) => {
-                        const val = prod.dynamicFields?.[key];
-                        if (val === undefined || val === null || val === '') return null;
-                        if (typeof val === 'object' && val !== null) {
-                          if (val.normalizedValue !== undefined && val.normalizedValue !== null && val.normalizedValue !== '') return val.normalizedValue;
-                          if (val.value !== undefined && val.value !== null && val.value !== '') return val.value;
-                          return null;
-                        }
-                        return val || null;
-                      };
-
-                      const valveType = getDynVal('valve_type') || getDynVal('valve_ball_type') || 'Ball Valve';
-                      const valveSize = getDynVal('valve_size') ? formatSizeToMm(getDynVal('valve_size')) : 'N/A';
-                      const valveClass = getDynVal('valve_class') || 'N/A';
-                      const endConn = getDynVal('valve_end_connection') || getDynVal('end_connection') || 'N/A';
-                      const moc = getDynVal('valve_moc_body') || getDynVal('body_material') || getDynVal('material') || getDynVal('moc') || 'N/A';
-
-                      return (
-                        <tr key={prod._id || idx} className="text-slate-700 hover:bg-slate-50/50 transition-colors">
-                          <td className="py-3.5 font-bold pr-4 text-slate-400">{idx + 1}</td>
-                          <td className="py-3.5 pr-4">
-                            <div className="font-semibold text-slate-900">{formatTextToMm(prod.description) || 'N/A'}</div>
-                          </td>
-                          <td className="py-3.5 pr-4 font-medium text-slate-700">{valveType}</td>
-                          <td className="py-3.5 pr-4 font-bold text-slate-800">{valveSize}</td>
-                          <td className="py-3.5 pr-4 font-medium text-slate-700">{valveClass}</td>
-                          <td className="py-3.5 pr-4 font-medium text-slate-700">{endConn}</td>
-                          <td className="py-3.5 pr-4 font-medium text-slate-700">{moc}</td>
-                          <td className="py-3.5 pr-4">
-                            <span className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">
-                              {prod.category || enquiry.productCategory || 'N/A'}
-                            </span>
-                          </td>
-                          <td className="py-3.5 font-black pr-4 text-brand-600">{prod.quantity} {prod.unit || 'NOS'}</td>
-                          <td className="py-3.5 pr-4">
-                            {prod.standardCode && prod.standardCode !== 'Not specified' ? (
-                              <div className="flex flex-wrap gap-1">
-                                {prod.standardCode.split(',').map(s => s.trim()).filter(Boolean).map(std => (
-                                  <span key={std} className="inline-flex items-center rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-bold text-indigo-700">
-                                    {std}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-slate-400 text-xs font-medium">N/A</span>
-                            )}
-                          </td>
-                          {enquiry.isUnverified && (
-                            <td className="py-3.5 text-right font-bold pr-2">
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                (prod.confidence || 100) >= 80 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
-                                (prod.confidence || 100) >= 50 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
-                              }`}>
-                                {prod.confidence || 100}%
-                              </span>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {/* Interactive Line Items Spreadsheet Table */}
+          <EditableLineItemsTable 
+            enquiryId={id} 
+            initialProducts={enquiry.products} 
+            productCategory={enquiry.productCategory} 
+            onSaveSuccess={(updated) => setEnquiry(updated)} 
+          />
 
           {/* Tender Intelligence Panel */}
           {enquiry.sourceType === 'Tender' && enquiry.tenderIntelligence && (
             <TenderIntelligencePanel tenderIntelligence={enquiry.tenderIntelligence} />
           )}
 
-          {/* Customer Info */}
+          {/* Customer Info Card (Editable) */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-base font-bold mb-5 tracking-tight">Customer Information</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 gap-x-6 text-sm">
-              {[
-                ['Company',  enquiry.senderCompany || enquiry.customer?.companyName],
-                ['Contact',  enquiry.customer?.primaryContactName],
-                ['Mobile',   enquiry.customer?.mobileNumber],
-                ['Email',    enquiry.customer?.emailAddress],
-                ['City',     enquiry.customer?.city],
-                ['GSTIN',    enquiry.customer?.gstin],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">{label}</p>
-                  <p className="font-semibold text-slate-800">{value || '—'}</p>
-                </div>
-              ))}
+            <div className="flex items-center justify-between gap-4 mb-5 pb-3 border-b border-slate-100">
+              <h2 className="text-base font-bold tracking-tight text-slate-900">Customer Information</h2>
+              {canEdit && (
+                !isEditingCustomer ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingCustomer(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Edit Customer Info
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingCustomer(false)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveCustomerInfo}
+                      disabled={saving}
+                      className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold transition-all shadow-sm shadow-brand-500/20"
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      Save
+                    </button>
+                  </div>
+                )
+              )}
             </div>
+
+            {!isEditingCustomer ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 gap-x-6 text-sm">
+                {[
+                  ['Company',  enquiry.senderCompany || enquiry.customer?.companyName],
+                  ['Contact',  enquiry.customer?.primaryContactName],
+                  ['Mobile',   enquiry.customer?.mobileNumber],
+                  ['Email',    enquiry.customer?.emailAddress],
+                  ['City',     enquiry.customer?.city],
+                  ['GSTIN',    enquiry.customer?.gstin],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">{label}</p>
+                    <p className="font-semibold text-slate-800">{value || '—'}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <form onSubmit={saveCustomerInfo} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider mb-1">Company Name</label>
+                  <input
+                    type="text"
+                    value={customerForm.companyName}
+                    onChange={(e) => setCustomerForm(prev => ({ ...prev, companyName: e.target.value }))}
+                    placeholder="Enter company name..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider mb-1">Contact Person</label>
+                  <input
+                    type="text"
+                    value={customerForm.primaryContactName}
+                    onChange={(e) => setCustomerForm(prev => ({ ...prev, primaryContactName: e.target.value }))}
+                    placeholder="Enter contact person name..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider mb-1">Mobile Number</label>
+                  <input
+                    type="text"
+                    value={customerForm.mobileNumber}
+                    onChange={(e) => setCustomerForm(prev => ({ ...prev, mobileNumber: e.target.value }))}
+                    placeholder="Enter mobile number..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={customerForm.emailAddress}
+                    onChange={(e) => setCustomerForm(prev => ({ ...prev, emailAddress: e.target.value }))}
+                    placeholder="Enter email address..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider mb-1">City</label>
+                  <input
+                    type="text"
+                    value={customerForm.city}
+                    onChange={(e) => setCustomerForm(prev => ({ ...prev, city: e.target.value }))}
+                    placeholder="Enter city..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider mb-1">GSTIN</label>
+                  <input
+                    type="text"
+                    value={customerForm.gstin}
+                    onChange={(e) => setCustomerForm(prev => ({ ...prev, gstin: e.target.value }))}
+                    placeholder="Enter GSTIN..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all uppercase"
+                  />
+                </div>
+              </form>
+            )}
           </div>
 
 
@@ -806,46 +885,12 @@ const EnquiryDetail = () => {
             <div className="p-6">
               {/* Email Thread Tab */}
               {activeTab === 'emails' && (
-                <div className="space-y-4">
-                  {emailsLoading && <Loader2 className="w-6 h-6 animate-spin text-brand-600 mx-auto" />}
-                  {!emailsLoading && threadEmails.length === 0 && (
-                    <p className="text-sm text-slate-400 text-center py-6">No raw email messages archived for this thread.</p>
+                <div>
+                  {emailsLoading ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-brand-600 mx-auto py-6" />
+                  ) : (
+                    <EmailThreadViewer emails={threadEmails} primaryEmail={enquiry.rawEmail} />
                   )}
-                  {!emailsLoading && threadEmails.map((email, idx) => (
-                    <div key={email._id || idx} className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
-                      <div className="px-5 py-4 bg-slate-100/50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                          <h4 className="text-sm font-bold text-slate-800">{email.subject}</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            From: <span className="font-semibold">{email.sender}</span>
-                          </p>
-                        </div>
-                        <span className="text-xs font-bold text-slate-400">
-                          {new Date(email.receivedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
-                        </span>
-                      </div>
-                      <div className="p-5 text-sm text-slate-700 whitespace-pre-wrap font-sans max-h-96 overflow-y-auto bg-white">
-                        {email.bodyText || '(No plain text body content)'}
-                      </div>
-                      {email.attachments && email.attachments.length > 0 && (
-                        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-2">
-                          <span className="text-xs font-black text-slate-400 uppercase tracking-wider shrink-0 mt-1.5">Email Attachments:</span>
-                          {email.attachments.map(att => (
-                            <a
-                              key={att._id}
-                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/files/download-local/${att.storagePath}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 transition-all"
-                            >
-                              <Download className="w-3 h-3 text-slate-400" />
-                              {att.originalFileName} ({att.attachmentCategory})
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
                 </div>
               )}
 

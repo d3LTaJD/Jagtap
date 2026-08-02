@@ -59,6 +59,9 @@ const temperatureExtractor = require('./extractors/TemperatureExtractor');
 const quantityExtractor = require('./extractors/QuantityExtractor');
 const tagExtractor = require('./extractors/TagExtractor');
 const drawingExtractor = require('./extractors/DrawingExtractor');
+const endConnectionExtractor = require('./extractors/EndConnectionExtractor');
+const boreExtractor = require('./extractors/BoreExtractor');
+const operationExtractor = require('./extractors/OperationExtractor');
 
 registryInstance.register(sizeExtractor);
 registryInstance.register(classExtractor);
@@ -70,5 +73,8 @@ registryInstance.register(temperatureExtractor);
 registryInstance.register(quantityExtractor);
 registryInstance.register(tagExtractor);
 registryInstance.register(drawingExtractor);
+registryInstance.register(endConnectionExtractor);
+registryInstance.register(boreExtractor);
+registryInstance.register(operationExtractor);
 
 module.exports = registryInstance;

@@ -50,7 +50,13 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
   }, [formContext]);
 
   if (loading) return null;
-  if (!fields.length) return null;
+  if (!fields.length) {
+    return (
+      <div className="p-8 text-center text-slate-400 font-semibold text-xs border border-dashed border-slate-200 rounded-2xl">
+        No technical specifications configured for {formContext}.
+      </div>
+    );
+  }
 
   const getFieldValue = (fieldName) => {
     const rawVal = values[fieldName];
@@ -64,7 +70,9 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
   const isVisible = (field) => {
     // Category boundary check
     if (field.productCategory && values.productCategory) {
-      if (field.productCategory !== 'Multiple' && field.productCategory !== 'Custom' && field.productCategory !== values.productCategory) {
+      const fCat = field.productCategory;
+      const vCat = values.productCategory;
+      if (vCat !== 'Custom' && vCat !== 'Multiple' && fCat !== 'Multiple' && fCat !== 'Custom' && fCat !== vCat) {
         return false;
       }
     }
@@ -75,8 +83,20 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
     }
     // Conditional logic
     if (field.conditionalLogic?.dependsOnField) {
-      const controllingValue = String(getFieldValue(field.conditionalLogic.dependsOnField) || '');
-      return controllingValue === field.conditionalLogic.requiredValue;
+      const depField = field.conditionalLogic.dependsOnField;
+      const reqVal = field.conditionalLogic.requiredValue;
+      const controllingValue = String(getFieldValue(depField) || '');
+
+      if (depField === 'productCategory') {
+        const lowerVal = controllingValue.toLowerCase();
+        if (['custom', 'multiple', 'general', 'tender', ''].includes(lowerVal)) {
+          // Flexible categories match any category requirement
+        } else if (controllingValue !== reqVal && reqVal !== 'Custom' && reqVal !== 'Multiple') {
+          return false;
+        }
+      } else if (controllingValue !== reqVal) {
+        return false;
+      }
     }
     return true;
   };

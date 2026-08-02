@@ -1,0 +1,25 @@
+[
+  {
+    "id": "RFQ_FWD_001",
+    "description": "Forwarded email with Gate Valve (the original bug case)",
+    "input": "---------- Forwarded message ----------\nFrom: customer@example.com\nSubject: RFQ for Valves\n\nDear Sir,\nPlease quote for the following:\n8\" Gate Valve Class 150 Qty 20\nDelivery: 4 weeks\nRegards",
+    "expected": {
+      "valve_type": "Gate Valve",
+      "valve_size": "200 mm",
+      "valve_class": "150#",
+      "quantity": "20"
+    }
+  },
+  {
+    "id": "RFQ_FWD_002",
+    "description": "Forwarded email with minimal description",
+    "input": "FW: Please quote Ball Valve 2 inch CL600 A105 BW",
+    "expected": {
+      "valve_type": "Ball Valve",
+      "valve_size": "50 mm",
+      "valve_class": "600#",
+      "material": "ASTM A105",
+      "end_connection": "Butt Weld"
+    }
+  }
+]

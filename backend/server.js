@@ -50,6 +50,8 @@ connectDB().then(async () => {
   }
 
   initCronJobs();
+  const LearningEngine = require('./src/services/extraction/LearningEngine');
+  await LearningEngine.init();
   emailBotService.start();
   startQueueWorker();
   app.listen(PORT, () => {

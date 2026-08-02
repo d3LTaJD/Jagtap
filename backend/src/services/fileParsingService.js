@@ -60,7 +60,7 @@ function cleanOcrText(text) {
     mergedLines.push(currentLine);
   }
 
-  // 5. Deduplicate duplicate adjacent/duplicate lines (Part 16)
+  // 5. Deduplicate consecutive duplicate adjacent lines
   const uniqueLines = [];
   for (const line of mergedLines) {
     if (line === '') {
@@ -68,7 +68,7 @@ function cleanOcrText(text) {
         uniqueLines.push('');
       }
     } else {
-      if (!uniqueLines.includes(line)) {
+      if (uniqueLines.length === 0 || uniqueLines[uniqueLines.length - 1] !== line) {
         uniqueLines.push(line);
       }
     }

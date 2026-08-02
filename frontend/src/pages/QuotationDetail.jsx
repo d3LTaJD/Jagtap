@@ -900,7 +900,9 @@ const QuotationDetail = () => {
               <DynamicFormRenderer
                 formContext="Quotation"
                 values={{
-                  productCategory: items[activeItemIndex]?.productCategory || quotation?.enquiry?.productCategory || 'Valves',
+                  productCategory: (items[activeItemIndex]?.productCategory && items[activeItemIndex]?.productCategory !== 'Custom')
+                    ? items[activeItemIndex].productCategory
+                    : (quotation?.enquiry?.productCategory || 'Valves'),
                   ...(items[activeItemIndex]?.dynamicFields || {})
                 }}
                 onChange={(fieldName, value) => {

@@ -333,8 +333,28 @@ ${trimmedText || '(No text content extracted)'}${truncNote}
 """`;
   }).join('\n\n');
 
+  const hasStructuredBOQ = Boolean(metadata.hasStructuredBOQ);
+  const boqInstruction = hasStructuredBOQ
+    ? `\nSTRUCTURED BOQ NOTICE:
+Product line items have ALREADY been extracted deterministically from a structured file (CSV/Excel). Do NOT extract line_items. Return an empty array "line_items": []. Focus ONLY on extracting customer contact details (companyName, primaryContactName, mobileNumber) and project metadata (clientName, pmcConsultant).`
+    : `\nExtract customer contact details, and split the request into line items.
+
+IMPORTANT BOQ RULES:
+- Every table row or numbered item represents one independent commercial line item.
+- Return exactly one JSON object in "line_items" for every BOQ row.
+- If the document contains N rows (e.g., 10 rows), return exactly N line_items.
+- Do not merge identical products.
+- Do not combine different sizes or pressure classes.
+- Do not calculate totals or summarize products.
+- Do not remove duplicate-looking rows.
+- Duplicate descriptions with different quantities are separate items.
+- Preserve original description text as productDescription / description.
+- Search every attachment before concluding a product does not exist.
+- Ignore table of contents, legal clauses, and commercial terms unless they contain product information.
+- IMPORTANT: Carefully scan ALL attachment content (PDFs, tenders, images) for Client/Owner name and PMC/EPCM/Consultant name.`;
+
   // Part 5: Improved Prompt (Return ONLY JSON, no markdown/code blocks, null if not found, use attachment context only)
-  const prompt = `You are a requirements gathering bot.
+  const prompt = `You are a requirements gathering bot for an industrial ERP procurement extraction engine.
 Read the customer email request and its attachments:
 
 Sender Info (From): ${fromAddress}
@@ -346,41 +366,30 @@ ${emailText}
 
 Parsed Email Attachments:
 ${attachmentsListStr || 'None'}
-
-Extract customer contact details, and split the request into one or more product enquiries.
-CRITICAL FOCUS:
-- Treat every Schedule, SOR row, BOQ row, material line item, equipment tag, and specification sheet as an independent product.
-- Never merge products. If 18 products exist, return exactly 18 JSON objects.
-- Search every attachment before concluding a product does not exist.
-- Ignore table of contents, legal clauses, and commercial terms unless they contain product information.
-- Do NOT attempt to extract custom technical specs (e.g. design temperature, MOC, pressure class, head type, shell thickness, capacity) in this pass. Focus solely on building the general catalog list of products.
-- IMPORTANT: Carefully scan ALL attachment content (PDFs, tenders, images) for Client/Owner name and PMC/EPCM/Consultant name. These may appear in:
-  * Document headers, letterheads, or title pages
-  * Fields like "Owner:", "Client:", "End User:", "Project Owner:", "Employer:"
-  * Fields like "PMC:", "EPCM:", "Consultant:", "Project Management Consultant:", "Engineering Consultant:", "EPC Contractor:"
-  * They can be indirectly mentioned — e.g. a company name appearing alongside project details
+${boqInstruction}
 
 Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks, explanations, comments, or headers.
 
 Schema:
 {
-  "isEnquiry": true/false (true if this is a genuine inquiry for Petro Valve's industrial valves, vessels, piping, or tanks),
+  "isEnquiry": true/false,
   "companyName": "...", (the company/person who SENT the email, or "Individual Customer" if unknown),
   "primaryContactName": "...", (or "Email Sender" if unknown),
   "mobileNumber": "...", (or "0000000000" if unknown),
   "clientName": "...", (the END CLIENT / OWNER of the project — NOT the sender. Look in attachments. null if not found),
   "pmcConsultant": "...", (PMC / EPCM / Engineering Consultant for the project. Look in attachments. null if not found),
-  "enquiries": [
+  "line_items": [
     {
+      "description": "...", (full description of item, e.g. "BALL API6D HOV F/F A/G TRU BOL 2IN 300#"),
       "productCategory": "Valves" / "Pressure Vessel" / "Heat Exchanger" / "Storage Tank" / "Structural" / "Custom" / "Multiple",
-      "productDescription": "...", (max 200 chars summary of product, e.g. "CS Ball Valve 100mm"),
+      "productDescription": "...", (max 200 chars description),
       "quantity": 1,
-      "unit": "NOS" / "SET" / "MT" / "KG" / "M" / "M2" / "Job",
+      "unit": "NOS" / "SET" / "MT" / "KG" / "M" / "M2" / "Job" / "LS" / "Mandays" / "LOT",
       "standardCode": "ASME" / "IS" / "BS" / "EN" / "API" / "IBR" / "Custom" / "Not specified",
       "specialRequirements": "...", (max 400 chars, e.g. NACE MR0175, TPI, paint spec),
       "priority": "Low" / "Medium" / "High" / "Urgent",
       "confidence": 0-100,
-      "linkedAttachmentNames": ["..."] (filenames of attachments containing specs for this item)
+      "linkedAttachmentNames": ["..."]
     }
   ]
 }
@@ -388,23 +397,45 @@ Schema:
 If information cannot be extracted, return null for that field. Never invent values. Use attachment content only.`;
 
   const validateFn = (data) => {
-    return data && typeof data === 'object' && data.isEnquiry !== undefined;
+    const items = data && (data.line_items || data.enquiries);
+    return data && typeof data === 'object' && data.isEnquiry !== undefined && Array.isArray(items);
   };
 
-  const { result, attempts } = await callAIServiceWithFallback({
-    prompt,
-    validateFn,
-    logTag: 'AI Multi-Extraction',
-    enquiryId: metadata.enquiryId || 'NEW_ENQUIRY'
-  });
+  let retryPrompt = prompt;
+  let finalResult = null;
+  let finalAttempts = [];
 
-  const normalized = cleanAndNormalizeMultiResult(result, fromAddress);
+  // Up to 3 retries if BOQ row validation fails (skipped if hasStructuredBOQ is true)
+  const maxRetries = hasStructuredBOQ ? 1 : 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const { result, attempts } = await callAIServiceWithFallback({
+      prompt: retryPrompt,
+      validateFn,
+      logTag: `AI Multi-Extraction (Pass ${attempt})`,
+      enquiryId: metadata.enquiryId || 'NEW_ENQUIRY'
+    });
+
+    finalResult = result;
+    finalAttempts.push(...attempts);
+
+    const itemsCount = (result?.line_items?.length || result?.enquiries?.length || 0);
+    const expectedRowCount = hasStructuredBOQ ? 0 : (metadata.expectedRowCount || 0);
+
+    if (!hasStructuredBOQ && expectedRowCount > 0 && itemsCount < expectedRowCount && attempt < 3) {
+      console.warn(`[BOQ Row Validation] Mismatch detected: Extracted ${itemsCount} items but expected ${expectedRowCount} BOQ rows. Retrying attempt ${attempt + 1}...`);
+      retryPrompt = prompt + `\n\nCRITICAL RETRY INSTRUCTION:\nPrevious extraction merged BOQ rows (${itemsCount}/${expectedRowCount}). Extract EVERY row separately. Do NOT summarize or combine sizes. Return exactly ${expectedRowCount} line_items.`;
+    } else {
+      break;
+    }
+  }
+
+  const normalized = cleanAndNormalizeMultiResult(finalResult, fromAddress);
   normalized.extractionMetadata = {
-    provider: attempts[attempts.length - 1]?.provider,
-    model: attempts[attempts.length - 1]?.model,
-    attemptsCount: attempts.length,
-    processingTime: attempts.reduce((sum, a) => sum + a.processingTime, 0),
-    attempts
+    provider: finalAttempts[finalAttempts.length - 1]?.provider,
+    model: finalAttempts[finalAttempts.length - 1]?.model,
+    attemptsCount: finalAttempts.length,
+    processingTime: finalAttempts.reduce((sum, a) => sum + a.processingTime, 0),
+    attempts: finalAttempts
   };
 
   return normalized;
@@ -414,12 +445,14 @@ If information cannot be extracted, return null for that field. Never invent val
  * Normalizes values of multi-enquiry AI output to match schemas perfectly.
  */
 function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
-  if (!data || data.isEnquiry === false || !data.enquiries || !Array.isArray(data.enquiries)) {
+  const items = data ? (data.line_items || data.enquiries) : null;
+  if (!data || data.isEnquiry === false || !items || !Array.isArray(items)) {
     return {
       isEnquiry: false,
       companyName: 'Individual Customer',
       primaryContactName: 'Email Sender',
       mobileNumber: '0000000000',
+      line_items: [],
       enquiries: []
     };
   }
@@ -429,27 +462,24 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
     mobile = '0000000000';
   }
 
-  const cleanedEnquiries = data.enquiries.map(item => {
+  const cleanedEnquiries = items.map(item => {
     let category = item.productCategory;
-    if (!PRODUCT_CATEGORIES.includes(category)) {
+    if (!category || !PRODUCT_CATEGORIES.includes(category)) {
       category = category?.toLowerCase().includes('valve') ? 'Valves' : 'Custom';
     }
 
     let std = item.standardCode;
     if (std && typeof std === 'string') {
-      const parts = std.split(/[\s,\/&]+/)
-        .map(p => p.trim())
-        .filter(p => {
+      const parts = std.split(/[,;\/]+/).map(s => s.trim()).filter(Boolean);
+      const matchedParts = parts
+        .map(p => {
           const matched = STANDARD_CODES.find(sc => sc.toLowerCase() === p.toLowerCase());
-          return matched && matched !== 'Not specified' && matched !== 'Custom';
-        })
-        .map(p => STANDARD_CODES.find(sc => sc.toLowerCase() === p.toLowerCase()));
-      if (parts.length > 0) {
-        std = [...new Set(parts)].join(', ');
-      } else if (std.toLowerCase().includes('custom')) {
-        std = 'Custom';
+          return matched && matched !== 'Not specified' && matched !== 'Custom' ? matched : p;
+        });
+      if (matchedParts.length > 0) {
+        std = [...new Set(matchedParts)].join(', ');
       } else {
-        std = 'Not specified';
+        std = item.standardCode || 'Not specified';
       }
     } else {
       std = 'Not specified';
@@ -466,11 +496,13 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
     let conf = parseInt(item.confidence, 10);
     if (isNaN(conf) || conf < 0 || conf > 100) conf = 100;
 
+    const unitStr = item.unit ? String(item.unit).trim() : 'NOS';
+
     return {
       productCategory: category,
       productDescription: String(item.productDescription || '').trim().substring(0, 200) || 'Valve Enquiry via Email',
       quantity: qty,
-      unit: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'].includes(item.unit) ? item.unit : 'NOS',
+      unit: unitStr || 'NOS',
       standardCode: std,
       specialRequirements: String(item.specialRequirements || '').trim().substring(0, 400),
       priority: prio,
@@ -487,6 +519,7 @@ function cleanAndNormalizeMultiResult(data, defaultFromEmail) {
     emailAddress: extractEmailFromString(defaultFromEmail),
     clientName: data.clientName ? String(data.clientName).trim() : null,
     pmcConsultant: data.pmcConsultant ? String(data.pmcConsultant).trim() : null,
+    line_items: cleanedEnquiries,
     enquiries: cleanedEnquiries
   };
 }
@@ -683,8 +716,8 @@ Ignore any specifications that belong to other product items mentioned in the te
 `;
   }
 
-  // Part 5: strict output prompt (Return ONLY JSON, no code blocks, null if not found)
-  const prompt = `You are a technical specification extraction bot.
+  // Zero Hallucination AI Assistant Prompt: Extraction only, no inference, no guessing.
+  const prompt = `You are an extraction assistant. NOT an engineer. NOT a guesser.
 Read the text context below:
 """
 ${filteredContextText}
@@ -694,16 +727,21 @@ ${itemContextFocus}
 Extract values for these custom fields:
 ${fieldListStr}
 
-CRITICAL FOCUS:
-- Extract specifications and values ONLY for the current product: "${productDescription}".
-- Ignore specifications of any unrelated products.
-- Never invent or hallucinate values. If a field is not found or not mentioned in the context, you MUST return null for value, 0 for confidence, and null for sourcePage.
-- For each extracted field, include value, confidence, and source page number.
+CRITICAL RULES:
+- Extract ONLY values explicitly written in the provided text for "${productDescription}".
+- Do NOT infer specifications from product descriptions or overall context.
+- Do NOT guess missing information. If a field is not explicitly mentioned in the text, you MUST return null for value, 0 for confidence, and null for sourcePage.
+- Never invent or create engineering specifications.
+- Return exact strings as found in text. Do not convert units.
+- UNIT PRESERVATION: Never auto-correct or normalize engineering units. Valid units include:
+  NOS, SET, MT, KG, M, M2, Mandays, LS (Lump Sum), LOT, Job, EA.
+  If the document says "Mandays", return "Mandays" (NOT "Mondays" or "Job").
+  If the document says "LS", return "LS" (NOT "Job" or "Lump Sum").
 - If the field is "valve_type" (Valve Type):
-  * Extract the exact type of valve requested in the item description or context (e.g. "Ball Valve", "Gate Valve", "Globe Valve", "Check Valve", "Butterfly Valve", "Plug Valve", "Control Valve", "Needle Valve", "Safety Valve").
-  * Do not extract end connection terms like "Flange Ended Valve" or "Butt Welded Valve" as the valve type — "Flange Ended" and "Butt Welded" belong to valve_end_connection.
+  * Extract ONLY if explicitly mentioned (e.g. "Ball Valve", "Gate Valve", "Globe Valve", "Check Valve", "Butterfly Valve").
+  * Do NOT confuse end connection terms (like "Flanged" or "Butt Welded") with valve_type.
 
-Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks (no \`\`\`json). Do not add explanations or text before/after the JSON.
+Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown blocks. Do not add text before or after.
 
 Schema:
 {

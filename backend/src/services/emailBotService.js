@@ -551,8 +551,7 @@ async function processEmailMessage(parsed) {
  */
 async function checkEmails() {
   if (isProcessing) {
-    console.log('[Email Bot] Previous execution is still processing. Skipping...');
-    return;
+    return; // Previous IMAP check still finishing
   }
   isProcessing = true;
 
@@ -634,7 +633,7 @@ exports.start = () => {
 
   console.log('[Email Bot] Starting background AI email processing service (1-minute polling interval)...');
   checkEmails();
-  intervalId = setInterval(checkEmails, 10000);
+  intervalId = setInterval(checkEmails, 60000);
 };
 
 /**

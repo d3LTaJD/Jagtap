@@ -1,0 +1,37 @@
+[
+  {
+    "id": "RFQ_MIXED_001",
+    "description": "Mixed inch and DN notation for same size",
+    "input": "We need a 4\" Ball Valve (DN100) Class 300 Material WCB",
+    "expected": {
+      "valve_type": "Ball Valve",
+      "valve_size": "100 mm",
+      "valve_class": "300#",
+      "material": "ASTM A216 WCB"
+    }
+  },
+  {
+    "id": "RFQ_MIXED_002",
+    "description": "CL notation and LBS notation in same text",
+    "input": "Gate Valve 6 inch 150LBS WCB Flanged ends",
+    "expected": {
+      "valve_type": "Gate Valve",
+      "valve_size": "150 mm",
+      "valve_class": "150#",
+      "material": "ASTM A216 WCB",
+      "end_connection": "Flanged"
+    }
+  },
+  {
+    "id": "RFQ_MIXED_003",
+    "description": "Concatenated and abbreviated text (BALLVALVE, BW)",
+    "input": "BALLVALVE 4IN CL300 WCB BW FULL BORE API6D",
+    "expected": {
+      "valve_type": "Ball Valve",
+      "valve_size": "100 mm",
+      "valve_class": "300#",
+      "material": "ASTM A216 WCB",
+      "end_connection": "Butt Weld"
+    }
+  }
+]

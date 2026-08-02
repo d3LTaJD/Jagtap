@@ -239,6 +239,14 @@ exports.getEnquiry = async (req, res, next) => {
 exports.updateEnquiry = async (req, res, next) => {
   try {
     req.body.lastModifiedBy = req.user._id;
+
+    // Sanitize empty string ObjectIds to null to prevent BSONError
+    ['assignedTo', 'customer', 'createdBy', 'lastModifiedBy'].forEach(f => {
+      if (req.body[f] === '' || req.body[f] === 'null' || req.body[f] === 'undefined') {
+        req.body[f] = null;
+      }
+    });
+
     const originalEnquiry = await Enquiry.findById(req.params.id);
     if (!originalEnquiry) {
       return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
@@ -256,10 +264,59 @@ exports.updateEnquiry = async (req, res, next) => {
 
     // Combine dynamicFields with existing to prevent wiping out unprovided keys
     if (req.body.dynamicFields) {
+      // Learning Engine Hook: Record user corrections for dictionary learning
+      try {
+        const LearningEngine = require('../services/extraction/LearningEngine');
+        const oldFields = originalEnquiry.dynamicFields || {};
+        const newFields = req.body.dynamicFields;
+
+        for (const [key, newVal] of Object.entries(newFields)) {
+          const oldVal = oldFields[key];
+          if (newVal && oldVal && String(newVal).trim() !== String(oldVal).trim()) {
+            let fieldCategory = 'valve';
+            const lKey = key.toLowerCase();
+            if (lKey.includes('size')) fieldCategory = 'size';
+            else if (lKey.includes('class')) fieldCategory = 'class';
+            else if (lKey.includes('material') || lKey.includes('moc')) fieldCategory = 'material';
+            else if (lKey.includes('end') || lKey.includes('connection')) fieldCategory = 'connection';
+
+            LearningEngine.recordCorrection({
+              enquiryId: originalEnquiry._id,
+              productIndex: 0,
+              fieldCategory,
+              field: key,
+              wrongValue: String(oldVal).trim(),
+              correctValue: String(newVal).trim(),
+              correctedBy: req.user._id,
+              documentContext: originalEnquiry.productDescription || ''
+            }).catch(err => console.error('[LearningEngine] Correction record error:', err.message));
+          }
+        }
+      } catch (lErr) {
+        console.error('[LearningEngine] Error in updateEnquiry hook:', lErr.message);
+      }
+
       req.body.dynamicFields = { ...originalEnquiry.dynamicFields, ...req.body.dynamicFields };
     }
 
-    let enquiry = await Enquiry.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    // Update attached Customer document if customerData is provided
+    if (req.body.customerData) {
+      const Customer = require('../models/Customer');
+      let customerId = originalEnquiry.customer;
+      if (customerId) {
+        await Customer.findByIdAndUpdate(customerId, req.body.customerData, { runValidators: true });
+      } else {
+        const newCust = await Customer.create(req.body.customerData);
+        req.body.customer = newCust._id;
+      }
+    }
+
+    let enquiry = await Enquiry.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
+      .populate('customer')
+      .populate('assignedTo', 'fullName')
+      .populate('createdBy', 'fullName')
+      .populate('files')
+      .populate('attachmentsList');
 
     // Auto-promote status to 'Confirmed' if all required fields are complete
     const completion = await checkEnquiryCompletion(enquiry);
@@ -729,22 +786,61 @@ exports.importTender = async (req, res, next) => {
           }
         });
       } else if (parsedText.length > 0 && products.length === 0) {
-        // No BOQ files uploaded, just spec PDFs — extract with generic Piping fields
-        const aiService = require('../services/aiService');
+        // No BOQ Excel uploaded, just spec PDFs — extract actual line items using ExtractionPipeline & layout parser
+        const extractionPipeline = require('../services/extraction/ExtractionPipeline');
+        const documentLayoutEngine = require('../services/extraction/DocumentLayoutEngine');
+        const layout = documentLayoutEngine.parseLayout(parsedText, 'SPEC_IMPORT');
+
+        // Extract line blocks from pages
+        const rawLines = parsedText
+          .split(/\r?\n/)
+          .map(l => l.trim())
+          .filter(l => l.length > 5 && /\b(valve|gate|ball|globe|check|butterfly|plug|pipe|flange)\b/i.test(l));
+
         const fields = await FieldDefinition.find({
           productCategory: 'Valves',
           formContext: 'Enquiry',
           isDeleted: false,
           isActive: true
         });
-        if (fields.length > 0) {
-          const specifications = await aiService.extractDynamicFields(parsedText, fields, 'Valves Tender', 'NEW_TENDER');
+
+        if (rawLines.length > 0) {
+          for (let i = 0; i < rawLines.length; i++) {
+            const lineText = rawLines[i];
+            const gatedResult = await extractionPipeline.processProductGatedPipeline({
+              textContext: lineText,
+              fieldDefinitions: fields,
+              productDescription: lineText,
+              enquiryId: null,
+              productIndex: i
+            });
+            products.push({
+              description: lineText,
+              quantity: 1,
+              unit: 'NOS',
+              category: 'Valves',
+              dynamicFields: gatedResult.validatedDynamicFields,
+              fieldConfidences: gatedResult.fieldConfidences,
+              extractionStatus: gatedResult.extractionStatus
+            });
+          }
+        } else {
+          // Single product block fallback
+          const gatedResult = await extractionPipeline.processProductGatedPipeline({
+            textContext: parsedText,
+            fieldDefinitions: fields,
+            productDescription: parsedText.substring(0, 100),
+            enquiryId: null,
+            productIndex: 0
+          });
           products = [{
-            description: 'Tender items (from specification documents)',
+            description: parsedText.substring(0, 200).trim(),
             quantity: 1,
             unit: 'NOS',
             category: 'Valves',
-            dynamicFields: specifications
+            dynamicFields: gatedResult.validatedDynamicFields,
+            fieldConfidences: gatedResult.fieldConfidences,
+            extractionStatus: gatedResult.extractionStatus
           }];
         }
       }
@@ -777,6 +873,86 @@ exports.importTender = async (req, res, next) => {
         },
         textSnippet: parsedText ? parsedText.substring(0, 500) : ''
       }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Granular Endpoint: Updates only the line items (products) array of an enquiry.
+ * Triggered by the inline editable spreadsheet table in EnquiryDetail UI.
+ */
+exports.updateEnquiryProducts = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { products } = req.body;
+
+    if (!products || !Array.isArray(products)) {
+      return res.status(400).json({ status: 'error', message: 'products array is required' });
+    }
+
+    const enquiry = await Enquiry.findById(id);
+    if (!enquiry) {
+      return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+    }
+
+    // Learning Engine Hook: Record user manual corrections for dynamic dictionary training
+    try {
+      const LearningEngine = require('../services/extraction/LearningEngine');
+      const oldProducts = enquiry.products || [];
+
+      products.forEach((newProd, idx) => {
+        const oldProd = oldProducts[idx] || {};
+        const oldFields = oldProd.dynamicFields || {};
+        const newFields = newProd.dynamicFields || {};
+
+        for (const [key, newVal] of Object.entries(newFields)) {
+          const oldVal = oldFields[key];
+          if (newVal && oldVal && String(newVal).trim() !== String(oldVal).trim()) {
+            let fieldCategory = 'valve';
+            const lKey = key.toLowerCase();
+            if (lKey.includes('size')) fieldCategory = 'size';
+            else if (lKey.includes('class')) fieldCategory = 'class';
+            else if (lKey.includes('material') || lKey.includes('moc')) fieldCategory = 'material';
+            else if (lKey.includes('end') || lKey.includes('connection')) fieldCategory = 'connection';
+
+            LearningEngine.recordCorrection({
+              enquiryId: enquiry._id,
+              productIndex: idx,
+              fieldCategory,
+              field: key,
+              wrongValue: String(oldVal).trim(),
+              correctValue: String(newVal).trim(),
+              correctedBy: req.user?._id || null,
+              documentContext: newProd.description || ''
+            }).catch(err => console.error('[LearningEngine] Correction record error:', err.message));
+          }
+        }
+      });
+    } catch (lErr) {
+      console.error('[LearningEngine] Error in updateEnquiryProducts hook:', lErr.message);
+    }
+
+    enquiry.products = products;
+    enquiry.lastModifiedBy = req.user?._id;
+    enquiry.markModified('products');
+
+    const updatedEnquiry = await enquiry.save();
+
+    await logActivity({
+      req,
+      action: 'UPDATE_LINE_ITEMS',
+      module: 'ENQUIRY',
+      resourceId: updatedEnquiry._id,
+      resourceName: updatedEnquiry.enquiryId,
+      details: `Updated ${products.length} line item(s) on enquiry ${updatedEnquiry.enquiryId}`
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Line items updated successfully',
+      data: { enquiry: updatedEnquiry }
     });
   } catch (err) {
     next(err);

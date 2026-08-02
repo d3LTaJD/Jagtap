@@ -1,0 +1,35 @@
+[
+  {
+    "id": "RFQ_ZERO_001",
+    "description": "Bare text - must NOT hallucinate any specifications",
+    "input": "Please quote for valves as per attached",
+    "expected": {
+      "valve_type": null,
+      "valve_size": null,
+      "valve_class": null,
+      "material": null
+    }
+  },
+  {
+    "id": "RFQ_ZERO_002",
+    "description": "Only valve type - must NOT guess size or class",
+    "input": "Supply Ball Valve",
+    "expected": {
+      "valve_type": "Ball Valve",
+      "valve_size": null,
+      "valve_class": null,
+      "material": null
+    }
+  },
+  {
+    "id": "RFQ_ZERO_003",
+    "description": "Invalid class - must reject CL3000",
+    "input": "Ball Valve 4 inch CL3000",
+    "expected": {
+      "valve_type": "Ball Valve",
+      "valve_size": "100 mm",
+      "valve_class": null,
+      "valve_class_rejected": true
+    }
+  }
+]

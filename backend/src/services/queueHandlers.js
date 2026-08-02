@@ -16,6 +16,7 @@ const { createNotification } = require('./notificationService');
 const { getNextSequenceValue } = require('../utils/counter');
 const { checkEnquiryCompletion } = require('../controllers/enquiryController');
 const { Queue } = require('./queueService');
+const extractionPipeline = require('./extraction/ExtractionPipeline');
 
 // Instantiate sub-queues
 const emailProcessingQueue = new Queue('EmailProcessingQueue');
@@ -479,7 +480,12 @@ async function handleAIExtraction({ emailMessageId }) {
     }
 
     console.log(`[AI Extraction] Calling AI extractEnquiries for new ${classification.category}... (Sent ${remainingAttachmentsForAI.length} attachments, skipped ${successfullyParsedBoqIds.size} parsed BOQs, ${structuredProducts.length} deterministic products)`);
-    const metadata = { from: emailMsg.sender, subject: emailMsg.subject };
+    const metadata = {
+      from: emailMsg.sender,
+      subject: emailMsg.subject,
+      expectedRowCount: structuredProducts.length,
+      hasStructuredBOQ: structuredProducts.length > 0
+    };
     
     // Pass 1: AI Catalog building (also extracts customer contact info even if we have structured products)
     const extractedResult = await aiService.extractEnquiries(bodyText, remainingAttachmentsForAI, metadata);
@@ -502,10 +508,11 @@ async function handleAIExtraction({ emailMessageId }) {
       console.log(`[AI Extraction] Using ${allProducts.length} structured products from BOQ. Skipping AI-extracted products to avoid duplication.`);
     } else {
       // Fallback: Use AI-extracted products from PDF/Email body
-      if (extractedResult && extractedResult.enquiries && extractedResult.enquiries.length > 0) {
-        allProducts = extractedResult.enquiries.map(item => ({
+      const aiItems = extractedResult ? (extractedResult.line_items || extractedResult.enquiries) : null;
+      if (aiItems && aiItems.length > 0) {
+        allProducts = aiItems.map(item => ({
           productCategory: item.productCategory || 'Custom',
-          productDescription: item.productDescription || '',
+          productDescription: item.productDescription || item.description || '',
           quantity: item.quantity || 1,
           unit: item.unit || 'NOS',
           standardCode: item.standardCode || 'Not specified',
@@ -516,9 +523,10 @@ async function handleAIExtraction({ emailMessageId }) {
         }));
       }
       
-      // Phase 5: Deduplicate and merge products from multiple sources (only for AI-extracted products)
+      // Phase 5: Pass-through (100% row preservation, zero line item merging)
       allProducts = boqParserService.mergeEnquiryProducts(allProducts);
     }
+    const productSummary = boqParserService.generateProductSummary(allProducts);
 
     if (allProducts.length === 0) {
       console.log(`[AI Extraction] Email ${emailMessageId} classified as ${classification.category} but no products extracted. Terminating.`);
@@ -565,16 +573,41 @@ async function handleAIExtraction({ emailMessageId }) {
       senderCompany = customer.companyName;
     }
 
-    // Map products array
-    const productsArray = allProducts.map(item => ({
-      description: item.productDescription || '',
-      quantity: item.quantity || 1,
-      unit: item.unit || 'NOS',
-      category: item.productCategory,
-      standardCode: item.standardCode,
-      confidence: item.confidence,
-      dynamicFields: {}
-    }));
+    // Map products array with 0ms deterministic regex pre-extraction
+    const extractorRegistry = require('./extraction/ExtractorRegistry');
+    const tokenizer = require('./extraction/Tokenizer');
+
+    const productsArray = allProducts.map(item => {
+      const desc = item.productDescription || '';
+      const tok = desc ? tokenizer.tokenize(desc) : '';
+      const regexRes = tok ? extractorRegistry.runAll(tok) : {};
+
+      const dyn = {};
+      const confs = {};
+
+      Object.values(regexRes).forEach(fieldObj => {
+        if (fieldObj && fieldObj.fieldId && fieldObj.normalizedValue) {
+          dyn[fieldObj.fieldId] = fieldObj.normalizedValue;
+          confs[fieldObj.fieldId] = {
+            value: fieldObj.normalizedValue,
+            confidence: 100,
+            source: 'REGEX',
+            validationState: 'VALID'
+          };
+        }
+      });
+
+      return {
+        description: desc,
+        quantity: item.quantity || 1,
+        unit: item.unit || 'NOS',
+        category: item.productCategory,
+        standardCode: item.standardCode,
+        confidence: item.confidence,
+        dynamicFields: dyn,
+        fieldConfidences: confs
+      };
+    });
 
     // Build merged enquiry fields
     const categories = [...new Set(allProducts.map(item => item.productCategory).filter(Boolean))];
@@ -714,6 +747,7 @@ async function handleAIExtraction({ emailMessageId }) {
         aiConfidence: mergedEnquiryItem.confidence,
         minConfidence: mergedEnquiryItem.minConfidence,
         products: mergedEnquiryItem.products,
+        productSummary: productSummary,
         originalMessageId: emailMsg.messageId,
         sourceEmailId: emailMsg.sourceEmailId || '',
         threadId: emailMsg.threadId,
@@ -812,41 +846,20 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
           });
 
           const existingProdFields = { ...(prod.dynamicFields || {}) };
-          const prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description, enquiry.enquiryId);
-          prod.dynamicFields = { ...existingProdFields, ...prodFields };
-          Object.assign(newlyExtractedGlobal, prodFields);
+          const gatedResult = await extractionPipeline.processProductGatedPipeline({
+            textContext: fullTextContext,
+            fieldDefinitions: fields,
+            productDescription: prod.description,
+            enquiryId: enquiry._id,
+            productIndex: enquiry.products.indexOf(prod)
+          });
+
+          prod.dynamicFields = { ...existingProdFields, ...gatedResult.validatedDynamicFields };
+          prod.fieldConfidences = gatedResult.fieldConfidences;
+          prod.extractionStatus = gatedResult.extractionStatus;
         });
 
-        // Apply any newly extracted fields to ALL products that were missing them
-        // (e.g. customer replied "150#" without specifying which product — apply to all)
-        const PRODUCT_SPECIFIC_FIELDS = [
-          'valve_type', 'valve_size', 'valve_class', 'valve_bore', 'valve_design_type',
-          'valve_end_connection', 'valve_operating', 'valve_ball_type', 'valve_moc_body',
-          'valve_moc_ball', 'valve_moc_stem', 'valve_moc_seat', 'valve_moc_stud_nuts', 'valve_qty'
-        ];
-
-        for (const [key, val] of Object.entries(newlyExtractedGlobal)) {
-          if (!val) continue;
-          if (PRODUCT_SPECIFIC_FIELDS.includes(key)) continue;
-
-          for (const prod of enquiry.products) {
-            const prodCat = prod.category || enquiry.productCategory;
-            // Only fill if this product's category matches the field's category
-            const allFields = await FieldDefinition.find({ fieldName: key, formContext: 'Enquiry', isDeleted: false });
-            const fieldDef = allFields[0];
-            if (fieldDef && fieldDef.productCategory && fieldDef.productCategory !== prodCat) continue;
-            if (!prod.dynamicFields[key]) {
-              prod.dynamicFields[key] = val;
-            }
-          }
-        }
-
         enquiry.markModified('products');
-        // Rebuild root dynamicFields from merged product fields
-        enquiry.dynamicFields = { ...previousFields };
-        for (const prod of enquiry.products) {
-          Object.assign(enquiry.dynamicFields, prod.dynamicFields);
-        }
       } else {
         const fields = await FieldDefinition.find({
           formContext: 'Enquiry',
@@ -1044,6 +1057,9 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       }
 
       enquiry.dynamicFields = {};
+      // Clear AI extraction cache before processing this enquiry's products
+      // to prevent cross-enquiry cache contamination
+      extractionPipeline.clearCache();
       if (enquiry.products && enquiry.products.length > 0) {
         const aiConfig = require('../config/aiConfig');
         const mapLimit = async (items, limit, fn) => {
@@ -1075,10 +1091,10 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
             }
           }
 
-          // Fallback: Use AI-based extraction
+          // Fallback: Use Zero-Hallucination Gated Pipeline
           if (!prodFields) {
             const prodCategory = prod.category || enquiry.productCategory;
-            const fields = await FieldDefinition.find({
+            let fields = await FieldDefinition.find({
               formContext: 'Enquiry',
               isDeleted: false,
               isActive: true,
@@ -1088,11 +1104,40 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
                 { productCategory: '' }
               ]
             });
-            prodFields = await aiService.extractDynamicFields(fullTextContext, fields, prod.description, enquiry.enquiryId);
+
+            // CATEGORY-SPECIFIC FIELD FILTERING:
+            // Skip fields irrelevant to the product category to avoid
+            // wasting AI calls on fields that will never be found.
+            const VALVE_IRRELEVANT_FIELDS = [
+              'tankCapacity', 'tankType', 'temaType', 'tubeLength',
+              'surfaceArea', 'radiographyPercent', 'designPressure',
+              'shellThickness', 'headType', 'baffleType', 'tubePitch',
+              'numberOfPasses', 'numberOfTubes'
+            ];
+            const TANK_IRRELEVANT_FIELDS = [
+              'valve_type', 'valve_bore', 'valve_ball_type', 'valve_operating',
+              'valve_end_connection', 'seatMaterial', 'sealType'
+            ];
+
+            if (prodCategory === 'Valves') {
+              fields = fields.filter(f => !VALVE_IRRELEVANT_FIELDS.includes(f.fieldName));
+            } else if (prodCategory === 'Storage Tank' || prodCategory === 'Heat Exchanger') {
+              fields = fields.filter(f => !TANK_IRRELEVANT_FIELDS.includes(f.fieldName));
+            }
+
+            const gatedResult = await extractionPipeline.processProductGatedPipeline({
+              textContext: fullTextContext,
+              fieldDefinitions: fields,
+              productDescription: prod.description,
+              enquiryId: enquiry._id,
+              productIndex: enquiry.products.indexOf(prod)
+            });
+            prodFields = gatedResult.validatedDynamicFields;
+            prod.fieldConfidences = gatedResult.fieldConfidences;
+            prod.extractionStatus = gatedResult.extractionStatus;
           }
 
           prod.dynamicFields = prodFields;
-          Object.assign(enquiry.dynamicFields, prodFields);
         });
         enquiry.markModified('products');
       } else {
@@ -1106,8 +1151,14 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
             { productCategory: '' }
           ]
         });
-        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription, enquiry.enquiryId);
-        enquiry.dynamicFields = extractedFields;
+        const gatedResult = await extractionPipeline.processProductGatedPipeline({
+          textContext: fullTextContext,
+          fieldDefinitions: fields,
+          productDescription: enquiry.productDescription,
+          enquiryId: enquiry._id,
+          productIndex: 0
+        });
+        enquiry.dynamicFields = gatedResult.validatedDynamicFields;
       }
       const mappedAttachments = freshAttachments.filter(att =>
         (aiItem.linkedAttachmentNames || []).some(name =>

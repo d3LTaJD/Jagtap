@@ -17,7 +17,7 @@ const productSchema = new mongoose.Schema({
     endConnection: String
   },
   
-  unit: { type: String, enum: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'], default: 'NOS' },
+  unit: { type: String, trim: true, default: 'NOS' },
   basePrice: { type: Number },
   currency: { type: String, default: 'INR' },
   taxRate: { type: Number, default: 18 }, // Default GST percentage

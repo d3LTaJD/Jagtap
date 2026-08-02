@@ -5,10 +5,16 @@ const { getFileBuffer } = require('./localStorageService');
 
 /**
  * Detects product category from a description string.
+ * Recognizes both full names and BOQ abbreviations.
  */
 function detectProductCategory(desc) {
   const lower = desc.toLowerCase();
+  // Full names
   if (lower.includes('valve')) return 'Valves';
+  // BOQ abbreviations for valve types
+  if (/\b(ball|gate|globe|check|butterfly|plug|control|nrv|vlv|chk|btfv|bfv)\b/i.test(lower)) return 'Valves';
+  // API/ANSI standards strongly indicate valve products
+  if (/\b(api\s*6d|api\s*600|api\s*602|api\s*608|ansi\s*\d+)\b/i.test(lower)) return 'Valves';
   if (lower.includes('piping') || lower.includes('pipe') || lower.includes('flange') || lower.includes('fitting')) return 'Valves';
   if (lower.includes('tank') || lower.includes('vessel')) return 'Storage Tank';
   if (lower.includes('exchanger') || lower.includes('heater') || lower.includes('cooler')) return 'Heat Exchanger';
@@ -27,6 +33,24 @@ function detectStandardCode(desc) {
   if (/\bis\b|\bis[:\-\s\d]/i.test(lower)) found.push('IS');
   if (/\bbs\b|\bbs[:\-\s\d]/i.test(lower)) found.push('BS');
   if (/\ben\b|\ben[:\-\s\d]/i.test(lower)) found.push('EN');
+
+  // Pipe schedule specifications (Sch 7, Sch 8, Schedule 40, Sch STD, Sch XS, Sch XXS)
+  const schMatches = lower.match(/\bsch(?:edule)?[\s\-]*(\d+|std|xs|xxs)\b/gi);
+  if (schMatches) {
+    for (const m of schMatches) {
+      // Normalize to "Sch X" format with uppercase suffix
+      const suffixMatch = m.match(/(\d+|std|xs|xxs)$/i);
+      if (suffixMatch) {
+        const suffix = suffixMatch[1];
+        // Numbers stay as-is, text suffixes get uppercased
+        const normalizedSuffix = /^\d+$/.test(suffix) ? suffix : suffix.toUpperCase();
+        const normalized = `Sch ${normalizedSuffix}`;
+        if (!found.includes(normalized)) {
+          found.push(normalized);
+        }
+      }
+    }
+  }
   
   if (found.length > 0) {
     return found.join(', ');
@@ -55,10 +79,23 @@ function normalizeUnit(unitStr) {
   if (['m2', 'sqm', 'square meters', 'square meter', 'sq.m', 'sq m'].includes(u)) {
     return 'M2';
   }
-  if (['job', 'jobs', 'ls', 'lump sum', 'lumpsum', 'mandays', 'manday', 'man-days', 'man-day'].includes(u)) {
+  // Mandays must remain as 'Mandays' — never collapse into 'Job'.
+  // These are engineering supervision units and must be preserved exactly.
+  if (['mandays', 'manday', 'man-days', 'man-day', 'man days', 'man day'].includes(u)) {
+    return 'Mandays';
+  }
+  if (['ls', 'lump sum', 'lumpsum', 'l/s'].includes(u)) {
+    return 'LS';
+  }
+  if (['lot', 'lots'].includes(u)) {
+    return 'LOT';
+  }
+  if (['job', 'jobs'].includes(u)) {
     return 'Job';
   }
-  return 'NOS'; // Default fallback
+  // Preserve original unit string for unrecognized units instead of
+  // blindly defaulting to 'NOS' (which loses information).
+  return String(unitStr).trim().toUpperCase() || 'NOS';
 }
 
 /**
@@ -320,18 +357,93 @@ function stripNonValveSections(text) {
 }
 
 /**
+ * Returns true if a row is a non-product header/intro/footer sentence.
+ * Used to filter out descriptions like "Supply and delivery of Ball Valves..."
+ */
+function isNonProductRow(text) {
+  if (!text || typeof text !== 'string') return true;
+  const lower = text.toLowerCase().trim();
+
+  // Reject rows containing intro/header/footer phrases
+  const rejectPatterns = [
+    /\bsupply\s+and\s+delivery\b/,
+    /\brequirement\s+of\b/,
+    /\bvendor\s+shall\b/,
+    /\bcertificate\b/,
+    /\bplease\s+quote\b/,
+    /\bplease\s+provide\b/,
+    /\bkindly\s+(?:share|provide|quote|send)\b/,
+    /\bregards\b/,
+    /\bterms\s+(?:and|&)\s+conditions\b/,
+    /\bspecification\s+(?:for|of)\b/,
+    /\bproject\s+description\b/,
+    /\bdear\s+(?:sir|madam|team)\b/,
+    /\bwe\s+(?:have|are|need|require)\b/,
+    /\bfinished\s+product\b/,
+    /\bthank(?:s|ing)?\s+(?:you|and)\b/,
+    /\bbest\s+regards\b/,
+    /\bwarm\s+regards\b/,
+    /\bnote\s*:/,
+    /\bscope\s+of\s+(?:work|supply)\b/,
+    /\battached\s+(?:herewith|please)\b/,
+    /\bsubject\s*:/
+  ];
+
+  for (const pattern of rejectPatterns) {
+    if (pattern.test(lower)) return true;
+  }
+
+  // Reject very long prose sentences (> 120 chars with no size/class indicators)
+  if (lower.length > 120 && !/\b\d+\s*(?:"|inch|in|mm|#|nos|ea|pcs)\b/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Returns true if a text row contains product indicator tokens
+ * (engineering abbreviations that identify it as a real product line).
+ */
+function isProductIndicatorRow(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+
+  const productTokens = [
+    /\b(ball|gate|globe|check|butterfly|plug|control|needle|safety)\b/i,
+    /\bvalve\b/i,
+    /\b(vlv|chk|btfv|bfv|nrv|prv|srv|ibv|mov|aov|sdv)\b/i,
+    /\b(api\s*\d+|ansi\s*\d+|asme)\b/i,
+    /\b(flg|flange[d]?|rf|rtj)\b/i,
+    /\b(wcb|lcb|wcc|cf8m?|a105|a216|a351|a352|ss\s*\d+|cs|lf2)\b/i,
+    /\b(hov|mov|aov)\b/i,
+    /\b(tru|bol|trunnion|bolted)\b/i,
+    /\b(f\/f|w\/w|a\/g|b\/w|s\/w)\b/i
+  ];
+
+  let matchCount = 0;
+  for (const pattern of productTokens) {
+    if (pattern.test(lower)) matchCount++;
+  }
+
+  // At least 1 strong indicator required
+  return matchCount >= 1;
+}
+
+/**
  * Deterministic email body line item parser.
  * Splits numbered/bulleted line items from email body text into separate products.
  *
  * Handles real-world formats:
- *   1  4" Shut off valve - pneumatic type  Suitable for 60 m3/hr  Nos. 16
- *   2. CS Ball Valve 100mm    15  Nos
- *   1) 100mm Gate Valve ... 8 Nos
+ *   Strategy 1: 1  4" Shut off valve - pneumatic type  Nos. 16
+ *   Strategy 2: Multi-line (serial on one line, desc on next, qty after)
+ *   Strategy 3: BOQ table rows without serial numbers (BALL API6D HOV 2IN 300#  35  EA)
+ *   Strategy 4: Tab/pipe-delimited OCR table rows
  *
  * Also handles multi-line items where serial number, description, and quantity
  * are on separate lines.
  *
- * Returns [] if no serial-numbered items found (falls through to AI).
+ * Returns [] if no items found (falls through to AI).
  */
 function parseEmailBodyLineItems(bodyText) {
   if (!bodyText || typeof bodyText !== 'string') return [];
@@ -368,7 +480,7 @@ function parseEmailBodyLineItems(bodyText) {
       const qty = parseInt(match[3], 10) || 1;
 
       // Validate: description must be at least 5 chars and contain letters
-      if (desc.length >= 5 && /[a-zA-Z]/.test(desc)) {
+      if (desc.length >= 5 && /[a-zA-Z]/.test(desc) && !isNonProductRow(desc)) {
         products.push({
           productDescription: desc,
           quantity: qty,
@@ -455,7 +567,7 @@ function parseEmailBodyLineItems(bodyText) {
 
       if (descParts.length > 0) {
         const fullDesc = descParts.join(' ').trim();
-        if (fullDesc.length >= 5) {
+        if (fullDesc.length >= 5 && !isNonProductRow(fullDesc)) {
           products.push({
             productDescription: fullDesc,
             quantity: qty,
@@ -475,6 +587,124 @@ function parseEmailBodyLineItems(bodyText) {
 
   if (products.length > 0) {
     console.log(`[Email Body Parser] Multi-line strategy found ${products.length} line items.`);
+    return products;
+  }
+
+  // ── Strategy 3: BOQ table rows WITHOUT serial numbers ──────────────────
+  // Handles formats like:
+  //   BALL API6D HOV F/F A/G TRU BOL 2IN 300#    35    EA
+  //   VLV,CHK,A216 WCB,A216 WCB,FLG,300,10IN      1    EA
+  //   1" x 800# W/W A/G HOV API 602 GATE VALVE    2    EA
+  //   18" x ANSI 150# HOV F/F API 600 Gate Valve   1    EA
+  //
+  // Pattern: <description with product indicators> <quantity number> <unit>
+  // OR:      <description with product indicators> <unit> <quantity number>
+
+  const boqPatternA = /^(.+?)\s+(\d+)\s+(nos|ea|each|pcs|sets?|mt|kg|lot)\s*$/i;
+  const boqPatternB = /^(.+?)\s+(nos|ea|each|pcs|sets?|mt|kg|lot)\s+(\d+)\s*$/i;
+  // Also handle rows ending with just a number (no explicit unit)
+  const boqPatternC = /^(.+?)\s{2,}(\d+)\s*$/;
+
+  for (const line of lines) {
+    // Skip header-like lines
+    if (/^\s*(?:sr\.?\s*no|sl\.?\s*no|s\.?\s*no|item\s*(?:no|#|desc)|#|description|particular|detail)/i.test(line)) continue;
+    if (/^\s*(?:unit|qty|quantity|nos|uom)\s*$/i.test(line)) continue;
+
+    let desc = null;
+    let qty = 1;
+    let unit = 'NOS';
+
+    let match = line.match(boqPatternA);
+    if (match) {
+      desc = match[1].trim();
+      qty = parseInt(match[2], 10) || 1;
+      unit = match[3];
+    }
+
+    if (!desc) {
+      match = line.match(boqPatternB);
+      if (match) {
+        desc = match[1].trim();
+        qty = parseInt(match[3], 10) || 1;
+        unit = match[2];
+      }
+    }
+
+    if (!desc) {
+      match = line.match(boqPatternC);
+      if (match) {
+        desc = match[1].trim();
+        qty = parseInt(match[2], 10) || 1;
+        unit = 'NOS';
+      }
+    }
+
+    if (desc && desc.length >= 5 && /[a-zA-Z]/.test(desc) && !isNonProductRow(desc) && isProductIndicatorRow(desc)) {
+      products.push({
+        productDescription: desc,
+        quantity: qty,
+        unit: normalizeUnit(unit),
+        productCategory: detectProductCategory(desc),
+        standardCode: detectStandardCode(desc)
+      });
+    }
+  }
+
+  if (products.length > 0) {
+    console.log(`[Email Body Parser] BOQ table strategy (Strategy 3) found ${products.length} line items.`);
+    return products;
+  }
+
+  // ── Strategy 4: Tab/pipe-delimited OCR table rows ──────────────────────
+  // Handles OCR output from PDF tables with pipe or tab delimiters:
+  //   1 | BALL API6D HOV 2IN 300# | 35 | EA
+  //   2 | VLV,CHK,A216 WCB | 1 | EA
+
+  const delimiterPattern = /[|\t]/;
+  const tabulatedLines = lines.filter(l => delimiterPattern.test(l));
+
+  if (tabulatedLines.length >= 2) {
+    for (const line of tabulatedLines) {
+      const cells = line.split(delimiterPattern).map(c => c.trim()).filter(Boolean);
+      if (cells.length < 2) continue;
+
+      // Find the description cell (longest cell with letters)
+      let descCell = '';
+      let qtyCell = '';
+      let unitCell = '';
+
+      for (const cell of cells) {
+        if (/^\d{1,5}$/.test(cell)) {
+          // Pure number — could be serial, qty, or skip
+          if (!qtyCell && descCell) {
+            qtyCell = cell; // qty comes after desc
+          }
+          continue;
+        }
+        if (/^(?:nos|ea|each|pcs|sets?|mt|kg|lot|uom)$/i.test(cell)) {
+          unitCell = cell;
+          continue;
+        }
+        // Must be description (has letters and is > 5 chars)
+        if (/[a-zA-Z]/.test(cell) && cell.length > 5) {
+          descCell = cell;
+        }
+      }
+
+      if (descCell && !isNonProductRow(descCell) && isProductIndicatorRow(descCell)) {
+        products.push({
+          productDescription: descCell,
+          quantity: parseInt(qtyCell, 10) || 1,
+          unit: normalizeUnit(unitCell || 'NOS'),
+          productCategory: detectProductCategory(descCell),
+          standardCode: detectStandardCode(descCell)
+        });
+      }
+    }
+  }
+
+  if (products.length > 0) {
+    console.log(`[Email Body Parser] Tabulated OCR strategy (Strategy 4) found ${products.length} line items.`);
   }
 
   return products;
@@ -487,139 +717,46 @@ module.exports = {
   mergeEnquiryProducts,
   normalizeUnit,
   parseEmailBodyLineItems,
-  stripNonValveSections
+  stripNonValveSections,
+  isNonProductRow,
+  isProductIndicatorRow
 };
 
 /**
- * Deduplicates and merges products extracted from multiple sources (BOQ, specs, emails).
- * Part of Phase 5.
+ * Pass-through function: Preserves 100% of BOQ line items as independent rows.
+ * Deduplication and merging are strictly disabled per ERP procurement requirements.
  */
 function mergeEnquiryProducts(products) {
-  const merged = [];
-
-  const parseSize = (desc) => {
-    const d = desc.toLowerCase();
-    const match = d.match(/\b(\d+(?:\/\d+)?\s*(?:inch|in|nb|dn|\"|mm))/i) || d.match(/(?:^|\s)(dn\s*\d+|\d+\s*mm)/i);
-    return match ? match[1].replace(/\s+/g, '').replace(/inch|in|dn|nb|mm|\"/g, '') : null;
-  };
-
-  const parseClass = (desc) => {
-    const d = desc.toLowerCase();
-    const match = d.match(/\b(\d+\s*#|\d+\s*class|class\s*\d+|#\s*\d+|\b\d+\s*lbs?)/i);
-    return match ? match[1].replace(/\s+/g, '').replace(/class|lbs?|#/g, '') : null;
-  };
-
-  const parseMaterial = (desc) => {
-    const d = desc.toLowerCase();
-    const grades = [
-      'a105', 'a 105', 'lf2', 'wcb', 'lcb', 'wcc', 'cf8m', 'cf8', 'cf3m', 'cf3',
-      'f316l', 'f316', 'f304l', 'f304', 'ss316l', 'ss316', 'ss304l', 'ss304',
-      'f51', 'f53', 'f55', 'monel', 'inconel', 'duplex', 'super duplex'
-    ];
-    for (const g of grades) {
-      const regex = new RegExp('\\b' + g.replace('.', '\\.') + '\\b', 'i');
-      if (regex.test(d)) {
-        return g.replace(/\s+/g, '');
-      }
-    }
-    if (/\b(carbon\s*steel|cs)\b/i.test(d)) return 'cs';
-    if (/\b(stainless\s*steel|ss)\b/i.test(d)) return 'ss';
-    if (/\b(alloy\s*steel|as)\b/i.test(d)) return 'as';
-    return null;
-  };
-
-  const parseBore = (desc) => {
-    const d = desc.toLowerCase();
-    if (/\b(full\s*bore|fb)\b/i.test(d)) return 'fb';
-    if (/\b(reduced\s*bore|rb|regular\s*bore)\b/i.test(d)) return 'rb';
-    return null;
-  };
-
-  const parseOperation = (desc) => {
-    const d = desc.toLowerCase();
-    if (/\b(motorized|mov|motor\s*operated|actuated|actuator)\b/i.test(d)) return 'motorized';
-    if (/\b(manual|lever|handwheel|handle|gear|hov)\b/i.test(d)) return 'manual';
-    return null;
-  };
-
-  const parseValveType = (desc) => {
-    const d = desc.toLowerCase();
-    const types = ['ball', 'gate', 'globe', 'check', 'butterfly', 'plug', 'control', 'safety'];
-    for (const t of types) {
-      const regex = new RegExp('\\b' + t + '\\b', 'i');
-      if (regex.test(d)) return t;
-    }
-    return null;
-  };
-
-  const parseEndConnection = (desc) => {
-    const d = desc.toLowerCase();
-    if (/\b(butt\s*weld|bw)\b/i.test(d)) return 'bw';
-    if (/\b(socket\s*weld|sw)\b/i.test(d)) return 'sw';
-    if (/\b(flanged|flange|fe|rf|rtj)\b/i.test(d)) return 'flanged';
-    if (/\b(screwed|npt|nptf)\b/i.test(d)) return 'screwed';
-    return null;
-  };
-
-  for (const prod of products) {
-    const desc = prod.productDescription || prod.description || '';
-    const size = parseSize(desc);
-    const rating = parseClass(desc);
-    const cat = (prod.productCategory || prod.category || '').toLowerCase();
-
-    // Check if we already have a similar product in merged list
-    let foundIdx = -1;
-    for (let i = 0; i < merged.length; i++) {
-      const other = merged[i];
-      const otherDesc = other.productDescription || other.description || '';
-      const otherSize = parseSize(otherDesc);
-      const otherRating = parseClass(otherDesc);
-      const otherCat = (other.productCategory || other.category || '').toLowerCase();
-
-      const catMatch = cat === otherCat || cat === 'custom' || otherCat === 'custom';
-      const sizeMatch = size && otherSize && size === otherSize;
-      const ratingMatch = rating && otherRating && rating === otherRating;
-      const descMatch = desc.toLowerCase().replace(/[^a-z0-9]/g, '') === otherDesc.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-      let isMatch = false;
-      if (catMatch && descMatch) {
-        isMatch = true;
-      }
-
-      if (isMatch) {
-        foundIdx = i;
-        break;
-      }
-    }
-
-    if (foundIdx > -1) {
-      const existing = merged[foundIdx];
-      console.log(`[Product Merge] Merging duplicate products:\n  - Product A: "${existing.productDescription || existing.description}" (qty: ${existing.quantity})\n  - Product B: "${desc}" (qty: ${prod.quantity})`);
-      
-      existing.quantity += prod.quantity;
-      if (desc.length > (existing.productDescription || existing.description || '').length) {
-        if (existing.productDescription !== undefined) existing.productDescription = desc;
-        if (existing.description !== undefined) existing.description = desc;
-      }
-      
-      const newCat = prod.productCategory || prod.category;
-      if (existing.productCategory === 'Custom' || !existing.productCategory) {
-        existing.productCategory = newCat;
-      }
-      if (existing.category === 'Custom' || !existing.category) {
-        existing.category = newCat;
-      }
-
-      if (existing.standardCode === 'Not specified' || !existing.standardCode) {
-        existing.standardCode = prod.standardCode;
-      }
-      if (prod.linkedAttachmentNames) {
-        existing.linkedAttachmentNames = [...new Set([...(existing.linkedAttachmentNames || []), ...prod.linkedAttachmentNames])];
-      }
-    } else {
-      merged.push({ ...prod });
-    }
-  }
-
-  return merged;
+  if (!Array.isArray(products)) return [];
+  console.log(`[BOQ Line Items] Preserving ${products.length} line items without merging.`);
+  return products.map(p => ({ ...p }));
 }
+
+/**
+ * Generates a category summary count object (e.g. { "Ball Valve": 6, "Check Valve": 1, "Gate Valve": 3 })
+ * without altering or reducing the line_items array.
+ */
+function generateProductSummary(products) {
+  if (!Array.isArray(products)) return {};
+  const summary = {};
+  for (const prod of products) {
+    const cat = prod.productCategory || prod.category || 'Custom';
+    summary[cat] = (summary[cat] || 0) + 1;
+  }
+  return summary;
+}
+
+module.exports = {
+  parseExcelBOQ,
+  parsePdfTableBOQ,
+  parseStructuredBOQ,
+  mergeEnquiryProducts,
+  generateProductSummary,
+  normalizeUnit,
+  parseEmailBodyLineItems,
+  stripNonValveSections,
+  isNonProductRow,
+  isProductIndicatorRow,
+  detectStandardCode,
+  detectProductCategory
+};

@@ -252,9 +252,13 @@ async function handleJobFailureNotification(job, err) {
       const title = `❌ Background Job Failed: ${job.queueName}`;
       const message = `Job failed: ${err.message}. Failed permanently after ${job.attempts} attempts. Check admin logs.`;
 
+      const payloadStr = JSON.stringify(job.payload || job.data || {});
+      const cleanPayload = payloadStr.length > 250 ? payloadStr.substring(0, 247) + '...' : payloadStr;
+      const cleanStack = (err.stack || '').substring(0, 350);
+
       await Task.create({
         title: title,
-        description: `Job ID: ${job._id}\nQueue Name: ${job.queueName}\nPayload: ${JSON.stringify(job.payload || job.data)}\nError: ${err.message}\nStack: ${err.stack}`,
+        description: `Job ID: ${job._id}\nQueue: ${job.queueName}\nPayload: ${cleanPayload}\nError: ${err.message}\nStack: ${cleanStack}`.substring(0, 950),
         dueDate: new Date(),
         priority: 'High',
         status: 'To Do',

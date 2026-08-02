@@ -1,0 +1,37 @@
+[
+  {
+    "id": "RFQ_SIMPLE_001",
+    "description": "Simple single-product RFQ",
+    "input": "Please quote for 4\" Ball Valve Class 300 Material WCB Flanged End",
+    "expected": {
+      "valve_type": "Ball Valve",
+      "valve_size": "100 mm",
+      "valve_class": "300#",
+      "material": "ASTM A216 WCB",
+      "end_connection": "Flanged"
+    }
+  },
+  {
+    "id": "RFQ_SIMPLE_002",
+    "description": "Gate valve with quantity",
+    "input": "8\" Gate Valve Class 150 Qty 20",
+    "expected": {
+      "valve_type": "Gate Valve",
+      "valve_size": "200 mm",
+      "valve_class": "150#",
+      "quantity": "20"
+    }
+  },
+  {
+    "id": "RFQ_SIMPLE_003",
+    "description": "Globe valve with material",
+    "input": "Supply 6 inch Globe Valve SS316 Socket Weld Class 800",
+    "expected": {
+      "valve_type": "Globe Valve",
+      "valve_size": "150 mm",
+      "valve_class": "800#",
+      "material": "SS316",
+      "end_connection": "Socket Weld"
+    }
+  }
+]

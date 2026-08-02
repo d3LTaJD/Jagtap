@@ -126,6 +126,18 @@ class NormalizationService {
       if (isMocOrActuatorField) {
         const sVal = String(val).trim();
         const cleanLower = sVal.toLowerCase();
+
+        // Reject schedule identifiers masquerading as materials.
+        // "MS ST for Sch 8" is a schedule identifier, not a material grade.
+        const isScheduleId = /\bfor\s+sch(?:edule)?\s*\d+/i.test(sVal) ||
+                             /\bms\s+st\b.*\bsch/i.test(sVal) ||
+                             /\bsch(?:edule)?[\s\-]*\d+/i.test(sVal);
+        if (isScheduleId) {
+          console.warn(`[NormalizationService] Rejecting schedule identifier as material for field ${key}: "${sVal}"`);
+          normalized[key] = nullResult;
+          continue;
+        }
+
         const isJunk = ['unknown', 'n/a', 'na', 'none', 'not specified'].includes(cleanLower);
         if (isJunk) {
           console.warn(`[NormalizationService] Rejecting junk text for field ${key}: "${sVal}"`);

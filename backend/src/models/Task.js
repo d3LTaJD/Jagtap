@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const taskSchema = new mongoose.Schema({
   taskId: { type: String, unique: true }, // TASK-YYYY-MM-NNNN
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, maxlength: 1000 },
+  description: { type: String, maxlength: 10000 },
 
   // Scheduling
   dueDate: { type: Date, required: true },

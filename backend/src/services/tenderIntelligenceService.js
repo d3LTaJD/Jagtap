@@ -442,6 +442,35 @@ Return ONLY a valid JSON object:
 
   try {
     const { result } = await callTenderAI({ prompt, validateFn, logTag: 'Tender Intelligence SOR', enquiryId });
+
+    // POST-PROCESSING: Mathematically recompute schedule totals from items[].
+    // AI estimates of totalItems and totalQuantity are unreliable (e.g. 228 vs 238).
+    // Compute them deterministically from the actual extracted items.
+    if (result && Array.isArray(result.scheduleOfRates)) {
+      result.productSummaryBySchedule = result.scheduleOfRates.map(sch => {
+        const items = Array.isArray(sch.items) ? sch.items : [];
+        const totalItems = items.length;
+        const totalQuantity = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+
+        // Compute size and class ranges from items
+        const sizes = items.map(i => i.size).filter(Boolean);
+        const classes = items.map(i => i.classRating).filter(Boolean);
+        const sizeRange = sizes.length > 0 ? [...new Set(sizes)].join(', ') : null;
+        const classRange = classes.length > 0 ? [...new Set(classes)].join(', ') : null;
+
+        return {
+          scheduleNo: sch.scheduleNo || null,
+          scheduleName: sch.scheduleName || null,
+          totalItems,
+          totalQuantity,
+          sizeRange,
+          classRange
+        };
+      });
+
+      console.log(`[Tender Intelligence] SOR totals recomputed mathematically. Schedules: ${result.productSummaryBySchedule.length}, Total items: ${result.productSummaryBySchedule.reduce((s, sch) => s + sch.totalItems, 0)}, Total qty: ${result.productSummaryBySchedule.reduce((s, sch) => s + sch.totalQuantity, 0)}`);
+    }
+
     return result;
   } catch (err) {
     console.error(`[Tender Intelligence] SOR extraction failed:`, err.message);

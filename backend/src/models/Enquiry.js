@@ -31,13 +31,13 @@ const enquirySchema = new mongoose.Schema({
   productCategory: { type: String, required: true }, // 'Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Valves', 'Structural', 'Custom', 'Multiple'
   productDescription: { type: String, required: true, maxlength: 200 },
   quantity: { type: Number, required: true, default: 1 },
-  unit: { type: String, enum: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'], default: 'NOS' },
+  unit: { type: String, trim: true, default: 'NOS' },
 
   requiredDeliveryWeeks: { type: Number },
   requiredDeliveryDate: { type: Date },
   budgetFrom: { type: Number },
   budgetTo: { type: Number },
-  standardCode: { type: String, enum: ['ASME', 'IS', 'BS', 'EN', 'API', 'IBR', 'Custom', 'Not specified'] },
+  standardCode: { type: String, trim: true, default: 'Not specified' },
   thirdPartyInspection: { type: Boolean, default: false },
   specialRequirements: { type: String, maxlength: 400 },
 
@@ -74,15 +74,22 @@ const enquirySchema = new mongoose.Schema({
       quantity: { type: Number, default: 1 },
       unit: {
         type: String,
-        enum: ['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job'],
+        trim: true,
         default: 'NOS'
       },
       category: { type: String },
-      standardCode: { type: String },
+      standardCode: { type: String, trim: true, default: 'Not specified' },
       confidence: { type: Number },
+      extractionStatus: {
+        type: String,
+        enum: ['raw', 'validated', 'approved', 'needs_review'],
+        default: 'raw'
+      },
+      fieldConfidences: { type: mongoose.Schema.Types.Mixed, default: {} },
       dynamicFields: { type: mongoose.Schema.Types.Mixed, default: {} }
     }
   ],
+  productSummary: { type: mongoose.Schema.Types.Mixed, default: {} },
   minConfidence: { type: Number },
 
   internalNotes: { type: String, maxlength: 300 },
@@ -131,7 +138,7 @@ enquirySchema.pre('save', async function(next) {
 
     const cleanFields = (dynamicFields, targetCategory) => {
       if (!dynamicFields || typeof dynamicFields !== 'object') return {};
-      if (!targetCategory || targetCategory === 'Multiple') return dynamicFields;
+      if (!targetCategory || targetCategory === 'Multiple' || targetCategory === 'Custom') return dynamicFields;
 
       // Map common synonyms: e.g. "piping" -> "valves"
       const normalize = c => {
@@ -141,12 +148,17 @@ enquirySchema.pre('save', async function(next) {
       };
       const normalizedTarget = normalize(targetCategory);
 
+      // If target category is custom, general, tender, multiple, or unassigned, do not strip fields!
+      if (['custom', 'multiple', 'general', 'tender'].includes(normalizedTarget)) {
+        return dynamicFields;
+      }
+
       const cleaned = {};
       for (const [key, val] of Object.entries(dynamicFields)) {
         const fieldCat = fieldCatMap[key];
         if (fieldCat) {
           const normalizedFieldCat = normalize(fieldCat);
-          if (normalizedFieldCat !== normalizedTarget) {
+          if (normalizedFieldCat !== normalizedTarget && normalizedFieldCat !== 'custom' && normalizedFieldCat !== 'multiple') {
             console.log(`[Schema-Aware Validation] Stripping field "${key}" (belongs to: "${fieldCat}") from category "${targetCategory}"`);
             continue;
           }
