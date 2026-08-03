@@ -81,7 +81,7 @@ function normalizeUnit(unitStr) {
   }
   // Mandays must remain as 'Mandays' — never collapse into 'Job'.
   // These are engineering supervision units and must be preserved exactly.
-  if (['mandays', 'manday', 'man-days', 'man-day', 'man days', 'man day'].includes(u)) {
+  if (['mandays', 'manday', 'man-days', 'man-day', 'man days', 'man day', 'mondays', 'monday', 'mon-days', 'mon-day', 'mon days', 'mon day'].includes(u)) {
     return 'Mandays';
   }
   if (['ls', 'lump sum', 'lumpsum', 'l/s'].includes(u)) {
