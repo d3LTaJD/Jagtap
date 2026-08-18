@@ -23,7 +23,27 @@ const taskSchema = new mongoose.Schema({
   linkedEnquiry: { type: mongoose.Schema.Types.ObjectId, ref: 'Enquiry', default: null },
   linkedQuotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', default: null },
 
+  // Attachments uploaded for this task
+  attachments: [{
+    fileName: String,
+    fileKey: String,
+    originalName: String,
+    mimeType: String,
+    size: Number,
+    uploadedAt: { type: Date, default: Date.now }
+  }],
+
   completedAt: { type: Date, default: null },
+  completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+  // Comprehensive audit history log
+  history: [{
+    action: { type: String, required: true }, // 'CREATED', 'ASSIGNED', 'STATUS_CHANGED', 'COMPLETED', 'FILE_ATTACHED', 'EDITED'
+    performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    performedByName: { type: String },
+    details: { type: String },
+    timestamp: { type: Date, default: Date.now }
+  }],
 }, { timestamps: true });
 
 // Auto-generate taskId before saving

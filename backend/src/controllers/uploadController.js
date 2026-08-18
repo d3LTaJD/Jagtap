@@ -32,7 +32,7 @@ exports.uploadFile = async (req, res, next) => {
       size: req.file.size,
       uploadedBy: req.user._id,
       module,
-      entityId: entityId || null
+      entityId: (entityId && require('mongoose').Types.ObjectId.isValid(entityId)) ? entityId : null
     });
 
     // 3. If this is an Enquiry attachment, also create an Attachment record and

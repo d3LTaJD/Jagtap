@@ -213,8 +213,6 @@ export default function EditableLineItemsTable({ enquiryId, initialProducts = []
               <th className="py-2.5 px-3 min-w-[100px]">Size</th>
               <th className="py-2.5 px-3 min-w-[100px]">Class</th>
               <th className="py-2.5 px-3 min-w-[130px]">End Connection</th>
-              <th className="py-2.5 px-3 min-w-[140px]">MOC</th>
-              <th className="py-2.5 px-3 min-w-[110px]">Category</th>
               <th className="py-2.5 px-3 min-w-[80px]">Qty</th>
               <th className="py-2.5 px-3 min-w-[110px]">Standard</th>
               <th className="py-2.5 px-2 w-10 text-center"></th>
@@ -226,7 +224,6 @@ export default function EditableLineItemsTable({ enquiryId, initialProducts = []
               const size = getDynVal(prod, 'valve_size') || getDynVal(prod, 'size');
               const pClass = getDynVal(prod, 'valve_class') || getDynVal(prod, 'class') || getDynVal(prod, 'pressure_class');
               const endConn = getDynVal(prod, 'valve_end_connection') || getDynVal(prod, 'end_connection') || getDynVal(prod, 'endConnection') || getDynVal(prod, 'valve_ends');
-              const moc = getDynVal(prod, 'valve_moc_body') || getDynVal(prod, 'material') || getDynVal(prod, 'moc') || getDynVal(prod, 'shellMaterial') || getDynVal(prod, 'materialGrade');
 
               return (
                 <tr key={prod._id || idx} className="hover:bg-slate-50/80 transition-colors">
@@ -247,7 +244,6 @@ export default function EditableLineItemsTable({ enquiryId, initialProducts = []
                       {size && <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100">Size: {size}</span>}
                       {pClass && <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100">Class: {pClass}</span>}
                       {endConn && <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">End: {endConn}</span>}
-                      {moc && <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-mono">MOC: {moc}</span>}
                     </div>
                   </td>
 
@@ -323,33 +319,6 @@ export default function EditableLineItemsTable({ enquiryId, initialProducts = []
                     >
                       <option value="">(blank)</option>
                       {masterDataOptions.endConnections.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </td>
-
-                  {/* MOC Dropdown */}
-                  <td className="py-2 px-2">
-                    <select
-                      value={moc}
-                      onChange={(e) => updateProductField(idx, 'valve_moc_body', e.target.value)}
-                      className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                    >
-                      <option value="">(blank)</option>
-                      {masterDataOptions.materials.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </td>
-
-                  {/* Category Dropdown */}
-                  <td className="py-2 px-2">
-                    <select
-                      value={prod.category || productCategory || 'Valves'}
-                      onChange={(e) => updateProductField(idx, 'category', e.target.value)}
-                      className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-700 focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                    >
-                      {masterDataOptions.categories.map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
                     </select>

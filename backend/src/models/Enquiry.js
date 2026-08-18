@@ -70,6 +70,7 @@ const enquirySchema = new mongoose.Schema({
 
   products: [
     {
+      lineItemId: { type: String },
       description: { type: String, default: '' },
       quantity: { type: Number, default: 1 },
       unit: {
@@ -85,6 +86,11 @@ const enquirySchema = new mongoose.Schema({
         enum: ['raw', 'validated', 'approved', 'needs_review'],
         default: 'raw'
       },
+      sourceSpecifications: { type: mongoose.Schema.Types.Mixed, default: {} },
+      normalizedSpecifications: { type: mongoose.Schema.Types.Mixed, default: {} },
+      masterData: { type: mongoose.Schema.Types.Mixed, default: {} },
+      derivedSpecifications: { type: mongoose.Schema.Types.Mixed, default: {} },
+      validation: { type: mongoose.Schema.Types.Mixed, default: { isValid: true, warnings: [], needsManualReview: false } },
       fieldConfidences: { type: mongoose.Schema.Types.Mixed, default: {} },
       dynamicFields: { type: mongoose.Schema.Types.Mixed, default: {} }
     }

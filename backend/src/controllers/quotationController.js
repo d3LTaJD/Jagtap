@@ -5,6 +5,7 @@ const { createNotification, notifyRoles, sendEmail } = require('../services/noti
 const { logActivity } = require('../utils/logger');
 const { getNextSequenceValue } = require('../utils/counter');
 const { hasPermission } = require('../config/permissions');
+const { calculateQuotationPricing } = require('../utils/quotationCalculator');
 
 exports.createQuotation = async (req, res, next) => {
   try {
@@ -17,7 +18,7 @@ exports.createQuotation = async (req, res, next) => {
     const seq = await getNextSequenceValue(prefix);
     req.body.quotationId = `${prefix}${String(seq).padStart(4, '0')}`;
 
-    // Set standard defaults for Technical & Commercial parameters
+    // Set standard defaults matching Offer Formates.xlsx
     const defaultManufacturerName = 'M/s. PETRO VALVES PVT LTD';
     const defaultOriginOfGoods = 'INDIA';
     const defaultWeightDimensions = 'This details given at the time of dispatch';
@@ -25,14 +26,15 @@ exports.createQuotation = async (req, res, next) => {
     const defaultDeliveryTimeHeader = 'Provided in COMMERCIAL PART - III';
 
     const defaultPriceBasis = 'Ex Works Ahmedabad.';
-    const defaultPackingForwardingTerms = 'Extra as given in Price Part - II, If required in wooden box then charge extra';
+    const defaultPackingForwardingTerms = 'Extra as given in Price Part - II, If required in wooden box packing & NIL for loose Plastic packing.';
     const defaultFreightTerms = 'Extra at actual to your account.';
-    const defaultTaxDutyTerms = 'Extra at actual to your account (18% GST default)';
+    const defaultTaxDutyTerms = 'Extra at actual to your account (18% GST) as given in Price Part - II.';
     const defaultValidityTerms = 'Three Month from the date of Quote';
-    const defaultTpiTerms = 'We will offer valves to your nominated TPIA agency. Charges towards TPIA fees will be to your account.';
+    const defaultTpiTerms = 'We will offer valves to your nominated TPIA, charges towards TPIA fees will be Extra at actual to your account as given in Price Part - II.';
     const defaultTransitInsurance = 'In your scope only.';
-    const defaultGuaranteeTerms = '12 months from the date of commissioning or 18 months from the date of dispatch';
-    const defaultPaymentTerms = '10% Advance along with PO & balance payment 90% against Proforma Invoice before dispatch.';
+    const defaultGuaranteeTerms = '12 months from the date of commissioning or 18 months from the date of last shipment which ever is earlier.';
+    const defaultPaymentTerms = '10% Advance along with PO & 20% with approved QAP & GAD Balance against Performa Invoice prior to dispatch.';
+    const defaultDeliverySchedule = '12 weeks as per certification from the date of approval of technical documents and advance payment.';
 
     let extractedTerms = {};
 
@@ -84,6 +86,16 @@ exports.createQuotation = async (req, res, next) => {
           console.error('[Quotation Controller] AI term extraction failed:', err.message);
           return {};
         });
+      }
+
+      // Copy enquiry scope of supply if not specified
+      if (!req.body.scopeOfSupply) {
+        req.body.scopeOfSupply = enquiry.productDescription || '';
+      }
+
+      // Auto-populate items from enquiry products / emails / attachments if items array is empty or omitted
+      if (!req.body.items || !Array.isArray(req.body.items) || req.body.items.length === 0) {
+        req.body.items = await extractItemsFromEnquiry(enquiry);
       }
 
       // Copy enquiry dynamicFields to parent and to each item
@@ -138,6 +150,10 @@ exports.createQuotation = async (req, res, next) => {
     if (extractedTerms.deliverySchedule) {
       req.body.deliverySchedule = req.body.deliverySchedule || extractedTerms.deliverySchedule;
     }
+
+    const calculated = calculateQuotationPricing(req.body);
+    req.body.items = calculated.items;
+    req.body.commercialTotals = calculated.commercialTotals;
 
     const quotation = await Quotation.create(req.body);
     
@@ -263,13 +279,20 @@ exports.updateQuotationStatus = async (req, res, next) => {
 
     const TECHNICAL_FIELDS = [
       'manufacturerName', 'originOfGoods', 'weightDimensions', 'technicalDocuments',
-      'deliveryTimeHeader', 'scopeOfSupply', 'exclusions'
+      'deliveryTimeHeader', 'scopeOfSupply', 'exclusions', 'pmcConsultant', 'projectName',
+      'kindAttention', 'enquiryRefText', 'subjectText', 'salutationOpeningText',
+      'technicalSpecificationClause', 'technicalDeviations'
     ];
 
     const COMMERCIAL_FIELDS = [
       'priceBasis', 'packingForwardingTerms', 'freightTerms', 'taxDutyTerms',
       'validityTerms', 'tpiTerms', 'transitInsurance', 'guaranteeTerms',
-      'paymentTerms', 'commercialTotals', 'costSummary', 'validUntil', 'deliverySchedule'
+      'paymentTerms', 'commercialTotals', 'costSummary', 'validUntil', 'deliverySchedule',
+      'pricePartNotice', 'ndtRequirementText', 'specialTestingRequirementText',
+      'sparesMandayChargesText', 'cert32Terms', 'cert32Percent', 'pfTerms', 'pfPercent',
+      'tpiaNoticeText', 'tpiCharges', 'gstRate', 'certificationChargesTerms',
+      'commercialNotes', 'cancellationTerms', 'jurisdictionTerms',
+      'signatoryName', 'signatoryDesignation', 'signatoryPhone'
     ];
 
     TECHNICAL_FIELDS.forEach(f => {
@@ -328,7 +351,13 @@ exports.updateQuotationStatus = async (req, res, next) => {
       'status', 'comments', 'assignedTo', 'files', 'dynamicFields', 'items',
       'manufacturerName', 'originOfGoods', 'weightDimensions', 'technicalDocuments', 'deliveryTimeHeader',
       'priceBasis', 'packingForwardingTerms', 'freightTerms', 'taxDutyTerms', 'validityTerms', 'tpiTerms', 'transitInsurance', 'guaranteeTerms',
-      'paymentTerms', 'commercialTotals', 'scopeOfSupply', 'exclusions', 'deliverySchedule', 'validUntil'
+      'paymentTerms', 'commercialTotals', 'scopeOfSupply', 'exclusions', 'deliverySchedule', 'validUntil',
+      'pmcConsultant', 'projectName', 'kindAttention', 'enquiryRefText', 'subjectText', 'salutationOpeningText',
+      'technicalSpecificationClause', 'technicalDeviations',
+      'pricePartNotice', 'ndtRequirementText', 'specialTestingRequirementText', 'sparesMandayChargesText',
+      'cert32Terms', 'cert32Percent', 'pfTerms', 'pfPercent', 'tpiaNoticeText', 'tpiCharges', 'gstRate',
+      'certificationChargesTerms', 'commercialNotes', 'cancellationTerms', 'jurisdictionTerms',
+      'signatoryName', 'signatoryDesignation', 'signatoryPhone'
     ];
     const updateData = {};
     fields.forEach(f => {
@@ -336,6 +365,17 @@ exports.updateQuotationStatus = async (req, res, next) => {
         updateData[f] = req.body[f];
       }
     });
+
+    if (updateData.items || updateData.cert32Percent !== undefined || updateData.pfPercent !== undefined || updateData.tpiCharges !== undefined || updateData.gstRate !== undefined) {
+      const mergedForCalc = {
+        ...originalQuotation.toObject(),
+        ...updateData,
+        items: updateData.items || originalQuotation.items || []
+      };
+      const calculated = calculateQuotationPricing(mergedForCalc);
+      updateData.items = calculated.items;
+      updateData.commercialTotals = calculated.commercialTotals;
+    }
 
     const { status, assignedTo } = req.body;
     if (status === 'APPROVED') updateData.approvedBy = req.user._id;
@@ -391,84 +431,14 @@ exports.downloadPDF = async (req, res, next) => {
   try {
     const quotation = await Quotation.findById(req.params.id)
       .populate('customer')
-      .populate('enquiry');
+      .populate('enquiry')
+      .populate('preparedBy', 'fullName');
       
     if (!quotation) {
       return res.status(404).json({ status: 'error', message: 'Quotation not found' });
     }
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <style>
-            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
-            .header { border-bottom: 2px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
-            .header h1 { margin: 0; color: #1e40af; }
-            .details { margin-bottom: 40px; }
-            .details p { margin: 5px 0; }
-            .items-table { border-collapse: collapse; width: 100%; margin-bottom: 40px; }
-            .items-table th, .items-table td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
-            .items-table th { background-color: #f8fafc; color: #475569; }
-            .total { text-align: right; font-size: 1.25rem; font-weight: bold; color: #0f172a; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>PETRO VALVE</h1>
-            <p>Official Commercial Quotation</p>
-          </div>
-          <div class="details">
-            <p><strong>Quotation Ref:</strong> ${quotation.quotationId}</p>
-            <p><strong>Date:</strong> ${new Date(quotation.createdAt).toLocaleDateString('en-IN')}</p>
-            <p><strong>Customer:</strong> ${quotation.customer?.companyName || 'N/A'}</p>
-          </div>
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th>Qty</th>
-                <th>Unit Price (INR)</th>
-                <th>Total (INR)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${quotation.items.map(item => `
-                <tr>
-                  <td>${item.description}</td>
-                  <td>${item.quantity}</td>
-                  <td>Rs. ${(item.unitPrice || 0).toLocaleString('en-IN')}</td>
-                  <td>Rs. ${(item.lineTotalExclGST || 0).toLocaleString('en-IN')}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          <div class="total">
-            Grand Total (Excl. GST): Rs. ${(quotation.commercialTotals?.grandTotal || 0).toLocaleString('en-IN')}
-          </div>
-        </body>
-      </html>
-    `;
-
-    const launchArgs = [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-first-run',
-      '--no-zygote'
-    ];
-
-    const browser = await puppeteer.launch({ 
-      headless: 'new', 
-      args: launchArgs,
-      ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {})
-    });
-    const page = await browser.newPage();
-    await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' } });
-    await browser.close();
+    const pdfBuffer = await generateQuotationPdf(quotation);
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -553,6 +523,147 @@ exports.deleteQuotation = async (req, res, next) => {
     });
 
     res.status(200).json({ status: 'success', message: 'Quotation deleted' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+async function extractItemsFromEnquiry(enquiry) {
+  const EmailMessage = require('../models/EmailMessage');
+  const boqParserService = require('../services/boqParserService');
+
+  let items = [];
+
+  // 1. If enquiry has structured products array
+  if (enquiry.products && enquiry.products.length > 0) {
+    items = enquiry.products.map((p, idx) => ({
+      itemNo: p.itemNo || idx + 1,
+      description: p.description || '',
+      productCategory: p.category || enquiry.productCategory || 'Valves',
+      quantity: p.quantity || 1,
+      unit: p.unit || 'NOS',
+      materialGrade: p.dynamicFields?.valve_moc_body?.value || p.dynamicFields?.valve_moc_body || p.dynamicFields?.body_material?.value || p.dynamicFields?.body_material || p.dynamicFields?.moc?.value || p.dynamicFields?.moc || '',
+      applicableStandard: p.standardCode || enquiry.standardCode || '',
+      unitPrice: p.unitPrice || 0,
+      lineTotalExclGST: p.lineTotalExclGST || 0,
+      dynamicFields: { ...(p.dynamicFields || {}) }
+    }));
+    return items;
+  }
+
+  // 2. Try parsing email thread messages
+  if (enquiry.threadId) {
+    const emails = await EmailMessage.find({ threadId: enquiry.threadId });
+    for (const email of emails) {
+      if (email.bodyText) {
+        const parsed = boqParserService.parseEmailBodyLineItems(email.bodyText);
+        if (parsed && parsed.length > 0) {
+          items = parsed.map((p, pIdx) => ({
+            itemNo: pIdx + 1,
+            description: p.productDescription || p.description || '',
+            productCategory: p.productCategory || enquiry.productCategory || 'Valves',
+            quantity: p.quantity || 1,
+            unit: p.unit || 'NOS',
+            materialGrade: p.materialGrade || '',
+            applicableStandard: p.applicableStandard || enquiry.standardCode || '',
+            unitPrice: 0,
+            lineTotalExclGST: 0,
+            dynamicFields: {}
+          }));
+          break;
+        }
+      }
+    }
+  }
+
+  // 3. Try parsing attachments extracted text
+  if (items.length === 0 && enquiry.attachmentsList && enquiry.attachmentsList.length > 0) {
+    for (const att of enquiry.attachmentsList) {
+      if (att.extractedText) {
+        const parsed = boqParserService.parseEmailBodyLineItems(att.extractedText);
+        if (parsed && parsed.length > 0) {
+          items = parsed.map((p, pIdx) => ({
+            itemNo: pIdx + 1,
+            description: p.productDescription || p.description || '',
+            productCategory: p.productCategory || enquiry.productCategory || 'Valves',
+            quantity: p.quantity || 1,
+            unit: p.unit || 'NOS',
+            materialGrade: p.materialGrade || '',
+            applicableStandard: p.applicableStandard || enquiry.standardCode || '',
+            unitPrice: 0,
+            lineTotalExclGST: 0,
+            dynamicFields: {}
+          }));
+          break;
+        }
+      }
+    }
+  }
+
+  // 4. Try parsing productDescription text if it contains line items
+  if (items.length === 0 && enquiry.productDescription) {
+    const parsed = boqParserService.parseEmailBodyLineItems(enquiry.productDescription);
+    if (parsed && parsed.length > 0) {
+      items = parsed.map((p, pIdx) => ({
+        itemNo: pIdx + 1,
+        description: p.productDescription || p.description || '',
+        productCategory: p.productCategory || enquiry.productCategory || 'Valves',
+        quantity: p.quantity || 1,
+        unit: p.unit || 'NOS',
+        materialGrade: p.materialGrade || '',
+        applicableStandard: p.applicableStandard || enquiry.standardCode || '',
+        unitPrice: 0,
+        lineTotalExclGST: 0,
+        dynamicFields: {}
+      }));
+    }
+  }
+
+  // 5. Fallback single product item
+  if (items.length === 0) {
+    items = [{
+      itemNo: 1,
+      description: enquiry.productDescription || 'Supply of valves as per requirement',
+      productCategory: enquiry.productCategory || 'Valves',
+      quantity: enquiry.quantity || 1,
+      unit: 'NOS',
+      materialGrade: enquiry.dynamicFields?.valve_moc_body?.value || enquiry.dynamicFields?.valve_moc_body || enquiry.dynamicFields?.body_material?.value || enquiry.dynamicFields?.body_material || enquiry.dynamicFields?.moc?.value || enquiry.dynamicFields?.moc || '',
+      applicableStandard: enquiry.standardCode || '',
+      unitPrice: 0,
+      lineTotalExclGST: 0,
+      dynamicFields: { ...(enquiry.dynamicFields || {}) }
+    }];
+  }
+
+  return items;
+}
+
+exports.syncEnquiryItems = async (req, res, next) => {
+  try {
+    const quotation = await Quotation.findById(req.params.id);
+    if (!quotation) {
+      return res.status(404).json({ status: 'fail', message: 'Quotation not found' });
+    }
+    if (!quotation.enquiry) {
+      return res.status(400).json({ status: 'fail', message: 'No linked enquiry found for this quotation' });
+    }
+
+    const enquiry = await Enquiry.findById(quotation.enquiry).populate('attachmentsList');
+    if (!enquiry) {
+      return res.status(404).json({ status: 'fail', message: 'Linked enquiry not found' });
+    }
+
+    const extractedItems = await extractItemsFromEnquiry(enquiry);
+    const calculated = calculateQuotationPricing({ ...quotation.toObject(), items: extractedItems });
+    quotation.items = calculated.items;
+    quotation.commercialTotals = calculated.commercialTotals;
+    await quotation.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully extracted ${extractedItems.length} item(s) from enquiry!`,
+      data: { quotation: stripQuotationPricing(quotation, req.user) }
+    });
   } catch (err) {
     next(err);
   }

@@ -15,6 +15,7 @@ router.route('/:id')
   .delete(requirePermission('Quotation', 'delete'), quotationController.deleteQuotation);
 
 router.patch('/:id/status', requirePermission('Quotation', 'edit'), quotationController.updateQuotationStatus);
+router.post('/:id/sync-enquiry', requirePermission('Quotation', 'edit'), quotationController.syncEnquiryItems);
 router.post('/:id/generate-pdf', requirePermission('Quotation', 'edit'), quotationController.generatePdf);
 
 router.route('/:id/pdf')

@@ -4,7 +4,7 @@ import {
   CalendarDays, List, AlertCircle, Clock, CheckCircle2, Loader2, 
   ChevronLeft, ChevronRight, Plus, X, Trash2, Pencil, Search, 
   Filter, ArrowUpDown, ChevronDown, MoreVertical, Calendar,
-  LayoutGrid
+  LayoutGrid, Paperclip, FileText
 } from 'lucide-react';
 import api from '../api/client';
 import AutocompleteSelect from '../components/AutocompleteSelect';
@@ -23,7 +23,13 @@ const STATUS_COLORS = {
   'Cancelled': 'bg-red-50 text-red-500 border-red-200',
 };
 
-const emptyForm = { title: '', description: '', dueDate: '', dueTime: '', priority: 'Medium', assignedTo: '', status: 'To Do' };
+const getDownloadUrl = (fileKey) => {
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  const serverBase = apiBase.replace(/\/api\/?$/, '');
+  return `${serverBase}/api/files/download-local/${encodeURIComponent(fileKey)}`;
+};
+
+const emptyForm = { title: '', description: '', dueDate: '', dueTime: '', priority: 'Medium', assignedTo: '', status: 'To Do', linkedEnquiry: '', attachments: [] };
 
 const Tasks = () => {
   const [tasks, setTasks] = useState([]);
@@ -34,6 +40,7 @@ const Tasks = () => {
   const [formData, setFormData] = useState({ ...emptyForm });
   const [submitLoading, setSubmitLoading] = useState(false);
   const [users, setUsers] = useState([]);
+  const [enquiryOptions, setEnquiryOptions] = useState([]);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = 'success') => {
@@ -47,7 +54,18 @@ const Tasks = () => {
   const [sortBy, setSortBy] = useState('dueDate');
   const [sortOrder, setSortOrder] = useState('asc');
 
-  useEffect(() => { fetchTasks(); fetchUsers(); }, [page, filters, sortBy, sortOrder]);
+  useEffect(() => { fetchTasks(); fetchUsers(); fetchEnquiries(); }, [page, filters, sortBy, sortOrder]);
+
+  const fetchEnquiries = async () => {
+    try {
+      const res = await api.get('/enquiries?limit=100');
+      const list = res.data.data.enquiries || [];
+      setEnquiryOptions(list.map(e => ({
+        value: e._id,
+        label: `${e.enquiryId} - ${e.customerName || e.clientName || 'Customer'} (${e.productCategory || 'Custom'})`
+      })));
+    } catch (err) {}
+  };
 
   const fetchTasks = async () => {
     setLoading(true);
@@ -92,6 +110,53 @@ const Tasks = () => {
     } finally { setSubmitLoading(false); }
   };
 
+  const [uploadingFile, setUploadingFile] = useState(false);
+
+  const handleFileUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingFile(true);
+    try {
+      const uploadedAttachments = [...(formData.attachments || [])];
+      for (const file of files) {
+        const data = new FormData();
+        data.append('file', file);
+        data.append('module', 'Task');
+
+        const res = await api.post('/files/upload', data, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (res.data?.data?.file) {
+          const fileMeta = res.data.data.file;
+          uploadedAttachments.push({
+            fileName: fileMeta.originalName || fileMeta.fileName,
+            originalName: fileMeta.originalName || fileMeta.fileName,
+            fileKey: fileMeta.fileKey,
+            mimeType: fileMeta.mimeType,
+            size: fileMeta.size
+          });
+        }
+      }
+      setFormData(prev => ({ ...prev, attachments: uploadedAttachments }));
+      showToast('File(s) uploaded');
+    } catch (err) {
+      console.error(err);
+      showToast('Error uploading file', 'error');
+    } finally {
+      setUploadingFile(false);
+      e.target.value = '';
+    }
+  };
+
+  const removeAttachment = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      attachments: prev.attachments.filter((_, idx) => idx !== index)
+    }));
+  };
+
   const openEdit = (task) => {
     setEditingTask(task);
     setFormData({
@@ -99,6 +164,8 @@ const Tasks = () => {
       dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '',
       dueTime: task.dueTime || '', priority: task.priority || 'Medium',
       assignedTo: task.assignedTo?._id || '', status: task.status || 'To Do',
+      linkedEnquiry: task.linkedEnquiry?._id || task.linkedEnquiry || '',
+      attachments: task.attachments || []
     });
     setShowModal(true);
   };
@@ -239,7 +306,7 @@ const Tasks = () => {
                       <div className="flex flex-col">
                         <span className="text-sm font-bold text-slate-900 group-hover:text-brand-600 transition-colors">{task.title}</span>
                         <span className="text-xs text-slate-500 mt-1 line-clamp-1">{task.description || 'No description'}</span>
-                        <div className="flex items-center gap-2 mt-2">
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
                            {task.linkedEnquiry && (
                              <Link to={`/app/enquiries/${task.linkedEnquiry._id}`} className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
                                #{task.linkedEnquiry.enquiryId}
@@ -247,6 +314,24 @@ const Tasks = () => {
                            )}
                            <span className="text-[10px] font-mono text-slate-400">ID: {task.taskId}</span>
                         </div>
+
+                        {task.attachments && task.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {task.attachments.map((att, attIdx) => (
+                              <a
+                                key={attIdx}
+                                href={getDownloadUrl(att.fileKey)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 hover:bg-brand-50 border border-slate-200 hover:border-brand-200 rounded-md text-[11px] font-semibold text-brand-600 transition-all"
+                                title="Download attachment"
+                              >
+                                <Paperclip className="w-3 h-3 text-brand-500" />
+                                <span className="max-w-[150px] truncate">{att.originalName || att.fileName}</span>
+                              </a>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -428,6 +513,42 @@ const Tasks = () => {
                     placeholder="Select user..." 
                     allowClear={true} 
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Link to Enquiry (Optional)</label>
+                  <AutocompleteSelect 
+                    options={enquiryOptions} 
+                    value={formData.linkedEnquiry} 
+                    onChange={v => setFormData({...formData, linkedEnquiry: v})} 
+                    placeholder="Search & select Enquiry..." 
+                    allowClear={true} 
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">File Attachments</label>
+                  <div className="flex flex-col gap-2">
+                    <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-50 border border-dashed border-slate-300 hover:border-brand-500 rounded-xl text-xs font-bold text-slate-600 cursor-pointer transition-all">
+                      {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin text-brand-500" /> : <Paperclip className="w-4 h-4 text-brand-500" />}
+                      <span>{uploadingFile ? 'Uploading file...' : 'Choose File(s) to Upload'}</span>
+                      <input type="file" multiple onChange={handleFileUpload} disabled={uploadingFile} className="hidden" />
+                    </label>
+
+                    {formData.attachments && formData.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {formData.attachments.map((att, idx) => (
+                          <span key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-200/80 text-slate-700 text-xs font-semibold">
+                            <FileText className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="max-w-[160px] truncate">{att.originalName || att.fileName}</span>
+                            <button type="button" onClick={() => removeAttachment(idx)} className="text-slate-400 hover:text-red-600 p-0.5">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

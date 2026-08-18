@@ -1,0 +1,347 @@
+Format No. R/5.1.1/3 Rev 00 Effective From 15-May-2026 	Unit-II : API 6D Monogram Licencee Unit
+Offer No.: 	Date: 	06/07/26
+To,
+M/s.
+E-Mail 	on DT. 	05/07/26
+PV/J/QTN/P-001/26-27
+Subject 	: 	Offer for Valves as per your requirements.
+Kind Attention 	: 	Mr. Jay
+Enquiry Reference: 	Your Enquiry by
+Project 	: 	Pipeline Project
+Contact No:- 	+91 90237232XX
+E-Mail ID:-
+Ahmedabad
+ABC Constractor
+•
+•
+•
+Dear Sir,
+We acknowledge with thanks the receipt of your above referred enquiry and we are pleased to submit our proposal
+as under.
+TECHNICAL PART – I
+• We offered our valves as per Specification given in Contract Review Check.
+• Deviation, If any
+sales@petrovalves.co.in
+
+-- 1 of 5 --
+
+Petro Valves Pvt.Ltd.
+Format No. R/5.1.3.5/2 Rev04 Effective From 15-May-2026	
+Prepade By:	
+(Marketing / Sales Assistance)
+Approved By:	
+(Incharge-MKT)
+1 OF 2
+NO 	PV/J/QTN/P-001/26-27
+DATE 	06/07/26
+1 	2 	3 	4 	5 	6 	7 	8
+A 	Valve Type 	BALL 	BALL 	GLOBE 	GLOBE 	CHECK 	CHECK 	GATE 	GATE
+B 	Size in MM 	15 	200 	25 	50 	20 	50 	20 	150
+C 	Class 	800 	600 	800 	300 	800 	300 	800 	300
+D 	Required API 6D Monogram 	No 	No 	No 	No 	No 	No 	No 	No
+E 	Quality Specification Levels (QSL)
+QSL 2, 3, 3G, 4 & 4G 	No 	No 	No 	No 	No 	No 	No 	No
+1 	Design Type 	3 P/C LONG 	2 P/C LONG 	OS&Y 	OS&Y 	LIFT 	SWING 	2 P/C LONG 	2 P/C LONG
+2 	Bore 	FULL 	FULL 	- 	- 	- 	- 	- 	-
+3 	End Type 	SW WITH PUPS 	FLANGE 	SW 	FLANGE 	SW End 	Flange 	SW 	Flange
+4 	Operating of Valves 	HANDLE 	GEAR 	Hand Wheel 	HAND WHEEL 	- 	- 	HAND WHEEL 	Hand wheel
+5 	Ball Type 	FLOATING 	TMBV 	Globe 	Globe 	- 	- 	- 	-
+6 	Direction 	Bi Directional 	Bi Directional 	Uni Directional 	Uni Directional 	Uni Directional 	Uni Directional 	Bi Directional 	Bi Directional
+7 	Service (A) Liquid (B) Gas (C) Others 	GAS 	GAS 	GAS 	GAS 	Gas 	GAS 	GAS 	Gas
+8 	Seat Type 	Soft Seat 	Primary Metal
+Secondary Soft 	Metal Seat 	Metal Seat 	Metal Seat 	Metal Seat 	Metal Seat 	Metal Seat
+9 	Valve Design Standard 	ISO 17292 	API 6D 25TH ED 	ISO 15761 	BS 1873 	BS 1868 	API 6D 25TH ED 	BS 5352 	API 6D 25TH ED
+10 	Valve Testing Standard 	API 598 	API 6D 25TH ED 	API 598 	API 598 	API 598 	API 6D 25TH ED 	API 598 	API 6D 25TH ED
+11 	Minimum Design Operating Pressure 	1750 PSI 	1335 PSI 	1750 PSI 	677 PSI 	1750 PSI 	677 PSI 	1750 PSI 	677 PSI
+12 	Maximum Design Operating Pressure 	1975 PSI 	1480 PSI 	1975 PSI 	740 PSI 	1975 PSI 	740 PSI 	1975 PSI 	740 PSI
+13 	Minimium Design Temperature 	-29° C 	-29° C 	-29° C 	-29° C 	-29° C 	-29° C 	-29° C 	-29° C
+14 	Maximum Design Temperature 	121° C 	121° C 	121° C 	121° C 	121° C 	121° C 	121° C 	121° C
+15 	Drain Connection Size in MM 	No 	15 	No 	No 	No 	No 	No 	No
+16 	Vent Connection Size in MM 	No 	15 	No 	No 	No 	No 	No 	No
+17 	Lifting Lug (25 Kg And Above) 	No 	Yes 	No 	No 	No 	No 	No 	No
+18 	Support Foot Required 	No 	No 	No 	No 	No 	No 	No 	No
+19 	Fire Safe Design 	API 607 	API 6FA 	No 	No 	No 	No 	No 	No
+20 	Antistatic Device 	Yes 	Yes 	No 	No 	No 	No 	No 	No
+21 	Locking Device 	No 	No 	No 	No 	No 	No 	No 	No
+22 	Is Valve For Pigging:
+(A) Ball Valve (B) Gate Valve 	No 	No 	No 	No 	No 	No 	No 	No
+23 	Pressure Relief Device 	No 	No 	No 	No 	No 	No 	No 	No
+24 	Cavity Relief Valve 	No 	No 	No 	No 	No 	No 	No 	No
+25 	By-Pass Connection 	No 	No 	No 	No 	No 	No 	No 	No
+26 	Corrossion Alloance in MM 	1.5 	1.5 	1.5 	1.5 	1.5 	1.5 	1.5 	1.5
+27 	Any Special Requirement 	No 	No 	No 	No 	No 	No 	No 	No
+28 	Body/Side P/C/Bonnet/Trunnion 	ASTM A 105 	ASTM A216 WCB 	ASTM A 105 	ASTM A216 Gr. WCB 	ASTM A 105 	ASTM A 216 Gr WCB 	ASTM A105 	ASTM A216 Gr. WCB
+29 	Ball/Wedge/Disc 	SS 316 	ASTM A216 Gr.WCB
++ 75 MIC ENP
+13% Cr. Steel +
+STELLITED
+ASTM A479 Gr. 316
++ stellited 	13% CR. STEEL ASTM A 216 Gr WCB
++ 13% Cr. Steel
+13% Cr. Steel +
+STELLITED
+ASTM A 216 Gr WCB
++ Stellited
+30 	Stem/Hing 	SS 316 	ASTM A182 Gr.F6A
+Cl. 2 	13% Cr. Steel 	ASTM A479 Gr. 316 13% CR. STEEL ASTM A479 Gr. 410 	13% Cr. Steel 	ASTM A479 Gr. 410
+31 	Seat Ring (Soft Seat)/Seat Holder 	RPTFE 	RPTFE + ASTMA182
+Gr. F316
+13% Cr. Steel +
+STELLITED
+ASTM A479 Gr. 316
++ stellited 	13% CR. STEEL ASTM A 216 Gr WCB
++ 13% Cr. Steel
+13% Cr. Steel +
+STELLITED 	ASTM A479 Gr. 410
+32 	Stud & Nuts 	ASTM A193 Gr. B7&
+ASTM A194 Gr.2H
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+(HDG)
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+ASTM A193 Gr. B7 &
+ASTM A194 Gr. 2H
+33 	Extended Bonnet 	No 	No 	No 	No 	No 	No 	No 	No
+34 	Material Test Certificates
+(EN 10204 3.1 or EN 10204 3.2) 	EN 10204 3.2 	EN 10204 3.2 	EN 10204 3.2 	EN 10204 3.2 	EN 10204 3.2 	EN 10204 3.2 	EN 10204 3.2 	EN 10204 3.2
+35 	RT 	No 	Yes 	No 	Yes 	No 	Yes 	No 	Yes
+36 	UT 	Yes 	No 	Yes 	No 	Yes 	No 	Yes 	No
+37 	DPT 	No 	No 	No 	No 	No 	No 	No 	No
+38 	MPT 	No 	No 	No 	No 	No 	No 	No 	No
+39 	NACE Requirement 	No 	No 	No 	No 	No 	No 	No 	No
+40 	Fugitive Emission Test/Helium Leak Test 	No 	No 	No 	No 	No 	No 	No 	No
+41 	Cryogenics Test 	No 	No 	No 	No 	No 	No 	No 	No
+42 	Demonstration of valve function under pressure and
+pipe loads and moments 	No 	No 	No 	No 	No 	No 	No 	No
+43 	IGC (Intergranular Corrosion Test) 	No 	No 	No 	No 	No 	No 	No 	No
+44 	PMI TEST 	No 	No 	No 	No 	No 	No 	No 	No
+45 	Chemical Test 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+46 	Physical Test 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+47 	Hardness Test Report On Pressure Containing Parts 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+48 	Hardness Test Report On Pressure Controlling Parts 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+49 	Heat Treatment Chart 	No 	No 	No 	No 	No 	No 	No 	No
+50 	Impact Hardness Test 	0° C 	0° C 	0° C 	0° C 	0° C 	0° C 	0° C 	0° C
+51 	PQR & WPS 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+52 	Solution Annealing 	No 	No 	No 	No 	No 	No 	No 	No
+53 	Seismic Testing 	No 	No 	No 	No 	No 	No 	No 	No
+54 	Calibration Certificate 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+55 	IBR/CE Certification 	No 	No 	No 	No 	No 	No 	No 	No
+56 	Design Validation as Per API 6D:25th Annexure's 	No 	No 	No 	No 	No 	No 	No 	No
+57 	Hydro Shell Test (PSI) / Duration (Min.) 	3050 (02) 	2250 (05) 	3050 (02) 	1125 (02) 	3050 (02) 	1125 (02) 	3050 (02) 	1125 (05)
+58 	Hydro Seat Test (PSI) / Duration (Min.) 	2250 (02) 	1650 (05) 	2250 (02) 	825 (02) 	2250 (02) 	825 (02) 	2250 (02) 	825 (05)
+59 	Air Seat Test (PSI) / Duration (Min.) 	100 (02) 	100 (05) 	100 (02) 	100 (02) 	- 	- 	100 (02) 	100(05)
+60 	DBB HYDRO FOR DBB VALVES
+(ONLY FOR TMBV VALVES) (PSI) / Duration (Min.) 	- 	1650 (05) 	- 	- 	- 	- 	- 	-
+61 	Back Seat Test (PSI) / Duration (Min.) 	- 	- 	2250 (02) 	825 (02) 	- 	- 	825 (05) 	825 (05)
+62 	Antistatic Test 	Yes 	Yes 	No 	No 	No 	No 	No 	No
+63 	Painting (DFT Micron) 	300 	300 	300 	300 	300 	300 	300 	300
+64 	Packing 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes 	Yes
+65 	Dispatch By 	By Road 	By Road 	By Road 	By Road 	By Road 	By Road 	By Road 	By Road
+66 	Location 	As per requirement As per requirement As per requirement As per requirement As per requirement As per requirement As per requirement As per requirement
+67 	Is there any special requirement 	No 	No 	No 	No 	No 	No 	No 	No
+ANNEXURE 	NAME
+(INFORMAATIVE (I)/NORMATIVE (N))
+ANNEX A 	Repair or Remanufacturing of Valves
+(I) 	- 	No 	- 	- 	- 	No 	- 	No
+ANNEX B 	Example of Valve Configurations
+(I) 	- 	No 	- 	- 	- 	No 	- 	No
+ANNEX C 	Valve End-to-end and Face-to-face Dimensions (N) 	- 	Yes 	- 	- 	- 	Yes 	- 	Yes
+ANNEX D 	Guidance for Travel Stops by Valve Type (I) 	- 	Yes 	- 	- 	- 	Yes 	- 	Yes
+ANNEX E 	Isolation Valve Features (I) 	- 	Yes, DBB 	- 	- 	- 	No 	- 	No
+ANNEX F 	Design Validation (I) 	- 	No 	- 	- 	- 	No 	- 	No
+ANNEX G 	External Coating for End Connections (N) 	- 	As per requirement 	- 	- 	- 	AS PER CLIENT
+REQUIREMENT 	- 	As per requirement
+ANNEX H 	Heat-treating Equipment Qualification (N) 	- 	Yes 	- 	- 	- 	Yes 	- 	Yes
+ANNEX I 	Quality Specification Level (QSL) and Supplimentery
+Testing (N) 	- 	No 	- 	- 	- 	No 	- 	No
+ANNEX J
+Requirements for Extended Hydrostatic Shell Test
+Duration and Records Retention for Valves in Jurisdictional
+Pipeline Systems (I)
+- 	No 	- 	- 	- 	No 	- 	No
+CONTRACT REVIEW CHECKLIST
+Offer Sr. NO.
+DESIGN SPECIFICATION
+MATERIAL OF CONSTRUCTION
+RAW MATERIAL & SUPPLEMENTARY REQUIRED TESTING DETAILS
+OTHER SPECIFICATION
+FINAL TESTING
+API 6D ANNEXURE REQUIREMENTS
+APPLICABLE
+YES/NO
+
+-- 2 of 5 --
+
+Petro Valves Pvt.Ltd.
+Format No. R/5.1.3.5/2 Rev04 Effective From 15-May-2026	
+Prepade By:	
+(Marketing / Sales Assistance)
+Approved By:	
+(Incharge-MKT)
+2 OF 2
+NO 	PV/J/QTN/P-001/26-27
+DATE 	06/07/26
+1 	2 	3 	4 	5 	6 	7 	8
+A 	Valve Type 	BALL 	BALL 	GLOBE 	GLOBE 	CHECK 	CHECK 	GATE 	GATE
+B 	Size in MM 	15 	200 	25 	50 	20 	50 	20 	150
+C 	Class 	800 	600 	800 	300 	800 	300 	800 	300
+D 	Required API 6D Monogram 	No 	No 	No 	No 	No 	No 	No 	No
+E 	Quality Specification Levels (QSL)
+QSL 2, 3, 3G, 4 & 4G 	No 	No 	No 	No 	No 	No 	No 	No
+CONTRACT REVIEW CHECKLIST
+Offer Sr. NO.
+DESIGN SPECIFICATION
+ANNEX K
+Purchase Specification Customization-Permissible
+Deviations to Specified Design and Manufacturing
+Requirments (N)
+- 	No 	- 	- 	- 	No 	- 	No
+ANNEX L 	Specified Customization-Supplemental Options to Specified
+Design and Manufacturing Requirments (I) 	- 	No 	- 	- 	- 	No 	- 	No
+ANNEX M 	Valves in Hydrogen (H2) Gas Service (I) 	- 	No 	- 	- 	- 	No 	- 	No
+ii) Weight and measurement act
+iii) Labor low for lifting of valve, lifting arrangement for valve weight more than 25 kg)
+iv) AERB for RT enclosure and RT Gun, When RT applicable
+K. Any different Between Inquiry and Offer - Yes / No ■
+D. All requirement defined & documented - Yes ■ / No
+E. Any differences from previously identified & resolved - Yes ■ / No
+F. Petro Valves has the capability to meet the customer's requirement - Yes ■ / No
+G. Is there any customer specified / provided training required - Yes / No ■
+If yes, What type of Training and intimate HR/QC for co-ordination ……………………………………
+H. Is there any customer specified supplier to be used- Yes / No ■
+If yes, supplier names and intimate purchase for formal approval ……………………………………
+I. Is there any risk for execution, design & supply of valves - Yes / No ■
+C. Any additional requirement for valves, which are not stated by customer & but necessary for valves:
+Yes ■ / No
+IF, YES, As above given details.
+B. All requirements specified by the customer- Yes ■ / No
+i) AERB for Steel material, Radioactive elements shall not be more than allowed Limit
+CONTRACT REVIEW - GENERAL
+A. Any legal requirement applicable – Yes ■ / No
+If Yes, which are FACTORY ACT, INDIAN ELECTRICITY, AUTOMATIC ENERGY REGULATORY BOARD
+
+-- 3 of 5 --
+
+Format No. R/5.1.1/3 Rev 00 Effective From 15-May-2026 	Unit-II : API 6D Monogram Licencee Unit
+1 	2 	3 	4 	5 	6 	7 	8 	0 	0
+BALL 	BALL 	GLOBE 	GLOBE 	CHECK 	CHECK 	GATE 	GATE 	0 	0
+15 	200 	25 	50 	20 	50 	20 	150 	0 	0
+800 	600 	800 	300 	800 	300 	800 	300 	0 	0
+2 	1 	5 	3 	4 	6 	4 	9
+₹ 2,200 	₹ 2,05,000 	₹ 2,500 	₹ 30,500 	₹ 3,400 	₹ 35,000 	₹ 4,000 	₹ 55,000
+UT
+Applicable
+RT
+Applicable
+UT
+Applicable
+RT
+Applicable
+UT
+Applicable
+RT
+Applicable
+UT
+Applicable
+RT
+Applicable
+₹ 0 	₹ 0 	₹ 0 	₹ 0 	₹ 0 	₹ 0 	₹ 0 	₹ 0 	₹ 0 	₹ 0
+₹ 2,200 	₹ 2,05,000 	₹ 2,500 	₹ 30,500 	₹ 3,400 	₹ 35,000 	₹ 4,000 	₹ 55,000 	₹ 0 	₹ 0
+₹ 4,400 	₹ 2,05,000 	₹ 12,500 	₹ 91,500 	₹ 13,600 	₹ 2,10,000 	₹ 16,000 	₹ 4,95,000 	₹ 0 	₹ 0
+5%
+5%
+Unit Rate
+Total Rate
+Unit Price
+Any NDT Requirement
+(i.e. RT,UT,MPT) then charges
+will be Extra at actual to your
+account.
+PRICE PART – II
+• We offer our Valves as below, considering Contract Review Check (Format No. R/5.1.3.5/2 Rev04).
+Enquiry Sr. NO.
+Valve Type
+Size in MM
+₹ 0
+Class
+If any Special Testing
+Requirement
+(i.e. Helium, Nitrogen, Vaccum,
+IGC, PMI, NACE, Paint) then
+charges will be Extra at actual
+to your account.
+Qunatity
+Spares, Manday required then
+charges will be Extra at actual
+to your account.
+Grand Total With GST 	₹ 14,31,104
+Extra for 3.2
+Certificatation Charges. 	₹ 52,400
+Extra for Packing &
+Forwarding Charges 	₹ 52,400
+Third Party Inspection (TPIA)
+required then charges will be
+Extra to your account.
+₹ 60,000
+Grand Total (Inc. TPI, P&F,
+Certi., etc.) 	₹ 12,12,800
+18%GST 	₹ 2,18,304
+
+-- 4 of 5 --
+
+Format No. R/5.1.1/3 Rev 00 Effective From 15-May-2026 	Unit-II : API 6D Monogram Licencee Unit
+10 weeks 	as per
+Three Month from the date of Quote
+We will offer valves to your nominated TPIA, charges towards TPIA fees will be Extra
+at actual to your account as given in Price Part – II.
+Certification Charges :
+Third Party Inspection :
+Delivery Period 	: EN 10204 3.2 	certification from the date of
+Validity 	:
+Extra at actual to your account (18% GST) as given in Price Part – II.	Tax & Duty 	:
+Packing & Forwarding :
+Freight 	:
+10% Advance along with PO & 20% with approved QAP & GAD Balance against
+Performa Invoice prior to dispatch.
+Terms of Payment 	:
+COMMERCIAL PART – III
+Prices Basis 	: 	Ex Works Ahmedabad.
+Extra as given in Price Part – II, If required in wooden box packing & NIL for loose
+Plastic packing.
+Extra at actual to your account.
+• 	After order acknowledgement - 30%
+approval of technical documents and advance payment.
+Extra as given in Price Part – II for 3.2 Certificates.
+Transit Insurance 	: 	In your scope only.
+Guarantee 	: 12 months from the date of commissioning or 18 months from the date of last
+shipment which ever is earlier.
+Notes 	:
+If RT, UT, PMI, IGC, NACE, Valves or Actuator Spares, Helium & Nitrogen tests
+required then charges will be extra at actual to your account as given in Price Part –
+II.
+If API monogram required then price increase of 25% extra at actual.
+We offer valves as per API-6D without any QSL requirements, if required in QSL-2 to 4b price increase
+upto 15% subject to QSL levels.
+PO Cancellation or Modified (qty reduced) charges are as follows:
+• 	After Manufacturing clearance - 50%
+• 	After receipt of Raw material - 100%
+Subject to Ahmedabad Jurisdiction only.
+Thanking you,
+Yours faithfully,
+For, Petro Valves Pvt Ltd.
+Jay Mistry
+(Sales & Projects)
+9023723212
+Enclosed: As above.
+
+-- 5 of 5 --
+

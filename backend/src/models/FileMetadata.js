@@ -7,7 +7,7 @@ const fileMetadataSchema = new mongoose.Schema({
   mimeType: { type: String, required: true },
   size: { type: Number, required: true },
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  module: { type: String, enum: ['Enquiry', 'Quotation', 'QAP', 'FollowUp', 'General', 'Temp'], required: true, default: 'Temp' },
+  module: { type: String, enum: ['Enquiry', 'Quotation', 'QAP', 'FollowUp', 'General', 'Temp', 'Task'], required: true, default: 'Temp' },
   entityId: { type: mongoose.Schema.Types.ObjectId },
   isPrivate: { type: Boolean, default: true }
 }, { timestamps: true });

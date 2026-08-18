@@ -40,3 +40,4 @@ backend/scratch/
 backend/backups/
 backend/uploads/
 backend/eng.traineddata
+*.pdf

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Loader2, ArrowLeft, Save, Trash2, Download, CheckCircle2,
   AlertTriangle, Trophy, XCircle, PauseCircle, Flag,
@@ -117,6 +118,8 @@ const EnquiryDetail = () => {
   const userRoleCode = getRoleCode(currentUser.role);
   const userSecRoleCode = getRoleCode(currentUser.secondaryRole);
   const userRoles = [userRoleCode, userSecRoleCode].filter(Boolean);
+
+  const [creatingQuotation, setCreatingQuotation] = useState(false);
   
   const ability = useAbility();
   const canEdit = ability.can('edit', 'Enquiry');
@@ -130,6 +133,25 @@ const EnquiryDetail = () => {
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleDirectCreateQuotation = async () => {
+    if (!enquiry || ['Lost', 'Abandoned'].includes(enquiry.status)) return;
+    setCreatingQuotation(true);
+    try {
+      const res = await api.post('/quotations', { enquiry: enquiry._id });
+      if (res.data?.data?.quotation?._id) {
+        showToast('Quotation created! Redirecting to quote editor...');
+        navigate(`/app/quotations/${res.data.data.quotation._id}`);
+      } else {
+        showToast('Failed to retrieve created quotation', 'error');
+      }
+    } catch (err) {
+      console.error('Direct quotation creation error:', err);
+      showToast(err.response?.data?.message || 'Error creating quotation', 'error');
+    } finally {
+      setCreatingQuotation(false);
+    }
   };
 
   // Close dropdowns on outside click
@@ -262,36 +284,61 @@ const EnquiryDetail = () => {
     }
   };
 
-  // ─── Export ───────────────────────────────────────────────────────────────
+  // ─── Export Excel XLSX ───────────────────────────────────────────────────
   const handleExport = () => {
-    const rows = [
-      ['Field', 'Value'],
-      ['Enquiry ID', enquiry.enquiryId],
-      ['Customer', enquiry.customer?.companyName || ''],
-      ['Contact', enquiry.customer?.primaryContactName || ''],
-      ['Mobile', enquiry.customer?.mobileNumber || ''],
-      ['Email', enquiry.customer?.emailAddress || ''],
-      ['Product Category', enquiry.productCategory || ''],
-      ['Description', enquiry.productDescription || ''],
-      ['Quantity', enquiry.quantity || ''],
-      ['Unit', enquiry.unit || ''],
-      ['Source Channel', enquiry.sourceChannel || ''],
-      ['Status', enquiry.status || ''],
-      ['Priority', enquiry.priority || ''],
-      ['Assigned To', enquiry.assignedTo?.name || ''],
-      ['Created At', new Date(enquiry.createdAt).toLocaleString('en-IN')],
-      ...Object.entries(enquiry.dynamicFields || {}).map(([k, v]) => [k, v]),
-    ];
+    try {
+      const overviewRows = [
+        ['Field', 'Value'],
+        ['Enquiry ID', enquiry.enquiryId],
+        ['Customer', enquiry.customer?.companyName || enquiry.senderCompany || ''],
+        ['Contact', enquiry.customer?.primaryContactName || enquiry.contactPerson || ''],
+        ['Mobile', enquiry.customer?.mobileNumber || enquiry.contactMobile || ''],
+        ['Email', enquiry.customer?.emailAddress || enquiry.contactEmail || ''],
+        ['Product Category', enquiry.productCategory || ''],
+        ['Description', enquiry.productDescription || ''],
+        ['Total Quantity', enquiry.quantity || ''],
+        ['Unit', enquiry.unit || ''],
+        ['Source Channel', enquiry.sourceChannel || ''],
+        ['Source Type', enquiry.sourceType || ''],
+        ['Status', enquiry.status || ''],
+        ['Priority', enquiry.priority || ''],
+        ['Assigned To', enquiry.assignedTo?.name || enquiry.assignedTo?.fullName || 'Unassigned'],
+        ['Created At', new Date(enquiry.createdAt).toLocaleString('en-IN')],
+        ...Object.entries(enquiry.dynamicFields || {}).map(([k, v]) => [formatFieldName(k), renderVal(v) || ''])
+      ];
 
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${enquiry.enquiryId}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('Exported to CSV');
+      const wb = XLSX.utils.book_new();
+      const wsOverview = XLSX.utils.aoa_to_sheet(overviewRows);
+      XLSX.utils.book_append_sheet(wb, wsOverview, 'Enquiry Overview');
+
+      if (enquiry.products && enquiry.products.length > 0) {
+        const lineItemRows = enquiry.products.map((item, idx) => {
+          const df = item.dynamicFields || {};
+          return {
+            'Sr No': idx + 1,
+            'Description': item.description || '',
+            'Quantity': item.quantity || 1,
+            'Unit': item.unit || 'NOS',
+            'Valve Type': df.valve_type || df.product_type || '',
+            'Size (mm)': df.valve_size || df.size || '',
+            'Pressure Class': df.valve_class || df.class || '',
+            'Body MOC': df.body_moc || df.body_material || '',
+            'Trim / Ball MOC': df.trim_moc || df.ball_moc || '',
+            'Stem MOC': df.stem_moc || '',
+            'Seat MOC': df.seat_moc || '',
+            'End Connection': df.end_connection || ''
+          };
+        });
+        const wsLineItems = XLSX.utils.json_to_sheet(lineItemRows);
+        XLSX.utils.book_append_sheet(wb, wsLineItems, 'Line Items');
+      }
+
+      XLSX.writeFile(wb, `${enquiry.enquiryId}.xlsx`);
+      showToast('Exported to Excel (.xlsx)');
+    } catch (err) {
+      console.error('[Export XLSX Error]', err);
+      showToast('Export to Excel failed', 'error');
+    }
   };
 
   // ─── Edit Panel ───────────────────────────────────────────────────────────
@@ -562,8 +609,8 @@ const EnquiryDetail = () => {
 
             {ability.can('create', 'Quotation') && (
             <button
-              onClick={() => navigate(`/app/quotations?createForEnquiry=${enquiry._id}`)}
-              disabled={['Lost', 'Abandoned'].includes(enquiry.status)}
+              onClick={handleDirectCreateQuotation}
+              disabled={creatingQuotation || ['Lost', 'Abandoned'].includes(enquiry.status)}
               className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
                 !['Lost', 'Abandoned'].includes(enquiry.status)
                   ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer shadow-sm shadow-emerald-500/20'
@@ -571,7 +618,8 @@ const EnquiryDetail = () => {
               }`}
               title={['Lost', 'Abandoned'].includes(enquiry.status) ? "Quotation generation is disabled for Lost or Abandoned enquiries." : "Create Quotation for this enquiry"}
             >
-              <FileCheck className="w-3.5 h-3.5" /> Create Quotation
+              {creatingQuotation ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileCheck className="w-3.5 h-3.5" />}
+              {creatingQuotation ? 'Generating Quote...' : 'Create Quotation'}
             </button>
             )}
           </div>

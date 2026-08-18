@@ -1,11 +1,20 @@
 const Task = require('../models/Task');
+const FollowUp = require('../models/FollowUp');
 const { createNotification } = require('../services/notificationService');
 
 // @desc    Create a new task
 // @route   POST /api/tasks
 exports.createTask = async (req, res) => {
   try {
-    const { title, description, dueDate, dueTime, priority, assignedTo, linkedEnquiry, linkedQuotation, status } = req.body;
+    const { title, description, dueDate, dueTime, priority, assignedTo, linkedEnquiry, linkedQuotation, status, attachments } = req.body;
+
+    const initialHistory = [{
+      action: 'CREATED',
+      performedBy: req.user._id,
+      performedByName: req.user.name || req.user.email,
+      details: `Task created and assigned. Status: ${status || 'To Do'}.`,
+      timestamp: new Date()
+    }];
 
     const task = await Task.create({
       title,
@@ -17,12 +26,15 @@ exports.createTask = async (req, res) => {
       assignedTo: assignedTo || req.user._id,
       linkedEnquiry: linkedEnquiry || null,
       linkedQuotation: linkedQuotation || null,
+      attachments: attachments || [],
       createdBy: req.user._id,
+      history: initialHistory
     });
 
     const populated = await Task.findById(task._id)
       .populate('assignedTo', 'name department')
-      .populate('createdBy', 'name');
+      .populate('createdBy', 'name')
+      .populate('completedBy', 'name');
 
     // Notify the assigned user (if different from creator)
     const targetUser = assignedTo || req.user._id;
@@ -36,6 +48,22 @@ exports.createTask = async (req, res) => {
       });
     }
 
+    // Auto-create FollowUp entry in linked Enquiry for complete audit trail
+    if (linkedEnquiry) {
+      try {
+        await FollowUp.create({
+          enquiryId: linkedEnquiry,
+          type: 'NOTE',
+          notes: `📌 [Task Created] "${title}" — Assigned to ${populated.assignedTo?.name || 'Unassigned'} (Due: ${dueDate ? new Date(dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'N/A'})`,
+          outcome: 'Task Opened',
+          followUpDate: new Date(),
+          createdBy: req.user._id
+        });
+      } catch (fErr) {
+        console.warn('Failed to auto-create FollowUp log for task creation:', fErr.message);
+      }
+    }
+
     res.status(201).json({ status: 'success', data: { task: populated } });
   } catch (error) {
     console.error('Create task error:', error);
@@ -47,12 +75,14 @@ exports.createTask = async (req, res) => {
 // @route   GET /api/tasks
 exports.getTasks = async (req, res) => {
   try {
-    const { status, assignedTo, priority, search, page = 1, limit = 50, sortBy = 'dueDate', sortOrder = 'asc' } = req.query;
+    const { status, assignedTo, priority, search, linkedEnquiry, linkedQuotation, page = 1, limit = 50, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
     
     const filter = {};
     if (status) filter.status = status;
     if (assignedTo) filter.assignedTo = assignedTo;
     if (priority) filter.priority = priority;
+    if (linkedEnquiry) filter.linkedEnquiry = linkedEnquiry;
+    if (linkedQuotation) filter.linkedQuotation = linkedQuotation;
     
     if (search) {
       filter.$or = [
@@ -67,6 +97,7 @@ exports.getTasks = async (req, res) => {
     const tasks = await Task.find(filter)
       .populate('assignedTo', 'name department')
       .populate('createdBy', 'name')
+      .populate('completedBy', 'name')
       .populate('linkedEnquiry', 'enquiryId')
       .populate('linkedQuotation', 'quotationId')
       .sort(sort)
@@ -94,6 +125,7 @@ exports.getTask = async (req, res) => {
     const task = await Task.findById(req.params.id)
       .populate('assignedTo', 'name department')
       .populate('createdBy', 'name')
+      .populate('completedBy', 'name')
       .populate('linkedEnquiry', 'enquiryId')
       .populate('linkedQuotation', 'quotationId');
 
@@ -117,16 +149,49 @@ exports.updateTask = async (req, res) => {
       return res.status(404).json({ status: 'error', message: 'Task not found' });
     }
 
-    // If status changes to 'Done', record completedAt
-    if (updates.status === 'Done') {
-      updates.completedAt = new Date();
-    } else if (updates.status && updates.status !== 'Done') {
-      updates.completedAt = null;
+    const historyEntries = originalTask.history || [];
+
+    // Record audit entries for changes
+    if (updates.status && updates.status !== originalTask.status) {
+      if (updates.status === 'Done') {
+        updates.completedAt = new Date();
+        updates.completedBy = req.user._id;
+        historyEntries.push({
+          action: 'COMPLETED',
+          performedBy: req.user._id,
+          performedByName: req.user.name || req.user.email,
+          details: `Marked task as Done.`,
+          timestamp: new Date()
+        });
+      } else {
+        updates.completedAt = null;
+        updates.completedBy = null;
+        historyEntries.push({
+          action: 'STATUS_CHANGED',
+          performedBy: req.user._id,
+          performedByName: req.user.name || req.user.email,
+          details: `Status changed from ${originalTask.status} to ${updates.status}.`,
+          timestamp: new Date()
+        });
+      }
     }
+
+    if (updates.assignedTo && updates.assignedTo.toString() !== originalTask.assignedTo?.toString()) {
+      historyEntries.push({
+        action: 'ASSIGNED',
+        performedBy: req.user._id,
+        performedByName: req.user.name || req.user.email,
+        details: `Reassigned task.`,
+        timestamp: new Date()
+      });
+    }
+
+    updates.history = historyEntries;
 
     const task = await Task.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true })
       .populate('assignedTo', 'name department')
       .populate('createdBy', 'name')
+      .populate('completedBy', 'name')
       .populate('linkedEnquiry', 'enquiryId')
       .populate('linkedQuotation', 'quotationId');
 
@@ -141,16 +206,33 @@ exports.updateTask = async (req, res) => {
       });
     }
 
-    // Notify creator when task is marked Done (if different from the person who completed it)
+    // Notify creator when task is marked Done
     if (updates.status === 'Done' && originalTask.status !== 'Done') {
       if (originalTask.createdBy && originalTask.createdBy.toString() !== req.user._id.toString()) {
         await createNotification({
           user_id: originalTask.createdBy,
           type: 'TASK_COMPLETED',
           title: 'Task Completed',
-          message: `Task "${task.title}" has been marked as done.`,
+          message: `Task "${task.title}" has been marked as done by ${req.user.name || 'a team member'}.`,
           related_id: task._id
         });
+      }
+
+      // Auto-log completion into linked Enquiry follow-ups
+      if (task.linkedEnquiry) {
+        try {
+          const targetEnquiryId = task.linkedEnquiry._id || task.linkedEnquiry;
+          await FollowUp.create({
+            enquiryId: targetEnquiryId,
+            type: 'NOTE',
+            notes: `✅ [Task Completed] "${task.title}" was completed by ${req.user.name || 'Super Admin'}`,
+            outcome: 'Task Completed',
+            followUpDate: new Date(),
+            createdBy: req.user._id
+          });
+        } catch (fErr) {
+          console.warn('Failed to auto-create FollowUp log for task completion:', fErr.message);
+        }
       }
     }
 
