@@ -9,7 +9,7 @@ module.exports = {
   PRIMARY_MODEL: 'gpt-4o-mini',
   
   // Model Fallbacks (Cascade Chain: OpenAI -> Gemini -> Groq)
-  GEMINI_MODELS: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'],
+  GEMINI_MODELS: ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'],
   GROQ_MODEL: 'llama-3.3-70b-versatile',
   
   // Timeout for AI API requests in milliseconds (increased to 90s for large specs)

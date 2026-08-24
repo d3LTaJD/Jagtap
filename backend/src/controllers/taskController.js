@@ -8,6 +8,16 @@ exports.createTask = async (req, res) => {
   try {
     const { title, description, dueDate, dueTime, priority, assignedTo, linkedEnquiry, linkedQuotation, status, attachments } = req.body;
 
+    let targetEnquiryId = linkedEnquiry || null;
+    if (targetEnquiryId) {
+      const mongoose = require('mongoose');
+      if (!mongoose.Types.ObjectId.isValid(targetEnquiryId)) {
+        const Enquiry = require('../models/Enquiry');
+        const foundEnq = await Enquiry.findOne({ enquiryId: targetEnquiryId }).select('_id');
+        if (foundEnq) targetEnquiryId = foundEnq._id;
+      }
+    }
+
     const initialHistory = [{
       action: 'CREATED',
       performedBy: req.user._id,
@@ -24,7 +34,7 @@ exports.createTask = async (req, res) => {
       priority,
       status: status || 'To Do',
       assignedTo: assignedTo || req.user._id,
-      linkedEnquiry: linkedEnquiry || null,
+      linkedEnquiry: targetEnquiryId,
       linkedQuotation: linkedQuotation || null,
       attachments: attachments || [],
       createdBy: req.user._id,
@@ -49,10 +59,10 @@ exports.createTask = async (req, res) => {
     }
 
     // Auto-create FollowUp entry in linked Enquiry for complete audit trail
-    if (linkedEnquiry) {
+    if (targetEnquiryId) {
       try {
         await FollowUp.create({
-          enquiryId: linkedEnquiry,
+          enquiryId: targetEnquiryId,
           type: 'NOTE',
           notes: `📌 [Task Created] "${title}" — Assigned to ${populated.assignedTo?.name || 'Unassigned'} (Due: ${dueDate ? new Date(dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'N/A'})`,
           outcome: 'Task Opened',
@@ -81,7 +91,20 @@ exports.getTasks = async (req, res) => {
     if (status) filter.status = status;
     if (assignedTo) filter.assignedTo = assignedTo;
     if (priority) filter.priority = priority;
-    if (linkedEnquiry) filter.linkedEnquiry = linkedEnquiry;
+    if (linkedEnquiry) {
+      const mongoose = require('mongoose');
+      if (mongoose.Types.ObjectId.isValid(linkedEnquiry)) {
+        filter.linkedEnquiry = linkedEnquiry;
+      } else {
+        const Enquiry = require('../models/Enquiry');
+        const foundEnq = await Enquiry.findOne({ enquiryId: linkedEnquiry }).select('_id');
+        if (foundEnq) {
+          filter.linkedEnquiry = foundEnq._id;
+        } else {
+          filter.linkedEnquiry = new mongoose.Types.ObjectId();
+        }
+      }
+    }
     if (linkedQuotation) filter.linkedQuotation = linkedQuotation;
     
     if (search) {

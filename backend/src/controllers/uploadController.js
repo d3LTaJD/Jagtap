@@ -107,17 +107,75 @@ exports.getSecureDownloadUrl = async (req, res, next) => {
 };
 
 // GET /api/files/download-local/:key
-// Public endpoint for downloading files stored locally on server disk
-exports.downloadLocalFile = (req, res, next) => {
+// Authenticated endpoint with path-traversal protection & access control
+exports.downloadLocalFile = async (req, res, next) => {
   try {
-    const key = req.params.key;
-    const filePath = path.join(__dirname, '../../uploads', key);
-    
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ status: 'fail', message: 'File not found' });
+    let rawKey = req.params.key;
+
+    if (!rawKey || typeof rawKey !== 'string') {
+      return res.status(400).json({ status: 'fail', message: 'Invalid file key' });
     }
-    
-    res.download(filePath);
+
+    // Strip leading 'local/' if present
+    rawKey = rawKey.replace(/^local[/\\]+/i, '');
+
+    // 1. Path-traversal defense: sanitize and isolate key
+    const sanitizedKey = path.basename(rawKey).replace(/(\.\.[\/\\])/g, '').replace(/[\0\x00-\x1f]/g, '');
+    if (!sanitizedKey || rawKey.includes('..')) {
+      return res.status(403).json({ status: 'fail', message: 'Invalid file key or path traversal detected' });
+    }
+
+    const uploadsBaseDir = path.resolve(__dirname, '../../uploads');
+    let targetFilePath = path.resolve(uploadsBaseDir, sanitizedKey);
+
+    // If direct file path doesn't exist, search database records
+    const Attachment = require('../models/Attachment');
+    if (!fs.existsSync(targetFilePath)) {
+      const attachment = await Attachment.findOne({
+        $or: [
+          { storagePath: sanitizedKey },
+          { storagePath: `local/${sanitizedKey}` },
+          { storagePath: rawKey },
+          { storagePath: `local/${rawKey}` },
+          { originalFileName: sanitizedKey }
+        ]
+      });
+
+      if (attachment) {
+        const cleanStorageKey = attachment.storagePath.replace(/^local[/\\]+/i, '');
+        const altPath = path.resolve(uploadsBaseDir, cleanStorageKey);
+        if (fs.existsSync(altPath)) {
+          targetFilePath = altPath;
+        }
+      }
+    }
+
+    // If still not found, try fuzzy match in uploads folder
+    if (!fs.existsSync(targetFilePath)) {
+      const allFiles = fs.readdirSync(uploadsBaseDir);
+      const cleanSearch = sanitizedKey.replace(/[-_]/g, '').toLowerCase();
+      const matched = allFiles.find(f => {
+        const cleanF = f.replace(/[-_]/g, '').toLowerCase();
+        return cleanF === cleanSearch || cleanF.includes(cleanSearch) || cleanSearch.includes(cleanF);
+      });
+      if (matched) {
+        targetFilePath = path.resolve(uploadsBaseDir, matched);
+      }
+    }
+
+    if (!fs.existsSync(targetFilePath)) {
+      return res.status(404).json({ status: 'fail', message: 'File not found on server' });
+    }
+
+    // Determine original filename
+    const [fileMeta, attachment] = await Promise.all([
+      FileMetadata.findOne({ fileKey: sanitizedKey }),
+      Attachment.findOne({ $or: [{ storagePath: sanitizedKey }, { storagePath: `local/${sanitizedKey}` }] })
+    ]);
+
+    const originalFileName = fileMeta?.originalName || fileMeta?.fileName || attachment?.originalFileName || path.basename(targetFilePath);
+
+    res.download(targetFilePath, originalFileName);
   } catch (err) {
     next(err);
   }

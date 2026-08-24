@@ -4,12 +4,32 @@
  */
 
 /**
+ * Safely and recursively unwraps AI extraction wrapper objects (e.g. { value: '50', confidence: 0.9 })
+ */
+function unwrapExtractedValue(value) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !(value instanceof Date) &&
+    Object.prototype.hasOwnProperty.call(value, 'value') &&
+    value.value !== undefined &&
+    !value.unit
+  ) {
+    return unwrapExtractedValue(value.value);
+  }
+  return value;
+}
+
+/**
  * Centrally and safely formats any value into a human-readable display string
  * @param {*} value - The input value (string, number, boolean, object, array, etc.)
  * @param {string} fallback - The fallback string if empty or undefined (default: '-')
  * @returns {string} Safe display string
  */
 function formatPdfValue(value, fallback = '-') {
+  value = unwrapExtractedValue(value);
+
   if (value === null || value === undefined) {
     return fallback;
   }
@@ -189,6 +209,7 @@ function extractItemFieldValue(item, fieldKey, fallback = '-') {
       if (rawVal === undefined && dfObj.get && typeof dfObj.get === 'function') {
         rawVal = dfObj.get(key);
       }
+      rawVal = unwrapExtractedValue(rawVal);
       if (rawVal !== undefined && rawVal !== null) {
         const formatted = formatPdfValue(rawVal, '');
         if (formatted && formatted !== '') return formatted;

@@ -255,8 +255,8 @@ const Dashboard = () => {
           {loading ? (
             <div className="flex justify-center items-center flex-1 py-10"><Loader2 className="w-6 h-6 animate-spin text-brand-500" /></div>
           ) : (
-            <div className="flex-1 w-full h-80">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="flex-1 w-full h-80 min-h-[320px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300}>
                 <BarChart data={pipeline} layout="vertical" margin={{ top: 5, right: 40, left: 5, bottom: 5 }}>
                   <XAxis type="number" hide />
                   <YAxis
@@ -297,9 +297,9 @@ const Dashboard = () => {
             </select>
           </div>
 
-          <div style={{ width: '100%', height: 280 }}>
+          <div style={{ width: '100%', height: 280, minHeight: 280 }}>
             {stats.timeSeriesData && stats.timeSeriesData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={280} minWidth={0} minHeight={280}>
                 <AreaChart data={stats.timeSeriesData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">

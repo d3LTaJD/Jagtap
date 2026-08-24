@@ -23,9 +23,8 @@ const pdfStyles = `
   .pv-page {
     width: 210mm;
     min-height: 297mm;
-    height: 297mm;
-    max-height: 297mm;
-    padding: 18mm 18mm 14mm 18mm;
+    box-sizing: border-box;
+    padding: 12mm 15mm 10mm 15mm;
     margin: 0 auto;
     position: relative;
     page-break-after: always;
@@ -33,7 +32,6 @@ const pdfStyles = `
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    overflow: hidden;
     background: #ffffff;
   }
 
@@ -49,9 +47,9 @@ const pdfStyles = `
 
   /* Compact Page for Checklist (Pages 2 & 3) */
   .pv-page-checklist {
-    padding: 10mm 12mm 8mm 12mm;
-    font-size: 8.5px;
-    line-height: 1.15;
+    padding: 6mm 10mm 5mm 10mm;
+    font-size: 6.2px;
+    line-height: 1.05;
   }
 
   /* Header Styles */
@@ -332,50 +330,57 @@ const pdfStyles = `
   /* Checklist Matrix Table */
   .pv-chk-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
-    font-size: 6.8px;
-    line-height: 1.1;
+    font-size: 6.2px;
+    line-height: 1.05;
     font-family: Arial, Helvetica, sans-serif;
+    word-wrap: break-word;
   }
 
   .pv-chk-table th, .pv-chk-table td {
-    border: 0.75px solid #000000;
-    padding: 1.2px 2px;
+    border: 0.5px solid #000000;
+    padding: 1px 1.5px;
     vertical-align: middle;
+    overflow: hidden;
   }
 
   .pv-chk-table th {
     background-color: #ffffff;
     font-weight: bold;
     text-align: center;
+    font-size: 6.2px;
   }
 
   .pv-chk-table .col-sr {
-    width: 14px;
+    width: 22px;
     text-align: center;
     font-weight: bold;
+    font-size: 6px;
   }
 
   .pv-chk-table .col-desc {
-    width: 160px;
+    width: 150px;
     text-align: left;
     font-weight: 500;
+    font-size: 6px;
+    line-height: 1.05;
   }
 
   .pv-chk-table .col-val {
     text-align: center;
-    min-width: 32px;
-    max-width: 48px;
+    font-size: 6px;
     word-break: break-word;
+    overflow: hidden;
   }
 
   .pv-chk-section-header {
     background-color: #ffffff;
     font-weight: bold;
     text-align: center;
-    font-size: 7.5px;
-    padding: 2px 0;
-    letter-spacing: 0.4px;
+    font-size: 7px;
+    padding: 1.5px 0;
+    letter-spacing: 0.3px;
   }
 
   /* Checklist Footer */
@@ -414,23 +419,23 @@ const pdfStyles = `
   .pv-general-review-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 7.2px;
+    font-size: 6.8px;
     font-family: Arial, Helvetica, sans-serif;
-    line-height: 1.2;
-    margin-top: 6px;
+    line-height: 1.15;
+    margin-top: 4px;
   }
 
   .pv-general-review-table td {
-    border: 0.75px solid #000000;
-    padding: 2px 4px;
+    border: 0.5px solid #000000;
+    padding: 1.5px 3px;
     vertical-align: top;
   }
 
   .pv-general-review-title {
     text-align: center;
     font-weight: bold;
-    font-size: 7.5px;
-    padding: 2px 0;
+    font-size: 7px;
+    padding: 1.5px 0;
   }
 
   .pv-checkbox-checked {
@@ -441,40 +446,46 @@ const pdfStyles = `
   /* Price Part-II Table */
   .pv-price-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 8px;
-    margin-top: 10px;
+    font-size: 7.5px;
+    margin-top: 8px;
+    word-wrap: break-word;
   }
 
   .pv-price-table th, .pv-price-table td {
-    border: 0.75px solid #000000;
-    padding: 3px 4px;
+    border: 0.5px solid #000000;
+    padding: 2px 2px;
     text-align: center;
     vertical-align: middle;
+    overflow: hidden;
   }
 
   .pv-price-table .pv-price-label-col {
     text-align: left;
     font-weight: bold;
-    width: 170px;
+    width: 155px;
+    font-size: 7px;
   }
 
   .pv-price-table .pv-price-summary-label {
     text-align: left;
     font-weight: bold;
     padding-left: 6px;
+    font-size: 7.5px;
   }
 
   .pv-price-table .pv-price-summary-val {
     text-align: right;
-    padding-right: 10px;
+    padding-right: 8px;
     font-weight: bold;
+    font-size: 7.5px;
   }
 
   .pv-price-intro {
-    font-size: 11px;
-    margin-bottom: 8px;
+    font-size: 10.5px;
+    margin-bottom: 6px;
     line-height: 1.4;
   }
 

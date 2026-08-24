@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const quotationItemSchema = new mongoose.Schema({
   itemNo: Number,
+  enquirySrNo: Number,
   lineItemId: String,
   enquiryLineItemId: String,
   description: String,
@@ -33,7 +34,40 @@ const quotationItemSchema = new mongoose.Schema({
   masterData: { type: mongoose.Schema.Types.Mixed, default: {} },
   derivedSpecifications: { type: mongoose.Schema.Types.Mixed, default: {} },
   validation: { type: mongoose.Schema.Types.Mixed, default: { isValid: true, warnings: [], needsManualReview: false } },
+  fieldConfidences: { type: mongoose.Schema.Types.Mixed, default: {} },
   dynamicFields: { type: mongoose.Schema.Types.Mixed, default: {} }
+});
+
+const revisionEntrySchema = new mongoose.Schema({
+  revisionNumber: { type: Number, required: true }, // e.g. 0, 1, 2...
+  revisionLabel: { type: String, default: 'Rev 00' }, // e.g. "Rev 00", "Rev 01"
+  revisionReason: String, // Note provided by the user
+  createdAt: { type: Date, default: Date.now },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  createdByName: String,
+  
+  isSentToCustomer: { type: Boolean, default: false },
+  sentAt: Date,
+  sentToEmail: String,
+
+  changesSummary: [{
+    type: { type: String }, // 'ITEM_ADDED', 'ITEM_REMOVED', 'ITEM_MODIFIED', 'TERM_MODIFIED', 'TOTALS_MODIFIED'
+    lineItemId: String,
+    itemNo: Number,
+    description: String,
+    details: String,
+    changes: [mongoose.Schema.Types.Mixed]
+  }],
+  summaryTextList: [{ type: String }],
+  totalsDiff: mongoose.Schema.Types.Mixed,
+
+  snapshot: {
+    items: [mongoose.Schema.Types.Mixed],
+    commercialTotals: mongoose.Schema.Types.Mixed,
+    techFields: mongoose.Schema.Types.Mixed,
+    priceFields: mongoose.Schema.Types.Mixed,
+    commFields: mongoose.Schema.Types.Mixed
+  }
 });
 
 const quotationSchema = new mongoose.Schema({
@@ -47,24 +81,67 @@ const quotationSchema = new mongoose.Schema({
   enquiry: { type: mongoose.Schema.Types.ObjectId, ref: 'Enquiry', required: true },
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  
   revisionNumber: { type: Number, default: 0 },
   revisionReason: String,
+  lastSentSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  lastSentAt: Date,
+  lastSentTo: String,
+  revisions: [revisionEntrySchema],
   
   status: { 
     type: String, 
-    enum: ['DRAFT', 'TECH_REVIEW', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'Draft', 'Pending Technical Review', 'Pending Commercial Review', 'Sent', 'Accepted', 'Negotiating', 'Revised', 'Expired'],
+    enum: [
+      'DRAFT', 
+      'TECH_REVIEW', 
+      'CHECKER_REVIEW', 
+      'PENDING_APPROVAL', 
+      'APPROVED', 
+      'REJECTED', 
+      'SENT', 
+      'REVISION_REQUESTED', 
+      'ACCEPTED', 
+      'EXPIRED', 
+      'Draft', 
+      'Pending Technical Review', 
+      'Pending Commercial Review', 
+      'Sent', 
+      'Accepted', 
+      'Negotiating', 
+      'Revised', 
+      'Expired'
+    ],
     default: 'DRAFT'
   },
 
+  // Governance & Review Milestones
+  technicalLocked: { type: Boolean, default: false },
   preparedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  preparedAt: { type: Date, default: Date.now },
+  
   technicalReviewBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  technicalReviewAt: Date,
+  technicalReviewNotes: String,
+
+  checkedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  checkedAt: Date,
+  checkerNotes: String,
+
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  approvedAt: Date,
+  approvalNotes: String,
+  
+  returnReason: String,
 
   scopeOfSupply: String,
   exclusions: String,
   deliverySchedule: { type: String, default: '12 weeks as per certification from the date of approval of technical documents and advance payment.' },
   pmcConsultant: String,
   projectName: String,
+  customerName: String,
+  customerAddress: String,
+  contactMobile: String,
+  contactEmail: String,
   kindAttention: String,
   enquiryRefText: String,
   subjectText: { type: String, default: 'Offer for valves as per your requirements.' },
@@ -130,6 +207,28 @@ const quotationSchema = new mongoose.Schema({
   specialCommercialNotes: String,
   dynamicFields: { type: mongoose.Schema.Types.Mixed, default: {} },
   
+  // Revision tracking & snapshots
+  revisionNumber: { type: Number, default: 0 },
+  revisionReason: String,
+  lastSentSnapshot: { type: mongoose.Schema.Types.Mixed },
+  lastSentAt: Date,
+  lastSentTo: String,
+  revisions: [{
+    revisionNumber: Number,
+    revisionLabel: String,
+    revisionReason: String,
+    createdAt: { type: Date, default: Date.now },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    createdByName: String,
+    isSentToCustomer: { type: Boolean, default: false },
+    sentAt: Date,
+    sentToEmail: String,
+    changesSummary: [mongoose.Schema.Types.Mixed],
+    summaryTextList: [String],
+    totalsDiff: mongoose.Schema.Types.Mixed,
+    snapshot: mongoose.Schema.Types.Mixed
+  }],
+
   validUntil: Date
 }, { timestamps: true });
 

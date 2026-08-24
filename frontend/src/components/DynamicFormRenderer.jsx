@@ -59,9 +59,19 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
   }
 
   const getFieldValue = (fieldName) => {
-    const rawVal = values[fieldName];
-    if (rawVal && typeof rawVal === 'object' && rawVal.hasOwnProperty('value')) {
-      return rawVal.value;
+    let rawVal = values[fieldName];
+    if (rawVal === undefined || rawVal === null || rawVal === '') {
+      if (fieldName === 'valve_size') rawVal = values.size || values.size_mm || values.valveSize;
+      else if (fieldName === 'valve_class') rawVal = values.class || values.pressure_class || values.valveClass;
+      else if (fieldName === 'valve_type') rawVal = values.type || values.valveType;
+      else if (fieldName === 'valve_operating') rawVal = values.operating || values.operation || values.actuation;
+      else if (fieldName === 'valve_end_connection') rawVal = values.end_connection || values.endConnection;
+      else if (fieldName === 'valve_moc_body') rawVal = values.moc || values.body_material || values.shellMaterial;
+    }
+    if (rawVal && typeof rawVal === 'object') {
+      if (rawVal.canonicalValue !== undefined && rawVal.canonicalValue !== null) return rawVal.canonicalValue;
+      if (rawVal.normalizedValue !== undefined && rawVal.normalizedValue !== null) return rawVal.normalizedValue;
+      if (rawVal.value !== undefined && rawVal.value !== null) return rawVal.value;
     }
     return rawVal;
   };
@@ -461,33 +471,99 @@ const DynamicFormRenderer = ({ formContext, values = {}, onChange, readOnly = fa
     }
   };
 
+  const allVisibleSections = Object.entries(sections).map(([group, groupFields]) => ({
+    group,
+    fields: groupFields.filter(isVisible)
+  })).filter(s => s.fields.length > 0);
+
+  if (allVisibleSections.length === 0) {
+    const currentCategory = values.productCategory || 'Custom';
+    return (
+      <div className="space-y-6">
+        <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-slate-200 text-slate-800 text-xs font-black rounded-lg uppercase tracking-wider">
+              Category: {currentCategory}
+            </span>
+          </div>
+          <p className="text-xs text-slate-600 leading-relaxed font-medium">
+            This line item is categorized as <strong>{currentCategory}</strong>. Valve contract checklist specifications are not applicable to non-valve items.
+          </p>
+        </div>
+
+        <div className="space-y-4 pt-2 border-t border-slate-100">
+          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+            General Technical Specifications
+          </h4>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Material Grade / Specification
+            </label>
+            <input
+              type="text"
+              disabled={readOnly}
+              value={getFieldValue('materialGrade') || getFieldValue('material') || getFieldValue('moc') || ''}
+              onChange={e => handle('materialGrade', e.target.value)}
+              placeholder="e.g. MS / IS 2062 / ASTM A36 / Sch 9"
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors outline-none disabled:bg-slate-100 disabled:text-slate-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Applicable Standard / Code
+            </label>
+            <input
+              type="text"
+              disabled={readOnly}
+              value={getFieldValue('applicableStandard') || getFieldValue('standardCode') || ''}
+              onChange={e => handle('applicableStandard', e.target.value)}
+              placeholder="e.g. Sch 9, IS 800, ASME B31.3"
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors outline-none disabled:bg-slate-100 disabled:text-slate-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Technical Remarks / Notes
+            </label>
+            <textarea
+              rows={3}
+              disabled={readOnly}
+              value={getFieldValue('technicalRemarks') || getFieldValue('remarks') || getFieldValue('notes') || ''}
+              onChange={e => handle('technicalRemarks', e.target.value)}
+              placeholder="Enter any technical scope details or customer specifications..."
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-colors outline-none disabled:bg-slate-100 disabled:text-slate-500 resize-none"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {Object.entries(sections).map(([group, groupFields]) => {
-        const visibleFields = groupFields.filter(isVisible);
-        if (!visibleFields.length) return null;
-
-        return (
-          <div key={group}>
-            {group !== '__default__' && (
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 pb-2 border-b border-slate-100">
-                {group}
-              </h3>
-            )}
-            <div className="space-y-4">
-              {visibleFields.map(field => (
-                <div key={field._id}>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                    {field.fieldLabel}
-                    {field.isRequired && <span className="text-red-500 ml-1">*</span>}
-                  </label>
-                  {renderInput(field)}
-                </div>
-              ))}
-            </div>
+      {allVisibleSections.map(({ group, fields: visibleFields }) => (
+        <div key={group}>
+          {group !== '__default__' && (
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 pb-2 border-b border-slate-100">
+              {group}
+            </h3>
+          )}
+          <div className="space-y-4">
+            {visibleFields.map(field => (
+              <div key={field._id}>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  {field.fieldLabel}
+                  {field.isRequired && <span className="text-red-500 ml-1">*</span>}
+                </label>
+                {renderInput(field)}
+              </div>
+            ))}
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 };

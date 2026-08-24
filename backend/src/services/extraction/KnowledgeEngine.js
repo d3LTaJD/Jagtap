@@ -16,6 +16,11 @@ class KnowledgeEngine {
     return res.isValid ? res.canonicalValue : null;
   }
 
+  normalizeSizeDetailed(rawSize) {
+    if (!rawSize) return { isValid: false, canonicalValue: null, nps: null, dn: null };
+    return engineeringDictionary.normalizeSize(rawSize);
+  }
+
   normalizeEndConnection(rawConn) {
     if (!rawConn) return null;
     const res = engineeringDictionary.validateAndNormalize('endConnection', rawConn);
@@ -38,6 +43,16 @@ class KnowledgeEngine {
     if (!rawType) return null;
     const res = engineeringDictionary.validateAndNormalize('valve_type', rawType);
     return res.isValid ? res.canonicalValue : null;
+  }
+
+  normalizeQuantity(rawQty) {
+    if (rawQty === null || rawQty === undefined) return null;
+    const res = engineeringDictionary.validateAndNormalize('quantity', rawQty);
+    return res.isValid ? parseInt(res.canonicalValue, 10) : null;
+  }
+
+  validateField(fieldName, rawValue) {
+    return engineeringDictionary.validateAndNormalize(fieldName, rawValue);
   }
 
   registerLearnedAlias(category, alias, canonicalValue) {

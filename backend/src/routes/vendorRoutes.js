@@ -7,12 +7,12 @@ const router = express.Router();
 router.use(protect);
 
 router.route('/')
-  .get(requirePermission('Admin', 'view'), vendorController.getVendors)
-  .post(requirePermission('Admin', 'create'), vendorController.createVendor);
+  .get(requirePermission('Vendors', 'view'), vendorController.getVendors)
+  .post(requirePermission('Vendors', 'create'), vendorController.createVendor);
 
 router.route('/:id')
-  .get(requirePermission('Admin', 'view'), vendorController.getVendor)
-  .put(requirePermission('Admin', 'edit'), vendorController.updateVendor)
-  .delete(requirePermission('Admin', 'delete'), vendorController.deleteVendor);
+  .get(requirePermission('Vendors', 'view'), vendorController.getVendor)
+  .put(requirePermission('Vendors', 'edit'), vendorController.updateVendor)
+  .delete(requirePermission('Vendors', 'delete'), vendorController.deleteVendor);
 
 module.exports = router;

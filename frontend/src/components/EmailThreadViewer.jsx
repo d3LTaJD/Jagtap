@@ -28,6 +28,14 @@ function parseEmailBody(rawBody) {
   };
 }
 
+function sanitizeHtmlBody(html) {
+  if (!html) return '';
+  return html
+    .replace(/font-size\s*:\s*[3-9][0-9]+(?:pt|px|em|rem|%)/gi, 'font-size: 13px')
+    .replace(/font-size\s*:\s*[1-9][0-9]{2,}(?:pt|px|em|rem|%)/gi, 'font-size: 13px')
+    .replace(/size=["']?[4-9]["']?/gi, 'size="2"');
+}
+
 export default function EmailThreadViewer({ emails = [], primaryEmail = null }) {
   const [expandedQuotes, setExpandedQuotes] = useState({});
 
@@ -93,8 +101,8 @@ export default function EmailThreadViewer({ emails = [], primaryEmail = null }) 
             <div className="p-5 space-y-4 text-sm text-slate-700 leading-relaxed font-normal overflow-x-auto w-full max-w-full">
               {email.htmlBody ? (
                 <div 
-                  className="prose prose-sm max-w-none text-slate-700 font-sans overflow-x-auto [&_table]:w-full [&_table]:min-w-[500px] [&_table]:border-collapse [&_table]:my-3 [&_td]:border [&_td]:border-slate-300 [&_td]:p-2.5 [&_td]:text-xs [&_th]:border [&_th]:border-slate-300 [&_th]:p-2.5 [&_th]:text-xs [&_th]:bg-slate-100 [&_th]:font-bold"
-                  dangerouslySetInnerHTML={{ __html: email.htmlBody }} 
+                  className="prose prose-sm max-w-none text-slate-700 font-sans overflow-x-auto [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_td]:border [&_td]:border-slate-300 [&_td]:p-2.5 [&_td]:text-xs [&_th]:border [&_th]:border-slate-300 [&_th]:p-2.5 [&_th]:text-xs [&_th]:bg-slate-100 [&_th]:font-bold [&_*]:max-w-full"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtmlBody(email.htmlBody) }} 
                 />
               ) : (
                 <div className="whitespace-pre-wrap font-sans text-slate-800 overflow-x-auto max-w-full font-mono text-xs leading-relaxed bg-slate-50/50 p-4 rounded-xl border border-slate-200/60">

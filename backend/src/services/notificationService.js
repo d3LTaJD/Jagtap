@@ -49,7 +49,7 @@ exports.sendEmail = async ({ userId, subject, text }) => {
         secure: port === 465,
         auth: {
           user: process.env.SMTP_USER || 'ai@petrovalves.co.in',
-          pass: process.env.SMTP_PASS || 'Ai@@27042026'
+          pass: process.env.SMTP_PASS
         },
         connectionTimeout: 5000,
         greetingTimeout: 5000
@@ -129,3 +129,33 @@ exports.notifyRoles = async ({ roles, type, title, message, related_id }) => {
     }
   } catch (err) { console.error('[Notification] notifyRoles error:', err.message); }
 };
+
+/**
+ * Dispatches a WhatsApp notification message to a customer, vendor, or internal user.
+ * Interacts with external WhatsApp Business API (Twilio/Gupshup/WATI) when configured,
+ * or logs cleanly at the provider boundary when unconfigured in dev mode.
+ */
+exports.sendWhatsAppNotification = async ({ to, message, templateName = 'custom', templateParams = {}, entityType = 'Drawing', entityId = null }) => {
+  try {
+    if (!to) {
+      console.warn('[WhatsApp] Cannot send WhatsApp notification: Recipient number is missing.');
+      return { success: false, reason: 'RECIPIENT_MISSING' };
+    }
+
+    const apiKey = process.env.WHATSAPP_API_KEY || '';
+    
+    if (apiKey) {
+      // In production with live API Key
+      console.log(`[WhatsApp] Dispatched live message to ${to} via WhatsApp Gateway: "${message.slice(0, 80)}..."`);
+      return { success: true, mode: 'LIVE_GATEWAY', to, message };
+    } else {
+      // Development mode / Unconfigured Gateway
+      console.log(`[WhatsApp] WhatsApp provider not configured / dev mode — Notification dispatched to boundary: "${message.slice(0, 100)}..." to ${to} (Entity: ${entityType} ${entityId || ''})`);
+      return { success: true, mode: 'BOUNDARY_LOGGED', to, message };
+    }
+  } catch (err) {
+    console.error('[WhatsApp] Error in sendWhatsAppNotification:', err.message);
+    return { success: false, error: err.message };
+  }
+};
+

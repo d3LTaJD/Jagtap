@@ -16,6 +16,6 @@ router.route('/:id')
 
 // Edit/status uses controller-level enforcement for granular actions
 router.route('/:id/status')
-  .patch(requirePermission('QAP', 'view'), updateQapStatus);
+  .patch(requirePermission('QAP', 'editActivities'), updateQapStatus);
 
 module.exports = router;

@@ -27,6 +27,10 @@ import AuditLog from './pages/AuditLog';
 import SystemLogs from './pages/SystemLogs';
 import Vendors from './pages/Vendors';
 import Products from './pages/Products';
+import Drawings from './pages/Drawings';
+import DrawingDetail from './pages/DrawingDetail';
+import WorkOrders from './pages/WorkOrders';
+import PurchaseAndBom from './pages/PurchaseAndBom';
 import { AbilityProvider } from './context/AbilityContext';
 
 function App() {
@@ -51,6 +55,10 @@ function App() {
           <Route path="enquiries/:id" element={<EnquiryDetail />} />
           <Route path="quotations" element={<Quotations />} />
           <Route path="quotations/:id" element={<QuotationDetail />} />
+          <Route path="drawings" element={<Drawings />} />
+          <Route path="drawings/:id" element={<DrawingDetail />} />
+          <Route path="work-orders" element={<WorkOrders />} />
+          <Route path="purchase" element={<PurchaseAndBom />} />
           <Route path="qaps" element={<Qaps />} />
           <Route path="qaps/:id" element={<QapDetail />} />
           <Route path="follow-ups" element={<FollowUpBoard />} />

@@ -3,6 +3,11 @@
  * Aligned with Offer Formates Excel & Price Part-II specifications.
  */
 
+function roundCurrency(value) {
+  if (value === undefined || value === null || isNaN(value)) return 0;
+  return Math.round(Number(value) * 100) / 100;
+}
+
 function calculateItemPricing(item) {
   if (!item) return item;
   const quantity = item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1;
@@ -15,9 +20,9 @@ function calculateItemPricing(item) {
   const tpiCharges = Number(item.tpiCharges) || 0;
   const discountPercent = Number(item.discountPercent) || 0;
 
-  const unitRateBeforeDiscount = unitPrice + ndtCharges + specialTestingCharges + sparesCharges + cert32Charges + pfCharges + tpiCharges;
-  const unitRate = unitRateBeforeDiscount * (1 - discountPercent / 100);
-  const lineTotalExclGST = unitRate * quantity;
+  const unitRateBeforeDiscount = roundCurrency(unitPrice + ndtCharges + specialTestingCharges + sparesCharges + cert32Charges + pfCharges + tpiCharges);
+  const unitRate = roundCurrency(unitRateBeforeDiscount * (1 - discountPercent / 100));
+  const lineTotalExclGST = roundCurrency(unitRate * quantity);
 
   return {
     ...item,
@@ -51,7 +56,7 @@ function calculateQuotationPricing(quotationOrItems, options = {}) {
   }
 
   const processedItems = items.map(calculateItemPricing);
-  const baseTotalRateSum = processedItems.reduce((acc, item) => acc + (item.lineTotalExclGST || 0), 0);
+  const baseTotalRateSum = roundCurrency(processedItems.reduce((acc, item) => acc + (item.lineTotalExclGST || 0), 0));
 
   const cert32Percent = opts.cert32Percent !== undefined && opts.cert32Percent !== null ? Number(opts.cert32Percent) : 5;
   const pfPercent = opts.pfPercent !== undefined && opts.pfPercent !== null ? Number(opts.pfPercent) : 5;
@@ -59,21 +64,21 @@ function calculateQuotationPricing(quotationOrItems, options = {}) {
 
   let tpiAmount = 0;
   if (opts.tpiCharges !== undefined && opts.tpiCharges !== null) {
-    tpiAmount = Number(opts.tpiCharges);
+    tpiAmount = roundCurrency(opts.tpiCharges);
   } else if (opts.commercialTotals?.totalInspectionCharges !== undefined && opts.commercialTotals.totalInspectionCharges !== null) {
-    tpiAmount = Number(opts.commercialTotals.totalInspectionCharges);
+    tpiAmount = roundCurrency(opts.commercialTotals.totalInspectionCharges);
   } else if (opts.commercialTotals?.tpiAmount !== undefined && opts.commercialTotals.tpiAmount !== null) {
-    tpiAmount = Number(opts.commercialTotals.tpiAmount);
+    tpiAmount = roundCurrency(opts.commercialTotals.tpiAmount);
   } else {
     tpiAmount = 0;
   }
 
-  const cert32Amount = (baseTotalRateSum * cert32Percent) / 100;
-  const pfAmount = (baseTotalRateSum * pfPercent) / 100;
+  const cert32Amount = roundCurrency((baseTotalRateSum * cert32Percent) / 100);
+  const pfAmount = roundCurrency((baseTotalRateSum * pfPercent) / 100);
 
-  const grandTotalBeforeGST = baseTotalRateSum + cert32Amount + pfAmount + tpiAmount;
-  const gstAmount = grandTotalBeforeGST * (gstRate / 100);
-  const grandTotalWithGST = grandTotalBeforeGST + gstAmount;
+  const grandTotalBeforeGST = roundCurrency(baseTotalRateSum + cert32Amount + pfAmount + tpiAmount);
+  const gstAmount = roundCurrency(grandTotalBeforeGST * (gstRate / 100));
+  const grandTotalWithGST = roundCurrency(grandTotalBeforeGST + gstAmount);
 
   return {
     items: processedItems,
@@ -109,6 +114,7 @@ function calculateQuotationPricing(quotationOrItems, options = {}) {
 }
 
 module.exports = {
+  roundCurrency,
   calculateItemPricing,
   calculateQuotationPricing
 };

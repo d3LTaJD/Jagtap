@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Filter, FileText, ChevronRight, Loader2, X, Trash2, RefreshCw, Pencil, XCircle, Download, CalendarDays, Upload, CheckCircle2 } from 'lucide-react';
+import { Plus, Filter, FileText, ChevronRight, Loader2, X, Trash2, RefreshCw, Pencil, XCircle, Download, CalendarDays, Upload, CheckCircle2, Layers, Sparkles, Eye, EyeOff, Package, MapPin, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import DynamicFormRenderer from '../components/DynamicFormRenderer';
@@ -69,6 +69,7 @@ const Enquiries = () => {
   const [importLoading, setImportLoading] = useState(false);
   const [boqFiles, setBoqFiles] = useState([]);
   const [specFiles, setSpecFiles] = useState([]);
+  const [showBoqItemsEditor, setShowBoqItemsEditor] = useState(true);
 
   const [formData, setFormData] = useState({
     companyName: '', primaryContactName: '', mobileNumber: '', emailAddress: '',
@@ -123,30 +124,45 @@ const Enquiries = () => {
 
   const handleCustomerSelect = (customerId) => {
     setSelectedCustomerId(customerId);
-    setAiSuggested(false);
-    const selected = customers.find(c => c._id === customerId);
-    if (selected) {
+    if (!customerId) return;
+    const cust = customers.find(c => c._id === customerId);
+    if (cust) {
       setFormData(prev => ({
         ...prev,
-        companyName: selected.companyName || '',
-        primaryContactName: selected.primaryContactName || '',
-        mobileNumber: selected.mobileNumber || '',
-        emailAddress: selected.emailAddress || ''
+        companyName: cust.companyName || '',
+        primaryContactName: cust.primaryContactName || '',
+        mobileNumber: cust.mobileNumber || '',
+        emailAddress: cust.emailAddress || '',
       }));
     }
   };
 
+  const updateBoqItem = (idx, field, value) => {
+    setFormData(prev => {
+      const newProds = [...(prev.products || [])];
+      if (newProds[idx]) {
+        newProds[idx] = { ...newProds[idx], [field]: value };
+      }
+      const totalQty = newProds.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+      const cat = prev.productCategory || 'Valves';
+      const u = prev.unit || 'NO.';
+      return {
+        ...prev,
+        products: newProds,
+        quantity: totalQty,
+        productDescription: `${newProds.length} BOQ Line Items (${cat}) — Total Quantity: ${totalQty} ${u}`
+      };
+    });
+  };
+
   const handleAISuggest = async () => {
-    if (!formData.productDescription) {
-      alert('Please enter a Product Description first!');
-      return;
-    }
+    if (!formData.productDescription) return;
     setAiSuggestLoading(true);
     try {
       const payload = {
-        customerId: selectedCustomerId || undefined,
-        productCategory: formData.productCategory,
         productDescription: formData.productDescription,
+        productCategory: formData.productCategory,
+        companyName: formData.companyName || undefined,
         mobileNumber: formData.mobileNumber || undefined,
         emailAddress: formData.emailAddress || undefined
       };
@@ -204,6 +220,7 @@ const Enquiries = () => {
             const td = tenderIntelligence.tenderDetails || {};
             const tl = tenderIntelligence.tenderTimeline || {};
             const contacts = tenderIntelligence.contactPersons || [];
+            const reqs = tenderIntelligence.specialRequirements || tenderIntelligence.commercialTerms || tenderIntelligence.complianceTerms;
 
             // Populate Customer Details
             if (td.customer) updated.companyName = td.customer;
@@ -214,9 +231,10 @@ const Enquiries = () => {
             }
 
             // Populate Tender Metadata
-            if (td.gemTenderNo) {
-              updated.tenderNumber = td.gemTenderNo;
-              updated.gemTenderNo = td.gemTenderNo;
+            const tNum = td.gemTenderNo || td.tenderNumber || td.nitNumber || '';
+            if (tNum) {
+              updated.tenderNumber = tNum;
+              updated.gemTenderNo = tNum;
             }
             if (tl.bidSubmissionDate) {
               updated.tenderDeadline = tl.bidSubmissionDate;
@@ -224,15 +242,23 @@ const Enquiries = () => {
             if (tl.deliveryPeriodDays) {
               updated.requiredDeliveryWeeks = Math.ceil(tl.deliveryPeriodDays / 7);
             }
+
+            // Populate Special Requirements from extracted technical / tender requirements
+            if (reqs && typeof reqs === 'string' && reqs.trim()) {
+              updated.specialRequirements = reqs.trim();
+            } else if (td.scopeOfWork) {
+              updated.specialRequirements = td.scopeOfWork;
+            }
           }
           
           let firstProductSpecs = {};
           if (products && products.length > 0) {
-            updated.productDescription = products[0].description;
-            updated.quantity = products[0].quantity;
-            updated.unit = products[0].unit;
-            updated.productCategory = products[0].category || 'Piping';
+            const totalQty = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
             updated.products = products;
+            updated.productCategory = products[0].category || 'Valves';
+            updated.quantity = totalQty;
+            updated.unit = products[0].unit || 'NO.';
+            updated.productDescription = `${products.length} BOQ Line Items (${updated.productCategory}) — Total Quantity: ${totalQty} ${updated.unit}`;
             firstProductSpecs = products[0].dynamicFields || {};
           }
           
@@ -264,17 +290,29 @@ const Enquiries = () => {
         ? formData.dynamicFields.reduce((acc, f) => { if(f.key) acc[f.key] = f.value; return acc; }, {})
         : formData.dynamicFields || {};
       
+      let finalQty = formData.quantity;
+      let finalDesc = formData.productDescription;
+      let finalUnit = formData.unit || 'NO.';
+      
+      if (formData.products && formData.products.length > 0) {
+        finalQty = formData.products.reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+        finalUnit = formData.products[0]?.unit || finalUnit;
+        if (!finalDesc || finalDesc.trim().length === 0 || finalDesc === formData.products[0]?.description) {
+          finalDesc = `${formData.products.length} BOQ Line Items (${formData.productCategory || 'Valves'}) — Total Quantity: ${finalQty} ${finalUnit}`;
+        }
+      }
+
       if (editingEnquiry) {
         // EDIT mode — PATCH the existing enquiry
         await api.patch(`/enquiries/${editingEnquiry._id}`, {
           sourceChannel: formData.sourceChannel,
           sourceType: formData.sourceType,
-          tenderNumber: formData.sourceType === 'Tender' ? formData.tenderNumber : undefined,
-          tenderDeadline: formData.sourceType === 'Tender' && formData.tenderDeadline ? formData.tenderDeadline : undefined,
+          tenderNumber: (formData.sourceType === 'Tender' || formData.sourceChannel === 'GEM Portal') ? (formData.tenderNumber || formData.gemTenderNo) : undefined,
+          tenderDeadline: (formData.sourceType === 'Tender' || formData.sourceChannel === 'GEM Portal') && formData.tenderDeadline ? formData.tenderDeadline : undefined,
           productCategory: formData.productCategory,
-          productDescription: formData.productDescription,
-          quantity: formData.quantity,
-          unit: formData.unit,
+          productDescription: finalDesc,
+          quantity: finalQty,
+          unit: finalUnit,
           priority: formData.priority,
           // Add other fields that can be edited
           indiaMartLeadId: formData.sourceChannel === 'IndiaMart' ? formData.indiaMartLeadId : undefined,
@@ -306,22 +344,22 @@ const Enquiries = () => {
           enquiryData: {
             sourceChannel: formData.sourceChannel,
             sourceType: formData.sourceType || 'Manual Entry',
-            tenderNumber: formData.sourceType === 'Tender' ? formData.tenderNumber : undefined,
-            tenderDeadline: formData.sourceType === 'Tender' && formData.tenderDeadline ? formData.tenderDeadline : undefined,
+            tenderNumber: (formData.sourceType === 'Tender' || formData.sourceChannel === 'GEM Portal') ? (formData.tenderNumber || formData.gemTenderNo) : undefined,
+            tenderDeadline: (formData.sourceType === 'Tender' || formData.sourceChannel === 'GEM Portal') && formData.tenderDeadline ? formData.tenderDeadline : undefined,
             emailAccount: formData.sourceChannel === 'Email' ? formData.emailAccount : undefined,
             indiaMartLeadId: formData.sourceChannel === 'IndiaMart' ? formData.indiaMartLeadId : undefined,
             leadGenuineness: formData.sourceChannel === 'IndiaMart' ? formData.leadGenuineness : undefined,
             detailsSharedByLead: formData.sourceChannel === 'IndiaMart' ? formData.detailsSharedByLead : undefined,
             indiaMartContactMethod: formData.sourceChannel === 'IndiaMart' ? formData.indiaMartContactMethod : undefined,
             exhibitionName: formData.sourceChannel === 'Exhibition' ? formData.exhibitionName : undefined,
-            gemTenderNo: formData.sourceChannel === 'GEM Portal' ? formData.gemTenderNo : undefined,
+            gemTenderNo: (formData.sourceType === 'Tender' || formData.sourceChannel === 'GEM Portal') ? (formData.gemTenderNo || formData.tenderNumber) : undefined,
             contactPerson: formData.primaryContactName,
             contactMobile: formData.mobileNumber,
             contactEmail: formData.emailAddress,
             productCategory: formData.productCategory,
-            productDescription: formData.productDescription,
-            quantity: formData.quantity,
-            unit: formData.unit,
+            productDescription: finalDesc,
+            quantity: finalQty,
+            unit: finalUnit,
             requiredDeliveryWeeks: formData.requiredDeliveryWeeks,
             requiredDeliveryDate: formData.requiredDeliveryDate,
             budgetFrom: formData.budgetFrom,
@@ -870,20 +908,33 @@ const Enquiries = () => {
                       />
                     </div>
 
-                    {formData.sourceType === 'Tender' && (
-                      <div className="md:col-span-2 p-3 bg-amber-50/50 rounded-lg border border-amber-100 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Conditional Source Fields */}
+                    {(formData.sourceType === 'Tender' || formData.sourceChannel === 'GEM Portal') && (
+                      <div className="md:col-span-2 p-3.5 bg-amber-50/50 rounded-xl border border-amber-200/70 grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm font-medium text-amber-800 mb-1">Tender Number</label>
-                          <input type="text" value={formData.tenderNumber} onChange={e => setFormData({...formData, tenderNumber: e.target.value})} className="w-full px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-sm" placeholder="e.g. NIT-1234" />
+                          <label className="block text-sm font-semibold text-amber-900 mb-1">
+                            {formData.sourceChannel === 'GEM Portal' ? 'GeM / Tender Number' : 'Tender / NIT Number'}
+                          </label>
+                          <input 
+                            type="text" 
+                            value={formData.tenderNumber || formData.gemTenderNo || ''} 
+                            onChange={e => setFormData({ ...formData, tenderNumber: e.target.value, gemTenderNo: e.target.value })} 
+                            className="w-full px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all" 
+                            placeholder="e.g. GEM/2026/B/12345 or NIT-1234" 
+                          />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-amber-800 mb-1">Tender Deadline</label>
-                          <input type="date" value={formData.tenderDeadline} onChange={e => setFormData({...formData, tenderDeadline: e.target.value})} className="w-full px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-sm" />
+                          <label className="block text-sm font-semibold text-amber-900 mb-1">Tender Submission Deadline</label>
+                          <input 
+                            type="date" 
+                            value={formData.tenderDeadline || ''} 
+                            onChange={e => setFormData({ ...formData, tenderDeadline: e.target.value })} 
+                            className="w-full px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all" 
+                          />
                         </div>
                       </div>
                     )}
 
-                    {/* Conditional Source Fields */}
                     {formData.sourceChannel === 'Email' && (
                       <div className="md:col-span-2 p-3 bg-brand-50/50 rounded-lg border border-brand-100 flex items-center gap-4">
                         <label className="text-sm font-medium text-brand-800 whitespace-nowrap">Received On:</label>
@@ -937,36 +988,149 @@ const Enquiries = () => {
                         <input type="text" required value={formData.exhibitionName} onChange={e => setFormData({...formData, exhibitionName: e.target.value})} className="px-3 py-1.5 bg-white border border-violet-200 rounded-lg text-sm flex-1" placeholder="Name of Exhibition" />
                       </div>
                     )}
-                    {formData.sourceChannel === 'GEM Portal' && (
-                      <div className="md:col-span-2 p-3 bg-slate-50/50 rounded-lg border border-slate-200 flex items-center gap-4">
-                        <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Tender No:</label>
-                        <input type="text" required value={formData.gemTenderNo} onChange={e => setFormData({...formData, gemTenderNo: e.target.value})} className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm flex-1" placeholder="GEM Tender Number" />
+
+                    {/* Tender BOQ Summary & Line Items Section */}
+                    {formData.products && formData.products.length > 0 ? (
+                      <div className="md:col-span-2 bg-slate-50/70 border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
+                        {/* Summary Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/60">
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-2 bg-brand-100/70 text-brand-700 rounded-xl">
+                              <Layers className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                                Tender BOQ Summary & Line Items
+                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                                  ✓ {formData.products.length} Canonical Items
+                                </span>
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Multi-line tender BOQ structure is active as the ground-truth specification.
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowBoqItemsEditor(!showBoqItemsEditor)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-sm cursor-pointer"
+                          >
+                            {showBoqItemsEditor ? <EyeOff className="w-3.5 h-3.5 text-slate-400" /> : <Eye className="w-3.5 h-3.5 text-brand-600" />}
+                            {showBoqItemsEditor ? 'Collapse BOQ Table' : `View / Edit BOQ Items (${formData.products.length})`}
+                          </button>
+                        </div>
+
+                        {/* Summary Metrics Cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Line Items</span>
+                            <span className="text-lg font-black text-slate-900 mt-0.5 block">{formData.products.length} Items</span>
+                          </div>
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Quantity</span>
+                            <span className="text-lg font-black text-brand-700 mt-0.5 block">
+                              {formData.products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0)} {formData.products[0]?.unit || 'NO.'}
+                            </span>
+                          </div>
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Product Category</span>
+                            <span className="text-sm font-black text-slate-800 mt-1 block truncate">{formData.productCategory || 'Valves'}</span>
+                          </div>
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">BOQ Data Source</span>
+                            <span className="text-xs font-bold text-emerald-700 mt-1 block truncate">Excel + Spec Enriched</span>
+                          </div>
+                        </div>
+
+                        {/* Interactive Editable BOQ Table */}
+                        {showBoqItemsEditor && (
+                          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs animate-in fade-in duration-200">
+                            <div className="max-h-72 overflow-y-auto">
+                              <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                                <thead className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200 sticky top-0 z-10 backdrop-blur-xs">
+                                  <tr>
+                                    <th className="py-2.5 px-3 w-16 text-center">Item #</th>
+                                    <th className="py-2.5 px-3 min-w-[220px]">Description</th>
+                                    <th className="py-2.5 px-3 w-20 text-center">Qty</th>
+                                    <th className="py-2.5 px-3 w-18 text-center">Unit</th>
+                                    <th className="py-2.5 px-3 min-w-[200px]">Site / Destination</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {formData.products.map((p, idx) => (
+                                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
+                                      <td className="py-2 px-3 font-mono font-bold text-slate-500 text-center">
+                                        {p.itemNo || `1.${String(idx + 1).padStart(2, '0')}`}
+                                      </td>
+                                      <td className="py-2 px-3 font-semibold text-slate-800">
+                                        <input
+                                          type="text"
+                                          value={p.description || ''}
+                                          onChange={e => updateBoqItem(idx, 'description', e.target.value)}
+                                          className="w-full px-2 py-1 bg-transparent hover:bg-slate-50 focus:bg-white border border-transparent hover:border-slate-200 focus:border-brand-500 rounded text-xs font-medium text-slate-800 outline-none transition-all"
+                                        />
+                                      </td>
+                                      <td className="py-2 px-3 text-center">
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          value={p.quantity !== null && p.quantity !== undefined ? p.quantity : ''}
+                                          onChange={e => updateBoqItem(idx, 'quantity', Number(e.target.value) || 0)}
+                                          className="w-16 px-1.5 py-1 text-center font-bold text-slate-900 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 focus:border-brand-500 rounded text-xs outline-none transition-all"
+                                        />
+                                      </td>
+                                      <td className="py-2 px-3 text-center">
+                                        <input
+                                          type="text"
+                                          value={p.unit || 'NO.'}
+                                          onChange={e => updateBoqItem(idx, 'unit', e.target.value)}
+                                          className="w-14 px-1 py-1 text-center font-medium text-slate-600 bg-transparent hover:bg-slate-50 focus:bg-white border border-transparent hover:border-slate-200 focus:border-brand-500 rounded text-xs outline-none transition-all uppercase"
+                                        />
+                                      </td>
+                                      <td className="py-2 px-3 font-medium text-slate-600 text-[11px]">
+                                        <input
+                                          type="text"
+                                          value={p.destination || ''}
+                                          onChange={e => updateBoqItem(idx, 'destination', e.target.value)}
+                                          className="w-full px-2 py-1 bg-transparent hover:bg-slate-50 focus:bg-white border border-transparent hover:border-slate-200 focus:border-brand-500 rounded text-[11px] font-medium text-slate-600 outline-none transition-all"
+                                          placeholder="Enter destination..."
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
                       </div>
+                    ) : (
+                      <>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Product Description</label>
+                          <textarea required maxLength="200" value={formData.productDescription} onChange={e => setFormData({...formData, productDescription: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 min-h-[80px]" placeholder="Briefly describe the requested equipment (Max 200 chars)"></textarea>
+                        </div>
+
+                        <div className="flex gap-4">
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
+                            <input type="number" min="1" step="any" required placeholder=" " value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Unit</label>
+                            <AutocompleteSelect
+                              options={['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job']}
+                              value={formData.unit}
+                              onChange={v => setFormData({...formData, unit: v})}
+                              placeholder="Select unit..."
+                              allowClear={false}
+                            />
+                          </div>
+                        </div>
+                      </>
                     )}
 
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Product Description</label>
-                      <textarea required maxLength="200" value={formData.productDescription} onChange={e => setFormData({...formData, productDescription: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 min-h-[80px]" placeholder="Briefly describe the requested equipment (Max 200 chars)"></textarea>
-                    </div>
-
-
-
-                    <div className="flex gap-4">
-                      <div className="flex-1">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
-                        <input type="number" min="1" step="any" required placeholder=" " value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Unit</label>
-                        <AutocompleteSelect
-                          options={['NOS', 'SET', 'MT', 'KG', 'M', 'M2', 'Job']}
-                          value={formData.unit}
-                          onChange={v => setFormData({...formData, unit: v})}
-                          placeholder="Select unit..."
-                          allowClear={false}
-                        />
-                      </div>
-                    </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Priority</label>
                       <AutocompleteSelect

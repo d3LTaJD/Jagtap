@@ -30,7 +30,7 @@ const enquirySchema = new mongoose.Schema({
 
   productCategory: { type: String, required: true }, // 'Pressure Vessel', 'Heat Exchanger', 'Storage Tank', 'Valves', 'Structural', 'Custom', 'Multiple'
   productDescription: { type: String, required: true, maxlength: 200 },
-  quantity: { type: Number, required: true, default: 1 },
+  quantity: { type: Number, default: null },
   unit: { type: String, trim: true, default: 'NOS' },
 
   requiredDeliveryWeeks: { type: Number },
@@ -70,16 +70,19 @@ const enquirySchema = new mongoose.Schema({
 
   products: [
     {
+      itemNo: { type: mongoose.Schema.Types.Mixed },
+      enquirySrNo: { type: Number },
       lineItemId: { type: String },
       description: { type: String, default: '' },
-      quantity: { type: Number, default: 1 },
+      quantity: { type: Number, default: null },
       unit: {
         type: String,
         trim: true,
         default: 'NOS'
       },
+      destination: { type: String, default: '' },
       category: { type: String },
-      standardCode: { type: String, trim: true, default: 'Not specified' },
+      standardCode: { type: String, trim: true, default: null },
       confidence: { type: Number },
       extractionStatus: {
         type: String,

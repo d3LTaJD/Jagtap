@@ -6,12 +6,50 @@ const { renderContractReviewPart2 } = require('./pages/contractReviewPart2');
 const { renderPricePart2 } = require('./pages/pricePart2');
 const { renderCommercialPart3 } = require('./pages/commercialPart3');
 
+const CHUNK_SIZE = 8;
+
+function chunkArray(array, size) {
+  if (!array || array.length === 0) return [[]];
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
 /**
- * Generates the complete 5-page official Petro Valves Quotation PDF buffer
- * @param {Object} quotation
+ * Generates the complete official Petro Valves Quotation PDF buffer
+ * @param {Object|string} quotationOrId
  * @returns {Promise<Buffer>} PDF Buffer
  */
-async function generateQuotationPdf(quotation) {
+async function generateQuotationPdf(quotationOrId) {
+  let quotation = quotationOrId;
+  if (typeof quotationOrId === 'string' || (quotationOrId && (quotationOrId._bsontype === 'ObjectID' || quotationOrId._bsontype === 'ObjectId'))) {
+    const Quotation = require('../../models/Quotation');
+    quotation = await Quotation.findById(quotationOrId)
+      .populate('customer')
+      .populate('enquiry')
+      .populate('preparedBy', 'fullName')
+      .populate('files');
+  }
+
+  const items = quotation.items || [];
+  const itemChunks = chunkArray(items, CHUNK_SIZE);
+  const totalChunks = itemChunks.length;
+
+  const checklistPages = itemChunks.map((chunk, idx) => `
+    <!-- CONTRACT REVIEW CHECKLIST (PART 1 - CHUNK ${idx + 1}/${totalChunks}) -->
+    ${renderContractReviewPart1(quotation, chunk, idx, totalChunks)}
+
+    <!-- CONTRACT REVIEW CHECKLIST (PART 2 & GENERAL - CHUNK ${idx + 1}/${totalChunks}) -->
+    ${renderContractReviewPart2(quotation, chunk, idx, totalChunks)}
+  `).join('\n');
+
+  const pricePages = itemChunks.map((chunk, idx) => `
+    <!-- PRICE PART - II (CHUNK ${idx + 1}/${totalChunks}) -->
+    ${renderPricePart2(quotation, chunk, idx, totalChunks, idx === totalChunks - 1)}
+  `).join('\n');
+
   const htmlContent = `
     <!DOCTYPE html>
     <html lang="en">
@@ -26,16 +64,13 @@ async function generateQuotationPdf(quotation) {
       <!-- PAGE 1: TECHNICAL PART - I -->
       ${renderTechnicalPart1(quotation)}
 
-      <!-- PAGE 2: CONTRACT REVIEW CHECKLIST (PART 1) -->
-      ${renderContractReviewPart1(quotation)}
+      <!-- CONTRACT REVIEW CHECKLIST PAGES -->
+      ${checklistPages}
 
-      <!-- PAGE 3: CONTRACT REVIEW CHECKLIST (PART 2 & GENERAL) -->
-      ${renderContractReviewPart2(quotation)}
+      <!-- PRICE PART - II PAGES -->
+      ${pricePages}
 
-      <!-- PAGE 4: PRICE PART - II -->
-      ${renderPricePart2(quotation)}
-
-      <!-- PAGE 5: COMMERCIAL PART - III -->
+      <!-- COMMERCIAL PART - III -->
       ${renderCommercialPart3(quotation)}
     </body>
     </html>

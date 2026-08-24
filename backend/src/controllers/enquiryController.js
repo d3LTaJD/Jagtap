@@ -679,53 +679,28 @@ exports.importTender = async (req, res, next) => {
 
     // ── 1. Process ALL BOQ Files (XLSX, XLS, CSV) ──────────────────────────
     if (boqFileList.length > 0) {
-      const XLSX = require('xlsx');
+      const boqParserService = require('../services/boqParserService');
 
       for (const boqFile of boqFileList) {
         console.log(`[Tender Import] Parsing BOQ: ${boqFile.originalname} (${boqFile.size} bytes)`);
-        const workbook = XLSX.read(boqFile.buffer, { type: 'buffer' });
+        const extractedItems = boqParserService.parseExcelBOQ(boqFile.buffer);
 
-        // Process ALL sheets in the workbook (some tenders split items across sheets)
-        for (const sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          const rows = XLSX.utils.sheet_to_json(sheet);
-          if (rows.length === 0) continue;
+        const sheetProducts = extractedItems.map((item, index) => ({
+          itemNo: item.itemNo || `${index + 1}`,
+          description: item.description || item.productDescription,
+          quantity: item.quantity || 1,
+          unit: item.unit || 'NOS',
+          destination: item.destination || '',
+          category: item.category || item.productCategory || detectProductCategory(item.description || item.productDescription),
+          dynamicFields: {}
+        }));
 
-          const sheetProducts = rows.map((row, index) => {
-            const titleKey = Object.keys(row).find(k => /title|name|product/i.test(k)) || Object.keys(row).find(k => /item/i.test(k) && !/number|no|qty/i.test(k));
-            const descKey = Object.keys(row).find(k => /desc/i.test(k) || /specification/i.test(k));
-            const qtyKey = Object.keys(row).find(k => /qty|quantity/i.test(k));
-            const unitKey = Object.keys(row).find(k => /unit|uom/i.test(k));
-
-            const title = titleKey ? String(row[titleKey]).trim() : '';
-            const desc = descKey ? String(row[descKey]).trim() : '';
-            const fullDesc = title && desc ? `${title}: ${desc}` : title || desc || `Item ${index + 1}`;
-
-            // Skip rows that look like headers or empty rows
-            if (!title && !desc) return null;
-
-            let quantity = qtyKey ? Number(row[qtyKey]) : 1;
-            if (isNaN(quantity)) quantity = 1;
-
-            const boqParserService = require('../services/boqParserService');
-            const unit = unitKey ? boqParserService.normalizeUnit(row[unitKey]) : 'NOS';
-
-            return {
-              description: fullDesc,
-              quantity,
-              unit,
-              category: detectProductCategory(fullDesc),
-              dynamicFields: {}
-            };
-          }).filter(Boolean);
-
-          products.push(...sheetProducts);
-          console.log(`[Tender Import] Sheet "${sheetName}" in ${boqFile.originalname}: ${sheetProducts.length} product(s) extracted`);
-        }
+        products.push(...sheetProducts);
+        console.log(`[Tender Import] Clean items extracted from ${boqFile.originalname}: ${sheetProducts.length}`);
       }
 
       // Do NOT merge products from structured BOQ files to preserve all separate items
-      console.log(`[Tender Import] Preserved ${products.length} separate items from BOQ files.`);
+      console.log(`[Tender Import] Preserved ${products.length} canonical items from BOQ files.`);
     }
 
     // ── 2. Process ALL Technical Specification files ────────────────────────
@@ -749,6 +724,22 @@ exports.importTender = async (req, res, next) => {
       parsedText = textParts.join('');
 
       if (parsedText.length > 0 && products.length > 0) {
+        // Enrich canonical line item destinations if a Geographical Areas distribution table is present in the tender specification
+        const boqParserService = require('../services/boqParserService');
+        const gaMap = boqParserService.extractGaDistributionFromText(parsedText);
+        if (gaMap && gaMap.size > 0) {
+          products.forEach(p => {
+            const rawNo = String(p.itemNo || '').trim();
+            const destFromGa = gaMap.get(rawNo) || 
+                               gaMap.get(rawNo.replace(/^1\./, '')) || 
+                               (rawNo.startsWith('1.') ? gaMap.get(rawNo) : gaMap.get(`1.${rawNo.padStart(2, '0')}`));
+            if (destFromGa) {
+              p.destination = destFromGa;
+            }
+          });
+          console.log(`[Tender Import] Enriched destinations for ${products.length} items from Geographical Areas distribution table.`);
+        }
+
         const aiService = require('../services/aiService');
         const aiConfig = require('../config/aiConfig');
 
@@ -768,21 +759,24 @@ exports.importTender = async (req, res, next) => {
           return Promise.all(results);
         };
 
+        const extractionPipeline = require('../services/extraction/ExtractionPipeline');
         // Extract dynamic fields for EACH product using its own category concurrently
-        await mapLimit(products, aiConfig.MAX_AI_CONCURRENCY, async (prod) => {
+        await mapLimit(products, 6, async (prod) => {
           const prodFields = await FieldDefinition.find({
-            productCategory: prod.category,
+            productCategory: prod.category || 'Valves',
             formContext: 'Enquiry',
             isDeleted: false,
             isActive: true
           });
           if (prodFields.length > 0) {
-            prod.dynamicFields = await aiService.extractDynamicFields(
-              parsedText,
-              prodFields,
-              prod.description,
-              'NEW_TENDER'
-            );
+            const gatedResult = await extractionPipeline.processProductGatedPipeline({
+              textContext: `${prod.description}\n\n${parsedText.substring(0, 10000)}`,
+              fieldDefinitions: prodFields,
+              productDescription: prod.description,
+              enquiryId: null,
+              productIndex: products.indexOf(prod)
+            });
+            prod.dynamicFields = gatedResult.validatedDynamicFields || {};
           }
         });
       } else if (parsedText.length > 0 && products.length === 0) {
@@ -897,47 +891,140 @@ exports.updateEnquiryProducts = async (req, res, next) => {
       return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
     }
 
-    // Learning Engine Hook: Record user manual corrections for dynamic dictionary training
-    try {
-      const LearningEngine = require('../services/extraction/LearningEngine');
-      const oldProducts = enquiry.products || [];
+    const EngineeringRulesEngine = require('../services/extraction/EngineeringRulesEngine');
+    const EngineeringDictionary = require('../services/extraction/EngineeringDictionary');
+    const ValidationEngine = require('../services/extraction/ValidationEngine');
+    const LearningEngine = require('../services/extraction/LearningEngine');
+    const oldProducts = enquiry.products || [];
 
-      products.forEach((newProd, idx) => {
-        const oldProd = oldProducts[idx] || {};
-        const oldFields = oldProd.dynamicFields || {};
-        const newFields = newProd.dynamicFields || {};
+    const processedProducts = products.map((newProd, idx) => {
+      const oldProd = oldProducts[idx] || {};
+      const oldFields = oldProd.dynamicFields || {};
+      const newFields = newProd.dynamicFields || {};
+      const lineItemId = newProd.lineItemId || oldProd.lineItemId || `LI-${String(idx + 1).padStart(3, '0')}`;
 
-        for (const [key, newVal] of Object.entries(newFields)) {
-          const oldVal = oldFields[key];
-          if (newVal && oldVal && String(newVal).trim() !== String(oldVal).trim()) {
-            let fieldCategory = 'valve';
-            const lKey = key.toLowerCase();
-            if (lKey.includes('size')) fieldCategory = 'size';
-            else if (lKey.includes('class')) fieldCategory = 'class';
-            else if (lKey.includes('material') || lKey.includes('moc')) fieldCategory = 'material';
-            else if (lKey.includes('end') || lKey.includes('connection')) fieldCategory = 'connection';
+      // Preserve raw evidence in sourceSpecifications
+      const sourceSpecs = {
+        ...(oldProd.sourceSpecifications || {}),
+        ...(newProd.sourceSpecifications || {})
+      };
 
-            LearningEngine.recordCorrection({
-              enquiryId: enquiry._id,
-              productIndex: idx,
-              fieldCategory,
-              field: key,
-              wrongValue: String(oldVal).trim(),
-              correctValue: String(newVal).trim(),
-              correctedBy: req.user?._id || null,
-              documentContext: newProd.description || ''
-            }).catch(err => console.error('[LearningEngine] Correction record error:', err.message));
+      // Record field changes and set USER_OVERRIDE provenance
+      const fieldConfidences = { ...(oldProd.fieldConfidences || {}), ...(newProd.fieldConfidences || {}) };
+      for (const [key, newVal] of Object.entries(newFields)) {
+        const oldVal = oldFields[key];
+        const oldValStr = typeof oldVal === 'object' && oldVal !== null ? (oldVal.value || oldVal.canonicalValue || '') : String(oldVal || '');
+        const newValStr = typeof newVal === 'object' && newVal !== null ? (newVal.value || newVal.canonicalValue || '') : String(newVal || '');
+
+        if (newValStr && (!oldValStr || newValStr.trim() !== oldValStr.trim())) {
+          fieldConfidences[key] = {
+            confidence: 100,
+            source: 'USER_OVERRIDE',
+            provenance: 'USER_OVERRIDE',
+            updatedAt: new Date().toISOString(),
+            updatedBy: req.user?._id || null
+          };
+
+          let fieldCategory = 'valve';
+          const lKey = key.toLowerCase();
+          if (lKey.includes('size')) fieldCategory = 'size';
+          else if (lKey.includes('class')) fieldCategory = 'class';
+          else if (lKey.includes('material') || lKey.includes('moc')) fieldCategory = 'material';
+          else if (lKey.includes('end') || lKey.includes('connection')) fieldCategory = 'connection';
+
+          LearningEngine.recordCorrection({
+            enquiryId: enquiry._id,
+            lineItemId,
+            productIndex: idx,
+            fieldCategory,
+            field: key,
+            wrongValue: oldValStr.trim(),
+            correctValue: newValStr.trim(),
+            correctedBy: req.user?._id || null,
+            documentContext: newProd.description || ''
+          }).catch(err => console.error('[LearningEngine] Correction record error:', err.message));
+        }
+      }
+
+      // Extract current values for engineering derivation
+      const getFieldVal = (k) => {
+        const v = newFields[k];
+        if (v === undefined || v === null) return null;
+        if (typeof v === 'object' && v !== null) return v.value || v.canonicalValue || v.normalizedValue || null;
+        return v;
+      };
+
+      const rawSize = getFieldVal('valve_size') || getFieldVal('size') || '';
+      const rawClass = getFieldVal('valve_class') || getFieldVal('pressure_class') || getFieldVal('class') || '';
+      const rawType = getFieldVal('valve_type') || getFieldVal('valveType') || newProd.category || '';
+      const rawConn = getFieldVal('valve_end_connection') || getFieldVal('end_connection') || '';
+      const rawMoc = getFieldVal('valve_moc_body') || getFieldVal('body_material') || '';
+
+      const normSize = EngineeringDictionary.normalizeSize(rawSize);
+      const normClass = EngineeringDictionary.normalizeClass(rawClass);
+      const normType = EngineeringDictionary.normalizeValveType(rawType);
+
+      // Re-run engineering rules if inputs exist
+      let derivedSpecs = { ...(oldProd.derivedSpecifications || {}) };
+      if (normType.isValid || normSize.isValid || normClass.isValid) {
+        const rules = EngineeringRulesEngine.evaluateContractReviewRules({
+          valveType: normType.canonicalValue || rawType,
+          valveSize: normSize.canonicalValue || rawSize,
+          valveClass: normClass.canonicalValue || rawClass,
+          endConnection: rawConn,
+          bodyMoc: rawMoc
+        });
+
+        if (rules && rules.derived) {
+          derivedSpecs = {
+            ...derivedSpecs,
+            ...rules.derived
+          };
+        }
+
+        if (normClass.canonicalValue && normSize.canonicalValue) {
+          const hydro = EngineeringRulesEngine.calculateHydroAndAirTest(normClass.canonicalValue, normSize.canonicalValue);
+          if (hydro && hydro.shell) {
+            derivedSpecs.shellTestPressure = hydro.shell;
+            derivedSpecs.seatTestPressure = hydro.seat;
+            derivedSpecs.airSeatTestPressure = hydro.air;
           }
         }
-      });
-    } catch (lErr) {
-      console.error('[LearningEngine] Error in updateEnquiryProducts hook:', lErr.message);
+      }
+
+      const qty = (newProd.quantity !== undefined && newProd.quantity !== null && newProd.quantity !== '') ? Number(newProd.quantity) : null;
+      const isMissingRequired = qty === null || !normSize.canonicalValue || !normClass.canonicalValue;
+      const needsReview = isMissingRequired || !normType.isValid || !normSize.isValid || !normClass.isValid;
+
+      return {
+        ...newProd,
+        lineItemId,
+        itemNo: newProd.itemNo || idx + 1,
+        enquirySrNo: newProd.enquirySrNo || idx + 1,
+        quantity: qty,
+        sourceSpecifications: sourceSpecs,
+        derivedSpecifications: derivedSpecs,
+        fieldConfidences,
+        validation: {
+          isValid: !needsReview,
+          warnings: needsReview ? ['Missing or unverified required specification'] : [],
+          needsManualReview: needsReview,
+          reviewReason: needsReview ? (qty === null ? 'MISSING_QUANTITY' : (!normSize.canonicalValue ? 'SIZE_NOT_FOUND' : (!normClass.canonicalValue ? 'CLASS_NOT_FOUND' : 'INVALID_SPECIFICATION'))) : null
+        }
+      };
+    });
+
+    enquiry.products = processedProducts;
+    enquiry.lastModifiedBy = req.user?._id;
+
+    // If all products are valid, promote status from Needs Review if applicable
+    const allValid = processedProducts.every(p => p.validation && !p.validation.needsManualReview && p.validation.isValid);
+    if (allValid && enquiry.status === 'Needs Review') {
+      enquiry.status = 'Ready for Offer';
+      enquiry.isUnverified = false;
     }
 
-    enquiry.products = products;
-    enquiry.lastModifiedBy = req.user?._id;
     enquiry.markModified('products');
-
     const updatedEnquiry = await enquiry.save();
 
     await logActivity({
@@ -958,3 +1045,48 @@ exports.updateEnquiryProducts = async (req, res, next) => {
     next(err);
   }
 };
+
+/**
+ * Targeted Endpoint: Updates a single line item by lineItemId.
+ */
+exports.updateSingleEnquiryProduct = async (req, res, next) => {
+  try {
+    const { id, lineItemId } = req.params;
+    const updatedProductData = req.body;
+
+    const enquiry = await Enquiry.findById(id);
+    if (!enquiry) {
+      return res.status(404).json({ status: 'error', message: 'Enquiry not found' });
+    }
+
+    const prodIdx = enquiry.products.findIndex(p => p.lineItemId === lineItemId);
+    if (prodIdx === -1) {
+      return res.status(404).json({ status: 'error', message: `Line item ${lineItemId} not found on enquiry` });
+    }
+
+    const currentProd = enquiry.products[prodIdx].toObject ? enquiry.products[prodIdx].toObject() : enquiry.products[prodIdx];
+    const productsCopy = [...enquiry.products.map(p => p.toObject ? p.toObject() : p)];
+
+    productsCopy[prodIdx] = {
+      ...currentProd,
+      ...updatedProductData,
+      lineItemId,
+      itemNo: currentProd.itemNo || prodIdx + 1,
+      enquirySrNo: currentProd.enquirySrNo || prodIdx + 1,
+      dynamicFields: {
+        ...(currentProd.dynamicFields || {}),
+        ...(updatedProductData.dynamicFields || {})
+      },
+      sourceSpecifications: {
+        ...(currentProd.sourceSpecifications || {}),
+        ...(updatedProductData.sourceSpecifications || {})
+      }
+    };
+
+    req.body = { products: productsCopy };
+    return exports.updateEnquiryProducts(req, res, next);
+  } catch (err) {
+    next(err);
+  }
+};
+

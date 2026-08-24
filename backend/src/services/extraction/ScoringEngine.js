@@ -10,7 +10,7 @@ class ScoringEngine {
    * @param {Object} params Evaluation parameters.
    */
   calculateScore({
-    confidence = 100,
+    confidence = 0,
     authority = 85,
     agreement = 100,
     validationState = 'VALID',

@@ -6,6 +6,7 @@ const {
   getEnquiry, 
   updateEnquiry, 
   updateEnquiryProducts,
+  updateSingleEnquiryProduct,
   deleteEnquiry,
   verifyAndApproveEnquiry,
   getEnquiryThreadEmails,
@@ -42,6 +43,7 @@ router.route('/')
   .post(requirePermission('Enquiry', 'create'), createEnquiry);
 
 router.patch('/:id/verify-approve', requirePermission('Enquiry', 'edit'), verifyAndApproveEnquiry);
+router.patch('/:id/products/:lineItemId', requirePermission('Enquiry', 'edit'), updateSingleEnquiryProduct);
 router.patch('/:id/products', requirePermission('Enquiry', 'edit'), updateEnquiryProducts);
 router.get('/:id/thread-emails', requirePermission('Enquiry', 'view'), getEnquiryThreadEmails);
 

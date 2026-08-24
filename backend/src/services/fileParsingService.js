@@ -127,7 +127,7 @@ async function extractTextFromFile(buffer, fileType, fileName) {
       console.log(`[File Parsing] OCR Cache Hit for hash ${fileHash} (file: ${fileName}). Reusing extracted text.`);
       return {
         text: cached.extractedText,
-        confidence: cached.ocrConfidence || 100,
+        confidence: (cached.ocrConfidence !== undefined && cached.ocrConfidence !== null) ? cached.ocrConfidence : 0,
         status: 'SUCCESS',
         category: cached.attachmentCategory || category
       };
@@ -138,7 +138,7 @@ async function extractTextFromFile(buffer, fileType, fileName) {
     console.log(`[File Parsing] CAD/Drawing file detected (${fileName}). Skipping text extraction.`);
     return {
       text: '',
-      confidence: 100,
+      confidence: 0,
       status: 'NOT_SUPPORTED',
       category: 'Drawing'
     };
@@ -161,10 +161,11 @@ async function extractTextFromFile(buffer, fileType, fileName) {
           pdfTextResult = (result.text || '').trim();
           console.log(`[File Parsing] PDF text extracted via PDFParse class: ${pdfTextResult.length} chars from ${fileName}`);
 
-          if (pdfTextResult.length >= 50) {
+          const isCleanText = pdfTextResult.length >= 250 || (buffer.length < 30000 && pdfTextResult.length >= 80);
+          if (isCleanText) {
             resultObj = { text: pdfTextResult, confidence: 100, status: 'SUCCESS', category };
           } else {
-            console.log(`[File Parsing] PDF has very little text (${pdfTextResult.length} chars) — likely scanned: ${fileName}. Trying AI Vision OCR...`);
+            console.log(`[File Parsing] PDF has very little text (${pdfTextResult.length} chars for ${buffer.length} bytes) — likely scanned: ${fileName}. Trying AI Vision OCR...`);
           }
         } catch (pdfErr) {
           console.error(`[File Parsing] PDFParse class failed for ${fileName}: ${pdfErr.message}`);
@@ -193,11 +194,15 @@ async function extractTextFromFile(buffer, fileType, fileName) {
             }]
           };
 
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 45000);
           const geminiRes = await fetch(geminiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(geminiPayload)
+            body: JSON.stringify(geminiPayload),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
 
           if (geminiRes.ok) {
             const geminiResult = await geminiRes.json();
@@ -208,28 +213,22 @@ async function extractTextFromFile(buffer, fileType, fileName) {
               console.log(`[File Parsing] ✅ Gemini Vision OCR extracted ${trimmed.length} chars from scanned PDF: ${fileName}`);
               resultObj = { text: trimmed, confidence: 90, status: 'SUCCESS', category };
             }
+          } else {
+            console.warn(`[File Parsing] Gemini Vision OCR returned ${geminiRes.status} for ${fileName}`);
           }
         } catch (geminiErr) {
           console.error(`[File Parsing] Gemini Vision OCR failed for ${fileName}:`, geminiErr.message);
         }
       }
 
-      // If both PDFParse and Gemini failed, fallback to local Tesseract OCR
-      if (resultObj.status !== 'SUCCESS') {
-        console.log(`[File Parsing] Falling back to Tesseract OCR for PDF: ${fileName}`);
-        try {
-          const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
-          const trimmedText = (text || '').trim();
-          if (trimmedText.length > 20) {
-            resultObj = { text: trimmedText, confidence: confidence || 40, status: 'SUCCESS', category };
-          }
-        } catch (ocrErr) {
-          console.error(`[File Parsing] Tesseract OCR also failed for PDF ${fileName}:`, ocrErr.message);
-        }
-      }
-
-      if (resultObj.status !== 'SUCCESS' && pdfTextResult) {
-        resultObj = { text: pdfTextResult, confidence: 50, status: 'SUCCESS', category };
+      // Graceful fallback to whatever text was extracted by PDFParse
+      if (resultObj.status !== 'SUCCESS' && pdfTextResult && pdfTextResult.length > 0) {
+        resultObj = {
+          text: pdfTextResult,
+          confidence: pdfTextResult.length > 50 ? 80 : 40,
+          status: 'SUCCESS',
+          category
+        };
       }
     }
 

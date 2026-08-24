@@ -776,7 +776,7 @@ ${relevantFields.map(f => `  "${f.fieldName}": {
       let canonicalVal = null;
 
       if (lk.includes('size')) canonicalVal = legacy.valve_size;
-      else if (lk.includes('class') || lk.includes('rating')) canonicalVal = legacy.valve_class;
+      else if (lk.includes('class') || lk.includes('pressure_rating') || lk.includes('pressure_class') || (lk.includes('rating') && !lk.includes('operating'))) canonicalVal = legacy.valve_class;
       else if (lk.includes('type') && lk.includes('valve')) canonicalVal = legacy.valve_type;
       else if (lk.includes('material') || lk.includes('moc')) canonicalVal = legacy.shellMaterial;
       else if (lk.includes('standard')) canonicalVal = legacy.designStandard;

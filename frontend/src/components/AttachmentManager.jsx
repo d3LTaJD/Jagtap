@@ -63,12 +63,19 @@ const AttachmentManager = ({ moduleName, entityId = null, onUploadComplete, uplo
   const downloadFile = async (fileId, fileName) => {
     try {
       const res = await api.get(`/files/${fileId}/download-url`);
-      const { url } = res.data.data;
+      const { url, fileName: fetchedFileName } = res.data.data;
       
-      // Open signed URL in new tab directly (AWS will handle content-disposition usually)
-      window.open(url, '_blank');
+      const fileRes = await api.get(url, { responseType: 'blob' });
+      const blobUrl = window.URL.createObjectURL(new Blob([fileRes.data]));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', fileName || fetchedFileName || 'attachment');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      console.error('Failed to get download URL', err);
+      console.error('Failed to download file', err);
     }
   };
 
@@ -110,54 +117,114 @@ const AttachmentManager = ({ moduleName, entityId = null, onUploadComplete, uplo
       )}
 
       {/* File List */}
-      {uploadedFiles.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {uploadedFiles.map((file, idx) => {
-            // Support both old string URLs and new FileMetadata objects
-            const isLegacy = typeof file === 'string';
-            const fileName = isLegacy ? file.split('/').pop() : file.fileName;
-            const fileSize = isLegacy ? '' : (file.size / 1024 / 1024).toFixed(2) + ' MB';
-            const fileId = isLegacy ? null : file._id;
+      {uploadedFiles.length > 0 && (() => {
+        // Find latest generated PDF index
+        let latestPdfId = null;
+        let latestPdfTime = 0;
+        
+        uploadedFiles.forEach((file) => {
+          if (!file) return;
+          const fileName = typeof file === 'string' ? file.split('/').pop() : file.fileName || file.originalName || '';
+          const isPdf = fileName.toLowerCase().endsWith('.pdf');
+          if (isPdf) {
+            const time = file.createdAt ? new Date(file.createdAt).getTime() : 0;
+            if (time >= latestPdfTime) {
+              latestPdfTime = time;
+              latestPdfId = typeof file === 'string' ? file : (file._id || fileName);
+            }
+          }
+        });
 
-            return (
-              <div key={idx} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="p-2 bg-brand-50 text-brand-600 rounded-lg shrink-0">
-                    <File className="w-4 h-4" />
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {uploadedFiles.map((file, idx) => {
+              if (!file) return null;
+              const isLegacy = typeof file === 'string';
+              const fileName = isLegacy ? file.split('/').pop() : (file.originalName || file.fileName);
+              const fileSize = isLegacy ? '' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '');
+              const fileId = isLegacy ? null : file._id;
+              const createdAt = isLegacy ? null : file.createdAt;
+
+              // Check if file has revision in name or metadata
+              const revMatch = fileName.match(/_Rev(\d+)/i) || fileName.match(/Rev\s*(\d+)/i);
+              const revLabel = revMatch ? `Rev ${revMatch[1].padStart(2, '0')}` : (file.revisionNumber !== undefined ? `Rev ${String(file.revisionNumber).padStart(2, '0')}` : null);
+              
+              const isLatestPdf = (isLegacy ? file === latestPdfId : file._id === latestPdfId) && fileName.toLowerCase().endsWith('.pdf');
+
+              return (
+                <div 
+                  key={idx} 
+                  className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                    isLatestPdf 
+                      ? 'border-emerald-300 bg-emerald-50/40 shadow-xs' 
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 overflow-hidden flex-1">
+                    <div className={`p-2.5 rounded-xl shrink-0 ${isLatestPdf ? 'bg-emerald-100 text-emerald-700' : 'bg-brand-50 text-brand-600'}`}>
+                      <File className="w-4 h-4" />
+                    </div>
+                    <div className="truncate flex-1 space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-xs font-bold text-slate-800 truncate" title={fileName}>{fileName}</p>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {revLabel && (
+                          <span className="px-1.5 py-0.5 bg-slate-900 text-white text-[9px] font-black rounded">
+                            {revLabel}
+                          </span>
+                        )}
+                        {isLatestPdf ? (
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded-md border border-emerald-300">
+                            ★ Latest PDF
+                          </span>
+                        ) : revLabel ? (
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[9px] font-semibold rounded border border-slate-200">
+                            Previous Version
+                          </span>
+                        ) : null}
+
+                        <span className="text-[10px] text-slate-400">
+                          {fileSize}
+                        </span>
+
+                        {createdAt && (
+                          <span className="text-[10px] text-slate-400">
+                            • {new Date(createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="truncate">
-                    <p className="text-xs font-bold text-slate-800 truncate" title={fileName}>{fileName}</p>
-                    <p className="text-[10px] text-slate-500">{fileSize || 'Legacy attachment'}</p>
+                  
+                  <div className="flex items-center gap-1 pl-2">
+                    {fileId ? (
+                      <button 
+                        onClick={(e) => { e.preventDefault(); downloadFile(fileId, fileName); }}
+                        className="p-2 rounded-xl hover:bg-white text-slate-500 hover:text-brand-600 border border-transparent hover:border-slate-200 transition-all shadow-xs"
+                        title="Download securely"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <a 
+                        href={file} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="p-2 rounded-xl hover:bg-white text-slate-500 hover:text-brand-600 border border-transparent hover:border-slate-200 transition-all shadow-xs"
+                        title="Download legacy file"
+                      >
+                        <Download className="w-4 h-4" />
+                      </a>
+                    )}
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-1 pl-2">
-                  {fileId ? (
-                    <button 
-                      onClick={(e) => { e.preventDefault(); downloadFile(fileId, fileName); }}
-                      className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-brand-600 transition-colors"
-                      title="Download securely"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <a 
-                      href={file} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-brand-600 transition-colors"
-                      title="Download legacy file"
-                    >
-                      <Download className="w-4 h-4" />
-                    </a>
-                  )}
-                  {/* We could add delete logic here if not readOnly */}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {uploadedFiles.length === 0 && readOnly && (
         <p className="text-sm text-slate-500 italic">No attachments found.</p>

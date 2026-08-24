@@ -4,18 +4,29 @@ const helmet = require('helmet');
 
 const app = express();
 
-// Middleware
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
+// CORS configuration
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:5173,http://localhost:5174')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
+}));
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -44,6 +55,11 @@ app.use('/api/master-data', require('./routes/masterDataRoutes'));
 app.use('/api/vendors', require('./routes/vendorRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
 app.use('/api/calendar', require('./routes/calendarRoutes'));
+app.use('/api/drawings', require('./routes/drawingRoutes'));
+app.use('/api/work-orders', require('./routes/workOrderRoutes'));
+app.use('/api/bom', require('./routes/bomRoutes'));
+app.use('/api/purchase', require('./routes/purchaseRoutes'));
+app.use('/api/proforma-invoices', require('./routes/proformaInvoiceRoutes'));
 
 // Global Search
 const { protect } = require('./middleware/auth');

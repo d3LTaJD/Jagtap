@@ -1,5 +1,5 @@
 const express = require('express');
-const { protect } = require('../middleware/auth');
+const { protect, requirePermission } = require('../middleware/auth');
 const { createTask, getTasks, getTask, updateTask, deleteTask } = require('../controllers/taskController');
 
 const router = express.Router();
@@ -8,12 +8,12 @@ const router = express.Router();
 router.use(protect);
 
 router.route('/')
-  .get(getTasks)
-  .post(createTask);
+  .get(requirePermission('Tasks', 'view'), getTasks)
+  .post(requirePermission('Tasks', 'create'), createTask);
 
 router.route('/:id')
-  .get(getTask)
-  .patch(updateTask)
-  .delete(deleteTask);
+  .get(requirePermission('Tasks', 'view'), getTask)
+  .patch(requirePermission('Tasks', 'edit'), updateTask)
+  .delete(requirePermission('Tasks', 'delete'), deleteTask);
 
 module.exports = router;

@@ -19,6 +19,7 @@ const ROLE_ALIASES = {
   'SA':    ['SA', 'SUPER_ADMIN', 'SUPERADMIN', 'super_admin', 'superadmin'],
   'DIR':   ['DIR', 'DIRECTOR', 'director'],
   'TA':    ['TA', 'TECHNICAL_AUTHORITY', 'TECHNICALAUTHORITY', 'technical_authority', 'technicalauthority'],
+  'PM':    ['PM', 'PURCHASE_MANAGER', 'PURCHASEMANAGER', 'purchase_manager', 'purchasemanager'],
   'SALES': ['SALES', 'SALES_EXECUTIVE', 'SALESEXECUTIVE', 'sales_executive', 'salesexecutive'],
   'DE':    ['DE', 'DESIGN_ENGINEER', 'DESIGNENGINEER', 'design_engineer', 'designengineer'],
   'QCE':   ['QCE', 'QC_ENGINEER', 'QCENGINEER', 'qc_engineer', 'qcengineer'],
@@ -94,6 +95,7 @@ const PERMISSION_MATRIX = {
     view:           ['SA', 'DIR', 'TA', 'SALES', 'MGR'],
     create:         ['SA', 'DIR', 'TA', 'SALES'],
     edit:           ['SA', 'DIR', 'TA', 'SALES'],
+    delete:         ['SA', 'DIR', 'TA'],
     setNextDate:    ['SA', 'DIR', 'TA', 'SALES'],
     escalationRules: ['SA', 'DIR'],
     overrideReminder: ['SA', 'DIR', 'TA'],
@@ -101,14 +103,19 @@ const PERMISSION_MATRIX = {
 
   // ── MODULE 3: QUOTATION ──────────────────────────────────────────────────
   Quotation: {
-    view:           ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
-    create:         ['SA', 'DIR', 'TA', 'SALES'],
-    editTechnical:  ['SA', 'DIR', 'TA'],
-    editCommercial: ['SA', 'DIR', 'SALES'],
-    approve:        ['SA', 'DIR'],
-    linkDrawing:    ['SA', 'DIR', 'TA', 'DE'],
-    viewPricing:    ['SA', 'DIR', 'ACC'],
-    export:         ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    view:                 ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create:               ['SA', 'DIR', 'TA', 'SALES'],
+    editTechnical:        ['SA', 'DIR', 'TA', 'QCS', 'QCE'],
+    editCommercial:       ['SA', 'DIR', 'SALES'],
+    routeToQc:            ['SA', 'DIR', 'TA', 'SALES'],
+    submitTechnicalReview: ['SA', 'DIR', 'QCS', 'QCE'],
+    checkerReview:        ['SA', 'DIR', 'MGR'],
+    approve:              ['SA', 'DIR'],
+    sendToClient:         ['SA', 'DIR', 'SALES'],
+    unlockTechnical:      ['SA', 'DIR'],
+    linkDrawing:          ['SA', 'DIR', 'TA', 'DE'],
+    viewPricing:          ['SA', 'DIR', 'ACC', 'SALES', 'MGR'],
+    export:               ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
   },
 
   // ── MODULE 4: QAP ───────────────────────────────────────────────────────
@@ -132,7 +139,19 @@ const PERMISSION_MATRIX = {
     configureWidgets: ['SA', 'DIR'],
   },
 
-  // ── MASTER DATA (Customers, Products, Vendors) ──────────────────────────
+  // ── MODULE 6: TASKS & EMAIL ─────────────────────────────────────────────
+  Tasks: {
+    view:   ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create: ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS'],
+    edit:   ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS'],
+    delete: ['SA', 'DIR', 'TA'],
+  },
+
+  Email: {
+    send: ['SA', 'DIR', 'TA', 'SALES'],
+  },
+
+  // ── MASTER DATA (Customers, Products, Vendors, MasterData) ──────────────
   Customers: {
     view:   ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
     create: ['SA', 'DIR', 'TA'],
@@ -145,6 +164,59 @@ const PERMISSION_MATRIX = {
     create: ['SA', 'DIR', 'TA'],
     edit:   ['SA', 'DIR', 'TA'],
     delete: ['SA', 'DIR', 'TA'],
+  },
+
+  Vendors: {
+    view:   ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create: ['SA', 'DIR', 'TA'],
+    edit:   ['SA', 'DIR', 'TA'],
+    delete: ['SA', 'DIR', 'TA'],
+  },
+
+  MasterData: {
+    view:   ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create: ['SA', 'DIR', 'TA'],
+    edit:   ['SA', 'DIR', 'TA'],
+    delete: ['SA', 'DIR', 'TA'],
+  },
+
+  // ── MODULE 7: TDS / DRAWING MANAGEMENT ────────────────────────────────────
+  Drawing: {
+    view:    ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create:  ['SA', 'DIR', 'TA', 'DE', 'SALES'],
+    edit:    ['SA', 'DIR', 'TA', 'DE', 'QCS'],
+    approve: ['SA', 'DIR', 'TA', 'DE', 'QCS'],
+    reject:  ['SA', 'DIR', 'TA', 'DE', 'QCS'],
+    delete:  ['SA', 'DIR'],
+  },
+
+  // ── MODULE 8: WORK ORDERS & PRODUCTION GATING ────────────────────────────
+  WorkOrder: {
+    view:    ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create:  ['SA', 'DIR', 'TA', 'SALES'],
+    edit:    ['SA', 'DIR', 'TA', 'QCS'],
+    release: ['SA', 'DIR', 'TA', 'QCS'], // subject to authoritative hard backend drawing gate!
+    delete:  ['SA', 'DIR'],
+  },
+
+  // ── MODULE 9: BILL OF MATERIALS (BOM) ────────────────────────────────────
+  BOM: {
+    view:    ['SA', 'DIR', 'TA', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    create:  ['SA', 'DIR', 'TA', 'DE', 'SALES'],
+    edit:    ['SA', 'DIR', 'TA', 'DE'],
+    confirm: ['SA', 'DIR', 'TA'],
+    delete:  ['SA', 'DIR'],
+  },
+
+  // ── MODULE 10: PURCHASE & VENDOR PROFORMA INVOICES ───────────────────────
+  Purchase: {
+    view:        ['SA', 'DIR', 'TA', 'PM', 'SALES', 'DE', 'QCE', 'QCS', 'ACC', 'MGR'],
+    createPR:    ['SA', 'DIR', 'TA', 'PM', 'DE'],
+    createPO:    ['SA', 'DIR', 'TA', 'PM'],
+    editPO:      ['SA', 'DIR', 'TA', 'PM'],
+    reconcilePI: ['SA', 'DIR', 'TA', 'PM', 'ACC'],
+    overridePI:  ['SA', 'DIR', 'TA', 'PM'],
+    delete:      ['SA', 'DIR'],
   },
 };
 

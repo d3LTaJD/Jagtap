@@ -74,9 +74,16 @@ const AutocompleteSelect = ({
   // Flat list for keyboard navigation (group headers are not selectable)
   const flatFiltered = filtered;
 
+  // Helper to normalize strings for flexible option matching (stripping mm, inch, #, and trailing spaces)
+  const cleanMatch = (v) => String(v ?? '').trim().toLowerCase().replace(/\s*(?:mm|inch|inches|in|\"|#)$/, '').trim();
+
   // Derive displayed label from selected value
-  const selectedOption = normalised.find(o => o.value === value);
-  const displayLabel = selectedOption ? selectedOption.label : '';
+  const selectedOption = normalised.find(o => 
+    String(o.value) === String(value) ||
+    (value !== undefined && value !== null && value !== '' && cleanMatch(o.value) === cleanMatch(value)) ||
+    (value !== undefined && value !== null && value !== '' && String(o.label).toLowerCase() === String(value).toLowerCase())
+  );
+  const displayLabel = selectedOption ? selectedOption.label : (value !== undefined && value !== null && value !== '' ? String(value) : '');
 
   // Calculate dropdown position using fixed positioning (viewport-relative)
   const updatePosition = useCallback(() => {

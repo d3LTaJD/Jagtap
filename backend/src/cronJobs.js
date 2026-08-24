@@ -38,6 +38,27 @@ exports.initCronJobs = () => {
       console.error('Error in cron job checking follow-ups:', err);
     }
   });
+  // M3: TDS Vendor SLA & Delay Escalation Engine (Run every 15 minutes)
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const tdsService = require('./services/tdsService');
+      await tdsService.checkVendorSlaBreaches();
+      await tdsService.checkDrawingDelayEscalations();
+    } catch (tdsCronErr) {
+      console.error('[TDS Cron] Error running TDS SLA/Escalation cron:', tdsCronErr.message);
+    }
+  });
+
+  // M4: CPD Procurement Risk & Lead-Time Monitor (Run every 30 minutes)
+  cron.schedule('*/30 * * * *', async () => {
+    try {
+      const purchaseOrderService = require('./services/purchaseOrderService');
+      await purchaseOrderService.checkCpdProcurementRisks();
+    } catch (cpdCronErr) {
+      console.error('[CPD Cron] Error running CPD risk monitor cron:', cpdCronErr.message);
+    }
+  });
+
   // Daily Backup Cron (Run at midnight: 0 0 * * *)
   cron.schedule('0 0 * * *', async () => {
     try {

@@ -136,7 +136,11 @@ const EnquiryDetail = () => {
   };
 
   const handleDirectCreateQuotation = async () => {
-    if (!enquiry || ['Lost', 'Abandoned'].includes(enquiry.status)) return;
+    const BLOCKED_STATUSES = ['Needs Review', 'Lost', 'On Hold', 'Abandoned'];
+    if (!enquiry || BLOCKED_STATUSES.includes(enquiry.status)) {
+      showToast('Quotation cannot be generated until required specifications are reviewed.', 'error');
+      return;
+    }
     setCreatingQuotation(true);
     try {
       const res = await api.post('/quotations', { enquiry: enquiry._id });
@@ -186,14 +190,46 @@ const EnquiryDetail = () => {
       if (enquiry.dynamicFields) setDynamicValues(enquiry.dynamicFields);
       setCustomerForm({
         companyName: enquiry.senderCompany || enquiry.customer?.companyName || '',
-        primaryContactName: enquiry.customer?.primaryContactName || '',
-        mobileNumber: enquiry.customer?.mobileNumber || '',
-        emailAddress: enquiry.customer?.emailAddress || '',
+        primaryContactName: enquiry.contactPerson || enquiry.customer?.primaryContactName || '',
+        mobileNumber: enquiry.contactMobile || enquiry.customer?.mobileNumber || '',
+        emailAddress: enquiry.contactEmail || enquiry.customer?.emailAddress || '',
         city: enquiry.customer?.city || '',
         gstin: enquiry.customer?.gstin || ''
       });
     }
   }, [enquiry]);
+
+  const saveCustomerInfo = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        senderCompany: customerForm.companyName,
+        contactPerson: customerForm.primaryContactName,
+        contactMobile: customerForm.mobileNumber,
+        contactEmail: customerForm.emailAddress,
+        customerData: {
+          companyName: customerForm.companyName,
+          primaryContactName: customerForm.primaryContactName,
+          mobileNumber: customerForm.mobileNumber,
+          emailAddress: customerForm.emailAddress,
+          city: customerForm.city,
+          gstin: customerForm.gstin
+        }
+      };
+      const res = await api.patch(`/enquiries/${id}`, payload);
+      if (res.data?.data?.enquiry) {
+        setEnquiry(res.data.data.enquiry);
+        setIsEditingCustomer(false);
+        showToast('Customer information updated successfully!');
+      }
+    } catch (err) {
+      console.error('Failed to update customer info:', err);
+      showToast(err.response?.data?.message || 'Failed to update customer information', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     const fetchEmails = async () => {
@@ -405,32 +441,27 @@ const EnquiryDetail = () => {
     }
   };
 
-  const saveCustomerInfo = async (e) => {
-    if (e) e.preventDefault();
-    setSaving(true);
+  const handleDownloadAttachment = async (att) => {
     try {
-      const payload = {
-        senderCompany: customerForm.companyName,
-        customerData: {
-          companyName: customerForm.companyName,
-          primaryContactName: customerForm.primaryContactName,
-          mobileNumber: customerForm.mobileNumber,
-          emailAddress: customerForm.emailAddress,
-          city: customerForm.city,
-          gstin: customerForm.gstin
-        }
-      };
-      const res = await api.patch(`/enquiries/${id}`, payload);
-      if (res.data?.data?.enquiry) {
-        setEnquiry(res.data.data.enquiry);
-        setIsEditingCustomer(false);
-        showToast('Customer information updated successfully!');
-      }
+      showToast('Downloading file...', 'info');
+      const rawPath = att.storagePath || att.fileKey || '';
+      const cleanKey = rawPath.replace(/^local[/\\]+/i, '');
+      
+      const res = await api.get(`/files/download-local/${encodeURIComponent(cleanKey)}`, {
+        responseType: 'blob'
+      });
+      
+      const blobUrl = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', att.originalFileName || att.fileName || cleanKey);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      console.error('[EnquiryDetail] Save customer error:', err);
-      showToast(err.response?.data?.message || 'Failed to update customer info', 'error');
-    } finally {
-      setSaving(false);
+      console.error('Download failed:', err);
+      showToast(err.response?.data?.message || 'Failed to download file', 'error');
     }
   };
 
@@ -607,21 +638,25 @@ const EnquiryDetail = () => {
               />
             </div>
 
-            {ability.can('create', 'Quotation') && (
-            <button
-              onClick={handleDirectCreateQuotation}
-              disabled={creatingQuotation || ['Lost', 'Abandoned'].includes(enquiry.status)}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
-                !['Lost', 'Abandoned'].includes(enquiry.status)
-                  ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer shadow-sm shadow-emerald-500/20'
-                  : 'bg-slate-300 cursor-not-allowed opacity-60'
-              }`}
-              title={['Lost', 'Abandoned'].includes(enquiry.status) ? "Quotation generation is disabled for Lost or Abandoned enquiries." : "Create Quotation for this enquiry"}
-            >
-              {creatingQuotation ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileCheck className="w-3.5 h-3.5" />}
-              {creatingQuotation ? 'Generating Quote...' : 'Create Quotation'}
-            </button>
-            )}
+            {ability.can('create', 'Quotation') && (() => {
+              const isBlocked = ['Needs Review', 'Lost', 'On Hold', 'Abandoned'].includes(enquiry.status) || 
+                (enquiry.products && enquiry.products.some(p => p.validation?.needsManualReview));
+              return (
+                <button
+                  onClick={handleDirectCreateQuotation}
+                  disabled={creatingQuotation || isBlocked}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-white rounded-xl text-sm font-bold transition-all ${
+                    !isBlocked
+                      ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer shadow-sm shadow-emerald-500/20'
+                      : 'bg-slate-300 cursor-not-allowed opacity-60'
+                  }`}
+                  title={isBlocked ? "Quotation cannot be generated until required specifications are reviewed." : "Create Quotation for this enquiry"}
+                >
+                  {creatingQuotation ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileCheck className="w-3.5 h-3.5" />}
+                  {creatingQuotation ? 'Generating Quote...' : 'Create Quotation'}
+                </button>
+              );
+            })()}
           </div>
 
           {/* Group 2: Management Operations */}
@@ -651,6 +686,38 @@ const EnquiryDetail = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left — Details */}
         <div className="lg:col-span-2 space-y-6">
+
+          {/* Quotation Review & Readiness Gate Banner */}
+          {(['Needs Review', 'On Hold'].includes(enquiry.status) || (enquiry.products && enquiry.products.some(p => p.validation?.needsManualReview))) && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 shadow-sm">
+              <div className="flex items-start gap-3.5">
+                <div className="p-2 bg-amber-100 text-amber-700 rounded-xl mt-0.5">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-black text-amber-900">Quotation Generation Review Gate</h3>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-800">
+                      Review Required
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                    Quotation cannot be generated until required specifications are reviewed. Please review and approve the highlighted line items in the table below.
+                  </p>
+                  {enquiry.products && enquiry.products.filter(p => p.validation?.needsManualReview).length > 0 && (
+                    <div className="mt-3 space-y-1.5 border-t border-amber-200/60 pt-2.5">
+                      {enquiry.products.filter(p => p.validation?.needsManualReview).map((it, i) => (
+                        <div key={i} className="text-xs text-amber-800 font-medium flex items-center gap-2">
+                          <span className="font-bold font-mono">Item {it.itemNo || it.enquirySrNo || i + 1} ({it.lineItemId || `LI-${i+1}`}):</span>
+                          <span>{it.validation?.reviewReason || it.validation?.warnings?.[0] || 'Missing required specifications'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Core Info */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -802,9 +869,9 @@ const EnquiryDetail = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 gap-x-6 text-sm">
                 {[
                   ['Company',  enquiry.senderCompany || enquiry.customer?.companyName],
-                  ['Contact',  enquiry.customer?.primaryContactName],
-                  ['Mobile',   enquiry.customer?.mobileNumber],
-                  ['Email',    enquiry.customer?.emailAddress],
+                  ['Contact',  enquiry.contactPerson || enquiry.customer?.primaryContactName],
+                  ['Mobile',   enquiry.contactMobile || enquiry.customer?.mobileNumber],
+                  ['Email',    enquiry.contactEmail || enquiry.customer?.emailAddress],
                   ['City',     enquiry.customer?.city],
                   ['GSTIN',    enquiry.customer?.gstin],
                 ].map(([label, value]) => (
@@ -1058,14 +1125,13 @@ const EnquiryDetail = () => {
                             {new Date(att.uploadedAt || att.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                           </div>
                           <div className="text-right">
-                            <a
-                              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/files/download-local/${att.storagePath}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 font-bold"
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadAttachment(att)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold transition-all text-xs border border-brand-200/60 cursor-pointer shadow-xs"
                             >
                               <Download className="w-3.5 h-3.5" /> Download
-                            </a>
+                            </button>
                           </div>
                         </div>
                       ))}

@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const validationLogSchema = new mongoose.Schema({
   enquiryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Enquiry', index: true },
+  lineItemId: { type: String, index: true },
   productIndex: { type: Number, default: 0 },
   field: { type: String, required: true },
   aiValue: { type: mongoose.Schema.Types.Mixed, default: null },

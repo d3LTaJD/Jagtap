@@ -348,9 +348,22 @@ const TaskPanel = ({ enquiryId, readOnly = false }) => {
                   </div>
                   
                   <div className="flex flex-wrap items-center gap-2 mt-2">
-                    <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${STATUS_COLORS[task.status]}`}>
-                      {task.status}
-                    </span>
+                    {!readOnly ? (
+                      <select
+                        value={task.status}
+                        onChange={(e) => markStatus(task._id, e.target.value)}
+                        className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border-0 outline-none cursor-pointer transition-all ${STATUS_COLORS[task.status]}`}
+                        title="Click to change status"
+                      >
+                        {['To Do', 'In Progress', 'Done', 'Cancelled'].map(st => (
+                          <option key={st} value={st} className="bg-white text-slate-800 font-bold">{st}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${STATUS_COLORS[task.status]}`}>
+                        {task.status}
+                      </span>
+                    )}
                     <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${PRIORITY_COLORS[task.priority]}`}>
                       {task.priority}
                     </span>
@@ -439,15 +452,21 @@ const TaskPanel = ({ enquiryId, readOnly = false }) => {
 
                 {!readOnly && (
                 <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-100 shrink-0">
-                  {task.status !== 'Done' && (
-                    <button onClick={() => markStatus(task._id, 'Done')} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors" title="Mark as Done">
-                      <CheckCircle2 className="w-4 h-4" />
-                    </button>
-                  )}
-                  <button onClick={() => handleEdit(task)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                  <button 
+                    onClick={() => markStatus(task._id, task.status === 'Done' ? 'To Do' : 'Done')} 
+                    className={`p-1.5 rounded-md transition-colors ${
+                      task.status === 'Done' 
+                        ? 'text-emerald-600 hover:text-slate-500 hover:bg-slate-100' 
+                        : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                    }`} 
+                    title={task.status === 'Done' ? 'Reopen task (Set to To Do)' : 'Mark as Done'}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => handleEdit(task)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Edit Task">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button onClick={() => handleDelete(task._id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                  <button onClick={() => handleDelete(task._id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete Task">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

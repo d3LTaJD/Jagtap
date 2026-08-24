@@ -9,16 +9,20 @@ const { getFileBuffer } = require('./localStorageService');
  */
 function detectProductCategory(desc) {
   const lower = desc.toLowerCase();
-  // Full names
+  // 1. Services / Supervision
+  if (/\b(supervision|erection|installation|commissioning|consulting|manpower)\b/i.test(lower)) return 'Supervision';
+  // 2. Structural items (MS ST, structural steel, plates, beams, angles, channels)
+  if (/\b(ms\s*st|structural|structure|beam|column|plate|angle|channel|grating|chequered|truss|purlin|pipe\s*rack|staircase|handrail)\b/i.test(lower)) return 'Structural';
+  // 3. Full valve names & valve type BOQ abbreviations
   if (lower.includes('valve')) return 'Valves';
-  // BOQ abbreviations for valve types
   if (/\b(ball|gate|globe|check|butterfly|plug|control|nrv|vlv|chk|btfv|bfv)\b/i.test(lower)) return 'Valves';
-  // API/ANSI standards strongly indicate valve products
-  if (/\b(api\s*6d|api\s*600|api\s*602|api\s*608|ansi\s*\d+)\b/i.test(lower)) return 'Valves';
-  if (lower.includes('piping') || lower.includes('pipe') || lower.includes('flange') || lower.includes('fitting')) return 'Valves';
+  if (/\b(api\s*6d|api\s*600|api\s*602|api\s*608|api\s*594|api\s*598|bs\s*1868|bs\s*1873|bs\s*5352)\b/i.test(lower)) return 'Valves';
+  // 4. Shorthand valve BOQ items: e.g. "2 in 150 Manual", "4 in 150 Motoriz", "18 in 600 Motoriz"
+  if (/\b\d+(?:\/\d+)?(?:\.\d+)?\s*(?:in|inch|inches|\"|mm|dn)\s+\d+\s*(?:manual|motoriz|gear|lever|handwheel|actuated|flanged|wcb|cf8m|rf|rtj|sw|bw)\b/i.test(lower)) return 'Valves';
+  // 5. Tanks & Vessels
   if (lower.includes('tank') || lower.includes('vessel')) return 'Storage Tank';
   if (lower.includes('exchanger') || lower.includes('heater') || lower.includes('cooler')) return 'Heat Exchanger';
-  if (lower.includes('structure') || lower.includes('structural') || lower.includes('beam') || lower.includes('column')) return 'Structural';
+  if (lower.includes('piping') || lower.includes('pipe') || lower.includes('flange') || lower.includes('fitting')) return 'Piping';
   return 'Custom';
 }
 
@@ -121,128 +125,266 @@ function isPlaceholderValue(val) {
 }
 
 /**
- * Parses products structurally from an Excel sheet.
+ * Helper to dynamically format an array of non-zero destination/GA names
+ * e.g. ['Pune'] -> 'Pune GA'
+ * e.g. ['Nashik', 'Nizamabad'] -> 'Nashik & Nizamabad GAs'
+ * e.g. ['Pune', 'Ramanagara', 'Nanded', 'Nizamabad'] -> 'Pune, Ramanagara, Nanded & Nizamabad GAs'
  */
-function parseExcelBOQ(buffer) {
+function formatDestinationList(names) {
+  if (!names || !Array.isArray(names) || names.length === 0) return '';
+  const clean = names.map(n => String(n).trim().replace(/\s+(GA|GAs|Site|Sites)$/i, '')).filter(Boolean);
+  if (clean.length === 0) return '';
+  if (clean.length === 1) return `${clean[0]} GA`;
+  if (clean.length === 2) return `${clean[0]} & ${clean[1]} GAs`;
+  const allButLast = clean.slice(0, -1).join(', ');
+  return `${allButLast} & ${clean[clean.length - 1]} GAs`;
+}
+
+/**
+ * Known non-geographical words commonly found in tender document titles/headers.
+ */
+const NON_GA_WORDS = new Set([
+  'quoted', 'not', 'sr', 'no', 'total', 'quantity', 'quantities', 'item', 'description',
+  'schedule', 'rates', 'sl', 'geographical', 'areas', 'area', 'valve', 'valves', 'ball',
+  'gate', 'globe', 'check', 'butterfly', 'plug', 'cs', 'ss', 'bw', 'sw', 'fb', 'ug',
+  'technical', 'specification', 'specifications', 'painting', 'marking', 'service', 'natural',
+  'material', 'materials', 'part', 'parts', 'specified', 'equivalent', 'standard', 'document',
+  'documents', 'tender', 'contract', 'section', 'annexure', 'scope', 'supply', 'delivery',
+  'price', 'rate', 'amount', 'unit', 'units', 'code', 'make', 'type', 'size', 'class', 'rating'
+]);
+
+/**
+ * Robust, dynamic parser for Schedule of Rates (SOR) & Geographical Area breakdown tables.
+ * Dynamically detects GA headers (e.g. Pune, Nashik, Sindhudurg, Ramanagara, Nanded, Nizamabad, etc.)
+ * and accurately aligns them with row quantity distributions, filtering out zero/empty values.
+ */
+function extractGaDistributionFromText(text) {
+  if (!text) return new Map();
+
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+  const itemGaMap = new Map();
+
+  // Find genuine GA header lines throughout the document
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    const tokens = line.split(/[\t\s|,]+/).map(t => t.trim()).filter(t => t.length >= 2);
+    const validTokens = tokens.filter(t => !NON_GA_WORDS.has(t.toLowerCase()) && !/^\d+$/.test(t) && !/^[\(\)\[\]\/\-–—]+$/.test(t));
+    
+    // A genuine GA table header must have 3+ distinct non-keyword tokens that start with a capital letter
+    if (validTokens.length >= 3 && validTokens.every(t => /^[A-Z][a-zA-Z0-9_\-\.]{2,}$/.test(t) && !NON_GA_WORDS.has(t.toLowerCase()))) {
+      // Check if at least one token is a known location or line is in a delivery/quantities section
+      const hasGeoContext = validTokens.some(t => /pune|nashik|sindhudurg|ramanagara|nanded|nizamabad|mumbai|delhi|surat|chennai|hyderabad|bangalore|kolkata|ahmedabad|nagpur|indore|bhopal|vadodara|ghaziabad|agra|faridabad|meerut|rajkot|varanasi|aurangabad|ranchi|howrah|coimbatore|jabalpur|gwalior|vijayawada|jodhpur|madurai|raipur|kota|guwahati|chandigarh|solapur|hubli|mysore|gurgaon|noida|kochi|dehradun|asansol|rourkela|kolhapur|ajmer|akola|jamnagar|ujjain|jhansi|jammu|sangli|mangalore|erode|belgaum|kurnool|malegaon|gaya|tiruppur|davanagere|kozhikode|gandhinagar|bathinda|hosur|anantapur|bellary|karimnagar|alwar|parbhani|panipat|khammam|korba|kalyan|dombivli|vasai|virar/i.test(t));
+      
+      if (!hasGeoContext) continue;
+
+      const gaColumns = validTokens;
+      const sectionEnd = Math.min(lines.length - 1, i + 120);
+
+      // Scan rows following this header
+      for (let r = i + 1; r <= sectionEnd; r++) {
+        const rowLine = lines[r];
+        if (/^notes\s*:/i.test(rowLine) || /^terms and conditions/i.test(rowLine)) break;
+
+        // Match item pattern: "1.01", "1.08", "1.10", "1.1", "1", "10", etc.
+        const itemMatch = rowLine.match(/^(\d+(?:\.\d+)?)\b/);
+        if (!itemMatch) continue;
+
+        const itemNum = itemMatch[1];
+        
+        // Look for the numbers row (within current line or next 5 lines)
+        for (let offset = 0; offset <= 5 && (r + offset) <= sectionEnd; offset++) {
+          const targetLine = lines[r + offset];
+          
+          let numbersLine = targetLine;
+          const lastWordMatch = targetLine.match(/(?:UG|Piece\)|Piece\s*\)|\)|mm|inches?|#\d+|\bNOS\b|\bNO\b)\s*([\d\s\-–—]+)$/i);
+          if (lastWordMatch) {
+            numbersLine = lastWordMatch[1];
+          }
+
+          const rawTokens = numbersLine.trim().split(/\s+/).filter(t => /^\d+$/.test(t) || t === '-' || t === '–' || t === '—');
+          
+          if (rawTokens.length >= gaColumns.length - 1 && rawTokens.length >= 2) {
+            while (rawTokens.length < gaColumns.length) {
+              rawTokens.push('-');
+            }
+
+            const gaValues = rawTokens.slice(0, gaColumns.length);
+            const activeGas = [];
+
+            gaValues.forEach((val, idx) => {
+              const num = Number(val);
+              if (!isNaN(num) && num > 0) {
+                activeGas.push(gaColumns[idx]);
+              }
+            });
+
+            if (activeGas.length > 0) {
+              const destStr = formatDestinationList(activeGas);
+              itemGaMap.set(itemNum, destStr);
+              if (itemNum === '1.1' || itemNum === '1.10' || itemNum === '10') {
+                itemGaMap.set('1.10', destStr);
+                itemGaMap.set('1.1', destStr);
+                itemGaMap.set('10', destStr);
+              } else if (!itemNum.includes('.')) {
+                itemGaMap.set(`1.${itemNum.padStart(2, '0')}`, destStr);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return itemGaMap;
+}
+
+/**
+ * Parses products structurally from an Excel sheet with intelligent header row detection,
+ * multi-column filtering, and garbage row suppression.
+ */
+function extractCleanBoqItems(buffer) {
   const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const products = [];
+  const allProducts = [];
 
   for (const sheetName of workbook.SheetNames) {
+    if (/macro|instruction|summary|help|guideline/i.test(sheetName)) continue;
     const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet);
-    if (!rows || rows.length === 0) continue;
+    const rawMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (!rawMatrix || rawMatrix.length === 0) continue;
 
-    // Detect keys
-    const firstRow = rows[0];
-    const keys = Object.keys(firstRow);
+    let headerRowIdx = -1;
+    let colMap = { itemNo: -1, desc: -1, itemCode: -1, qty: -1, unit: -1, destination: -1, destCols: [] };
 
-    let titleKey = null;
-    let descKey = null;
-    let qtyKey = null;
-    let unitKey = null;
-
-    // Find title column
-    titleKey = keys.find(k => {
-      const l = k.toLowerCase();
-      return l.includes('title') || l.includes('name') || l.includes('nomenclature');
-    });
-
-    // Find description column
-    descKey = keys.find(k => {
-      const l = k.toLowerCase();
-      return l.includes('description') || l.includes('particulars') || l.includes('spec') || l.includes('valve') || l.includes('material description');
-    });
-
-    // If we only found description, check if it's actually the title column (or vice versa)
-    if (!descKey && titleKey) descKey = titleKey;
-    if (!titleKey && descKey) titleKey = descKey;
-    
-    // Fallback if none found
-    if (!titleKey && !descKey) {
-      titleKey = keys.find(k => typeof firstRow[k] === 'string' && firstRow[k].length > 10);
-      descKey = titleKey;
-    }
-    if (!titleKey) titleKey = keys[0];
-    if (!descKey) descKey = keys[0];
-
-    // Find qty column
-    qtyKey = keys.find(k => {
-      const l = k.toLowerCase();
-      // Exclude serial/item/sequence numbers
-      const isSerialNumber = l.includes('number') && (
-        l.includes('item') || l.includes('sr') || l.includes('sl') || 
-        l.includes('serial') || l.includes('seq') || l.includes('code') || 
-        l.includes('id') || l.includes('no')
-      );
-      if (isSerialNumber) return false;
-      return l.includes('qty') || l.includes('quant') || l.includes('volume') || l.includes('item quantity') || l.includes('quantity');
-    });
-
-    if (!qtyKey) {
-      qtyKey = keys.find(k => {
-        const l = k.toLowerCase();
-        // Check for 'nos' or 'number' fallback, still excluding serials
-        const isSerialNumber = l.includes('number') && (
-          l.includes('item') || l.includes('sr') || l.includes('sl') || 
-          l.includes('serial') || l.includes('seq') || l.includes('code') || 
-          l.includes('id') || l.includes('no')
-        );
-        if (isSerialNumber) return false;
-        return l.includes('nos') || l.includes('number') || l.includes('count');
-      });
-    }
-
-    if (!qtyKey) {
-      qtyKey = keys.find(k => typeof firstRow[k] === 'number' && !k.toLowerCase().includes('sr') && !k.toLowerCase().includes('no') && !k.toLowerCase().includes('sl') && !k.toLowerCase().includes('item'));
-    }
-
-    // Find unit column
-    unitKey = keys.find(k => {
-      const l = k.toLowerCase();
-      return l.includes('unit') || l.includes('uom') || l.includes('measure') || l.includes('rate') || l.includes('price');
-    });
-
-    for (const row of rows) {
-      const titleVal = row[titleKey] ? String(row[titleKey]).trim() : '';
-      const descVal = row[descKey] ? String(row[descKey]).trim() : '';
-
-      // Determine the best description
-      let finalDesc = '';
-      if (titleVal && descVal) {
-        if (isPlaceholderValue(descVal)) {
-          finalDesc = titleVal;
-        } else if (isPlaceholderValue(titleVal)) {
-          finalDesc = descVal;
-        } else if (titleVal.toLowerCase() === descVal.toLowerCase()) {
-          finalDesc = titleVal;
-        } else {
-          finalDesc = `${titleVal} - ${descVal}`;
-        }
-      } else {
-        finalDesc = titleVal || descVal;
-      }
-
-      if (!finalDesc || finalDesc.trim().length < 3) continue;
-
-      let qtyVal = parseFloat(row[qtyKey]) || 1;
-      let unitVal = row[unitKey] ? String(row[unitKey]).trim() : 'NOS';
+    for (let r = 0; r < Math.min(rawMatrix.length, 35); r++) {
+      const row = rawMatrix[r].map(c => String(c).trim().toLowerCase());
+      const hasDesc = row.some(c => c.includes('description') || c.includes('item desc') || c.includes('particulars'));
+      const hasQty = row.some(c => c === 'quantity' || c === 'qty' || c.includes('quantity') || c.includes('qty'));
       
-      const lowerDesc = finalDesc.toLowerCase();
-      if (lowerDesc.includes('total') || lowerDesc.includes('grand total') || lowerDesc.includes('signature') || lowerDesc.includes('summary')) {
-        continue;
+      if (hasDesc && (hasQty || row.some(c => c.includes('unit') || c.includes('sl') || c.includes('item')))) {
+        headerRowIdx = r;
+        rawMatrix[r].forEach((colVal, colIdx) => {
+          const c = String(colVal).trim().toLowerCase();
+          const orig = String(colVal).trim();
+          if (colMap.itemNo === -1 && (c.includes('sl') || c.includes('item no') || c.includes('item wise') || c === 'item' || c.includes('sr'))) colMap.itemNo = colIdx;
+          if (colMap.desc === -1 && (c.includes('description') || c.includes('particular') || c.includes('item desc'))) colMap.desc = colIdx;
+          if (colMap.itemCode === -1 && (c.includes('code') || c.includes('make') || c.includes('item code'))) colMap.itemCode = colIdx;
+          if (colMap.qty === -1 && (c === 'quantity' || c === 'qty' || c.includes('quantity') || c.includes('qty'))) colMap.qty = colIdx;
+          if (colMap.unit === -1 && (c.includes('unit') || c.includes('uom') || c === 'units')) colMap.unit = colIdx;
+          if (colMap.destination === -1 && (c.includes('destination') || c.includes('delivery site') || c.includes('location'))) colMap.destination = colIdx;
+          
+          // Check for individual location / GA columns in multi-site BOQs
+          if (orig.length >= 3 && /^[A-Z][a-zA-Z0-9_\-\.]{2,}$/.test(orig) && 
+              !/^(quoted|not|\/|sl|sr|no|\(no\.?\)|total|quantity|quantities|item|description|schedule|rates|unit|units|price|rate|amount|gst|vat|tax|taxes)$/i.test(orig)) {
+            colMap.destCols.push({ name: orig, colIdx });
+          }
+        });
+        break;
+      }
+    }
+
+    if (headerRowIdx === -1) {
+      // Fallback for simple flat Excel files without multi-line header blocks
+      const rows = XLSX.utils.sheet_to_json(sheet);
+      if (rows.length > 0) {
+        for (const row of rows) {
+          const descKey = Object.keys(row).find(k => /desc|particular|specification|valve|item/i.test(k));
+          const qtyKey = Object.keys(row).find(k => /qty|quantity/i.test(k));
+          const unitKey = Object.keys(row).find(k => /unit|uom/i.test(k));
+          if (descKey && row[descKey]) {
+            const desc = String(row[descKey]).trim();
+            if (desc.length > 3 && !/total|summary/i.test(desc)) {
+              allProducts.push({
+                itemNo: `${allProducts.length + 1}`,
+                productDescription: desc,
+                description: desc,
+                quantity: parseFloat(row[qtyKey]) || 1,
+                unit: normalizeUnit(row[unitKey] || 'NOS'),
+                productCategory: detectProductCategory(desc),
+                category: detectProductCategory(desc),
+                standardCode: detectStandardCode(desc),
+                dynamicFields: {}
+              });
+            }
+          }
+        }
+      }
+      continue;
+    }
+
+    for (let r = headerRowIdx + 1; r < rawMatrix.length; r++) {
+      const row = rawMatrix[r];
+      if (!row || row.length === 0) continue;
+
+      const itemNoRaw = colMap.itemNo !== -1 ? String(row[colMap.itemNo] || '').trim() : '';
+      const descRaw = colMap.desc !== -1 ? String(row[colMap.desc] || '').trim() : '';
+      const qtyRaw = colMap.qty !== -1 ? row[colMap.qty] : '';
+      const unitRaw = colMap.unit !== -1 ? String(row[colMap.unit] || '').trim() : 'NOS';
+      let destRaw = colMap.destination !== -1 ? String(row[colMap.destination] || '').trim() : '';
+
+      // If multi-column destinations are detected in the Excel sheet
+      if (colMap.destCols && colMap.destCols.length >= 2) {
+        const activeDestNames = [];
+        colMap.destCols.forEach(dc => {
+          const val = Number(row[dc.colIdx]);
+          if (!isNaN(val) && val > 0) {
+            activeDestNames.push(dc.name);
+          }
+        });
+        if (activeDestNames.length > 0) {
+          destRaw = formatDestinationList(activeDestNames);
+        }
       }
 
-      products.push({
-        productDescription: finalDesc,
-        quantity: qtyVal,
-        unit: normalizeUnit(unitVal),
-        productCategory: detectProductCategory(finalDesc),
-        standardCode: detectStandardCode(finalDesc)
+      if (!descRaw || descRaw.length < 3) continue;
+
+      // Skip summary / quotation rows
+      if (/total in figures|quoted rate|total amount|grand total|words/i.test(descRaw) ||
+          /total in figures|quoted rate|total amount|grand total|words/i.test(itemNoRaw)) continue;
+
+      // Skip sequential column numbering rows (e.g. 1, 2, 3...)
+      if (/^\d+$/.test(itemNoRaw) && Number(itemNoRaw) === 1 && String(row[colMap.desc]).trim() === '2') continue;
+
+      // Skip generic instruction/preamble rows
+      if (/^supply of .* as per technical specifications/i.test(descRaw) && (!qtyRaw || isNaN(Number(qtyRaw)))) continue;
+
+      // Filter out garbage / non-valve / chamber civil works rows
+      if (/construction of chamber/i.test(descRaw)) continue;
+
+      let quantity = Number(qtyRaw);
+      if (isNaN(quantity) || quantity <= 0) continue;
+
+      let cleanItemNo = itemNoRaw;
+      if (!cleanItemNo && /^\d+(\.\d+)?/.test(descRaw)) {
+        const m = descRaw.match(/^(\d+(\.\d+)?)/);
+        cleanItemNo = m ? m[1] : '';
+      }
+      // If item number is e.g. "1.1" and previous items were 1.01..1.09, normalize 1.1 to 1.10
+      if (cleanItemNo === '1.1' && allProducts.length >= 9) {
+        cleanItemNo = '1.10';
+      }
+
+      allProducts.push({
+        itemNo: cleanItemNo || `${allProducts.length + 1}`,
+        productDescription: descRaw,
+        description: descRaw,
+        quantity,
+        unit: normalizeUnit(unitRaw),
+        destination: destRaw,
+        productCategory: detectProductCategory(descRaw),
+        category: detectProductCategory(descRaw),
+        standardCode: detectStandardCode(descRaw),
+        dynamicFields: {}
       });
     }
   }
 
-  return products;
+  return allProducts;
+}
+
+function parseExcelBOQ(buffer) {
+  return extractCleanBoqItems(buffer);
 }
 
 /**
@@ -309,6 +451,32 @@ async function parseStructuredBOQ(attachment) {
 
     // PDF route
     if (fileName.endsWith('.pdf') || attachment.fileType.includes('pdf')) {
+      try {
+        const pyClient = require('./pythonExtractorClient');
+        const pyResult = await pyClient.extractFile(buffer, attachment.originalFileName);
+        if (pyResult.success && pyResult.items && pyResult.items.length > 0) {
+          console.log(`[Structured BOQ Parser] Successfully parsed PDF via Python Extractor. Found ${pyResult.items.length} products.`);
+          return pyResult.items.map(item => ({
+            productDescription: item.description,
+            quantity: item.quantity || 1,
+            unit: item.unit || 'NOS',
+            productCategory: 'Valves',
+            standardCode: item.valve_design_std || 'Not specified',
+            confidence: Math.round((item.confidence || 0.95) * 100),
+            dynamicFields: {
+              valve_type: item.valve_type,
+              valve_size: item.valve_size,
+              valve_class: item.valve_class,
+              valve_moc_body: item.valve_moc_body,
+              valve_end_connection: item.valve_end_connection,
+              valve_operating: item.valve_operating
+            }
+          }));
+        }
+      } catch (pyErr) {
+        console.warn(`[Structured BOQ Parser] Python extractor fallback: ${pyErr.message}`);
+      }
+
       const products = parsePdfTableBOQ(attachment.extractedText || '');
       if (products.length > 0) {
         console.log(`[Structured BOQ Parser] Successfully parsed PDF BOQ via regex tables. Found ${products.length} products.`);
@@ -322,25 +490,23 @@ async function parseStructuredBOQ(attachment) {
     console.error(`[Structured BOQ Parser] Error parsing ${attachment.originalFileName}:`, err.message);
     return [];
   }
-}
-
-/**
+}/**
  * Strips non-valve/non-enquiry sections from email body text.
- * Removes everything after boundary markers like "Product Details", "Terms & Conditions", etc.
- * This prevents lube oil tables, legal clauses, and signatures from polluting valve extraction.
+ * Removes non-valve auxiliary tables (lube oil, petroleum, legal terms, signatures).
+ * Never strips sections that contain genuine valve line items.
  */
 function stripNonValveSections(text) {
   if (!text) return '';
 
   const boundaries = [
-    /^\s*product\s+details\s*[-:]/im,
+    /^\s*product\s+details\s*[:=-]+\s*(?:finished\s+product|lube\s+oil|petroleum|fuel)/im,
+    /^\s*(?:finished\s+product\s+of\s+lube\s+oil|lube\s+oil\s+details)/im,
     /^\s*terms\s+(?:&|and)\s+conditions/im,
-    /^\s*commercial\s+terms/im,
-    /^\s*general\s+notes?\s*:/im,
-    /^\s*payment\s+terms/im,
-    /^\s*delivery\s+terms/im,
+    /^\s*commercial\s+terms\s*:/im,
+    /^\s*payment\s+terms\s*:/im,
+    /^\s*delivery\s+terms\s*:/im,
     /^\s*\*?regards\*?\s*,?\s*$/im,
-    /^\s*\*?thank(?:s|ing)\s+you\*?/im,
+    /^\s*\*?thank(?:s|ing)?\s+(?:you|and)[\s,*]*/im,
     /^\s*\*?best\s+regards\*?/im,
     /^\s*\*?warm\s+regards\*?/im
   ];
@@ -349,6 +515,11 @@ function stripNonValveSections(text) {
   for (const boundary of boundaries) {
     const match = text.match(boundary);
     if (match && match.index < endIndex) {
+      // Ensure we don't prematurely strip if the remaining text contains actual valve line items
+      const afterText = text.substring(match.index);
+      if (/\b(?:ball|gate|globe|check|butterfly|plug)\s+valve\b/i.test(afterText) && !/lube\s+oil|terms\s+(?:&|and)\s+conditions|thank(?:s|ing)?\s+you|regards/i.test(match[0])) {
+        continue;
+      }
       endIndex = match.index;
     }
   }
@@ -364,7 +535,7 @@ function isNonProductRow(text) {
   if (!text || typeof text !== 'string') return true;
   const lower = text.toLowerCase().trim();
 
-  // Reject rows containing intro/header/footer phrases
+  // Reject rows containing pure intro/header/footer phrases
   const rejectPatterns = [
     /\bsupply\s+and\s+delivery\b/,
     /\brequirement\s+of\b/,
@@ -391,6 +562,15 @@ function isNonProductRow(text) {
 
   for (const pattern of rejectPatterns) {
     if (pattern.test(lower)) return true;
+  }
+
+  // CRITICAL: If the row actually contains product tokens AND size/class/valve/qty indicators,
+  // it is a real product row and MUST NOT be rejected!
+  if (isProductIndicatorRow(text) && (
+    /\b\d+\s*(?:"|inch|in|mm|#|nos|ea|pcs|nb|class|cl|lbs)\b/i.test(lower) ||
+    /\b(?:ball|gate|globe|check|butterfly|plug|valve|vlv)\b/i.test(lower)
+  )) {
+    return false;
   }
 
   // Reject very long prose sentences (> 120 chars with no size/class indicators)
@@ -435,13 +615,11 @@ function isProductIndicatorRow(text) {
  * Splits numbered/bulleted line items from email body text into separate products.
  *
  * Handles real-world formats:
- *   Strategy 1: 1  4" Shut off valve - pneumatic type  Nos. 16
+ *   Strategy 1: Single-line (numbered or bulleted with quantity indicator)
  *   Strategy 2: Multi-line (serial on one line, desc on next, qty after)
- *   Strategy 3: BOQ table rows without serial numbers (BALL API6D HOV 2IN 300#  35  EA)
+ *   Strategy 3: BOQ table rows without serial numbers
  *   Strategy 4: Tab/pipe-delimited OCR table rows
- *
- * Also handles multi-line items where serial number, description, and quantity
- * are on separate lines.
+ *   Strategy 5: Direct single-item valve RFQ (Deterministic Extraction)
  *
  * Returns [] if no items found (falls through to AI).
  */
@@ -452,32 +630,75 @@ function parseEmailBodyLineItems(bodyText) {
   const cleanedText = stripNonValveSections(bodyText);
   if (!cleanedText || cleanedText.trim().length < 10) return [];
 
+  // ── Strategy 0: Multi-Line Specification Blocks ────────────────────────
+  // Handles formatted engineering RFQs where each item has multi-line bulleted specs:
+  //   Item 01: API 6D Floating Ball Valve
+  //   - Size: 2" (50 MM)
+  //   - Pressure Class: 150#
+  //   - Body MOC: ASTM A216 Gr. WCB
+  //   - Quantity: 5 Nos.
+  const blockHeaderRegex = /(?:^|\n)\s*(?:item|sr\.?\s*no\.?|sl\.?\s*no\.?|line)\s*[\d]{1,3}\s*[:.)-]\s*(.+?)(?=(?:\n\s*(?:item|sr\.?\s*no\.?|sl\.?\s*no\.?|line)\s*[\d]{1,3}\s*[:.)-]|\n\s*[-–=]{8,}|\n\s*(?:commercial|terms|general\s+terms|notes?|thank|regards))|$)/gis;
+
+  let blockMatch;
+  const blockProducts = [];
+  while ((blockMatch = blockHeaderRegex.exec(cleanedText)) !== null) {
+    const fullBlockText = blockMatch[0].trim();
+
+    // Extract quantity from within the block (e.g. Quantity: 5 Nos, Qty: 2, 5 Nos.)
+    let blockQty = 1;
+    const qtyMatch = fullBlockText.match(/(?:qty|quantity|numbers?|pcs|sets?|ea|each)\s*[:=–-]?\s*(\d+)/i) ||
+                     fullBlockText.match(/\b(\d+)\s*(?:nos|pcs|sets?|ea|each)\b/i);
+    if (qtyMatch) {
+      blockQty = parseInt(qtyMatch[1], 10) || 1;
+    }
+
+    // Clean up block lines into a single coherent description string
+    const cleanLines = fullBlockText
+      .split('\n')
+      .map(l => l.replace(/^[\s\-*•]+/, '').trim())
+      .filter(l => l.length > 0 && !isNonProductRow(l));
+
+    const combinedDesc = cleanLines.join(' | ').trim();
+    if (combinedDesc.length >= 5 && isProductIndicatorRow(combinedDesc)) {
+      blockProducts.push({
+        productDescription: combinedDesc,
+        quantity: blockQty,
+        unit: normalizeUnit('NOS'),
+        productCategory: detectProductCategory(combinedDesc),
+        standardCode: detectStandardCode(combinedDesc)
+      });
+    }
+  }
+
+  if (blockProducts.length > 0) {
+    console.log(`[Email Body Parser] Multi-line Specification Block Strategy (Strategy 0) found ${blockProducts.length} line items.`);
+    return blockProducts;
+  }
+
   const lines = cleanedText.split('\n').map(l => l.trim()).filter(Boolean);
   const products = [];
 
-  // ── Strategy 1: Single-line format ─────────────────────────────────────
-  // Pattern: Sr.No + Description + ... + Nos./Qty + Number (or Number + Nos./Qty)
-  //   1  4" Shut off valve - pneumatic type  Suitable for 60 m3/hr. flow rate  Nos. 16
-  //   2  4" On Off Type Valve along with NO + NC contacts  Nos. 8
-  //   3  4" Isolation Ball Valve  Nos. 8
-
-  // Match: starts with a serial number, has description text, ends with quantity indicator
-  // Pattern A: ... Nos./Qty.  <number>  (quantity at end after unit)
-  const patternA = /^\s*(\d{1,3})\s*[.)\s]\s*(.+?)\s+(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?\s*(\d+)\s*$/i;
-  // Pattern B: ... <number>  Nos./Qty  (quantity before unit)
-  const patternB = /^\s*(\d{1,3})\s*[.)\s]\s*(.+?)\s+(\d+)\s+(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?\s*$/i;
-  // Pattern C: ... Nos.  <number> (with period/colon after unit word, flexible spacing)
-  const patternC = /^\s*(\d{1,3})\s*[.)\s]\s*(.+?)\s+(?:nos|qty|quantity)[.:]\s*(\d+)\s*$/i;
+  // ── Strategy 1: Single-line format (Numbered, Bulleted, or Prefixed) ──────
+  // Pattern: Optional Sr.No/Bullet + Description + Qty Indicator (e.g. Nos. 16, 16 Nos, Qty: 16, (Qty: 16))
+  const patternA = /^\s*(?:(?:item|sr|sl|line)?\s*[\d]{1,3}\s*[:.)-]?|[-*•])\s*(.+?)\s+(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:\s=-]*(\d+)\s*$/i;
+  const patternB = /^\s*(?:(?:item|sr|sl|line)?\s*[\d]{1,3}\s*[:.)-]?|[-*•])\s*(.+?)\s+[-–:,]?\s*(\d+)\s*(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?\s*$/i;
+  const patternC = /^\s*(?:(?:item|sr|sl|line)?\s*[\d]{1,3}\s*[:.)-]?|[-*•])\s*(.+?)\s+[-–:,]?\s*\(?\s*(?:qty|quantity)\s*[:=–-]?\s*(\d+)\s*(?:nos|pcs|ea|sets?)?\s*\)?\s*$/i;
+  const patternD = /^\s*(?:(?:item|sr|sl|line)?\s*[\d]{1,3}\s*[:.)-]?|[-*•])\s*(.+?)\s+[-–:,]?\s*\(\s*(\d+)\s*(?:nos|pcs|ea|sets?|qty|quantity)[.:]?\s*\)\s*$/i;
 
   for (const line of lines) {
     // Skip header-like lines
     if (/^\s*(?:sr\.?\s*no|sl\.?\s*no|s\.?\s*no|item|#|description|particular|detail)/i.test(line)) continue;
     if (/^\s*(?:unit|qty|quantity|nos|uom)\s*$/i.test(line)) continue;
 
-    let match = line.match(patternA) || line.match(patternB) || line.match(patternC);
+    let match = line.match(patternA) || line.match(patternB) || line.match(patternC) || line.match(patternD);
     if (match) {
-      const desc = match[2].trim();
-      const qty = parseInt(match[3], 10) || 1;
+      const desc = match[1].trim();
+      const qty = parseInt(match[2], 10) || 1;
+
+      // Guard: description must not be just a quantity/unit label
+      if (/^(?:qty|quantity|unit|sr|sl|item|no)\s*[:.]?$/i.test(desc.trim())) {
+        continue;
+      }
 
       // Validate: description must be at least 5 chars and contain letters
       if (desc.length >= 5 && /[a-zA-Z]/.test(desc) && !isNonProductRow(desc)) {
@@ -492,7 +713,6 @@ function parseEmailBodyLineItems(bodyText) {
     }
   }
 
-  // If single-line strategy found items, return them
   if (products.length > 0) {
     console.log(`[Email Body Parser] Single-line strategy found ${products.length} line items.`);
     return products;
@@ -509,25 +729,33 @@ function parseEmailBodyLineItems(bodyText) {
 
   let i = 0;
   while (i < lines.length) {
-    const line = lines[i];
+    const line = lines[i].trim();
 
-    // Check if this line is a standalone serial number (1-3 digits, nothing else)
-    if (/^\d{1,3}$/.test(line.trim())) {
-      const serialNum = parseInt(line.trim(), 10);
-      // Collect subsequent description lines until we hit a unit/qty indicator
+    // Check if this line is a standalone serial number (1-3 digits)
+    if (/^\d{1,3}$/.test(line)) {
+      const serialNum = parseInt(line, 10);
       let descParts = [];
       let qty = 1;
+      let unit = 'NOS';
       let foundQty = false;
       let j = i + 1;
 
       while (j < lines.length) {
         const nextLine = lines[j].trim();
 
-        // Check if this line is a unit indicator ("Nos.", "Qty", etc.)
-        if (/^(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?$/i.test(nextLine)) {
-          // Next line should be the quantity number
-          if (j + 1 < lines.length && /^\d+$/.test(lines[j + 1].trim())) {
-            qty = parseInt(lines[j + 1].trim(), 10) || 1;
+        // 1. Check if next line is the sequential serial number of the NEXT row (e.g. 2 -> 3 -> 4)
+        if (/^\d{1,2}$/.test(nextLine)) {
+          const nextSerial = parseInt(nextLine, 10);
+          if (descParts.length > 0 && nextSerial === serialNum + 1) {
+            break;
+          }
+        }
+
+        // 2. Check if this line is a unit indicator BEFORE quantity (e.g. "Nos." \n "16")
+        if (/^(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each|lot|mtr|meters?)[.:]?$/i.test(nextLine)) {
+          unit = nextLine;
+          if (j + 1 < lines.length && /^\d+(?:\.\d+)?$/.test(lines[j + 1].trim())) {
+            qty = parseFloat(lines[j + 1].trim()) || 1;
             foundQty = true;
             j += 2;
           } else {
@@ -536,31 +764,29 @@ function parseEmailBodyLineItems(bodyText) {
           break;
         }
 
-        // Check if this line is just a number (could be quantity)
-        if (/^\d+$/.test(nextLine) && descParts.length > 0) {
-          qty = parseInt(nextLine, 10) || 1;
+        // 3. Check if this line is a quantity number (e.g. "35.00", "2500", "1.00")
+        if (/^\d+(?:\.\d+)?$/.test(nextLine) && descParts.length > 0) {
+          qty = parseFloat(nextLine) || 1;
           foundQty = true;
           j++;
-          // Check if next line is a unit
-          if (j < lines.length && /^(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each)[.:]?$/i.test(lines[j].trim())) {
+          // Check if subsequent line is a unit (e.g. "EA", "NOS")
+          if (j < lines.length && /^(?:nos|qty|quantity|numbers?|pcs|sets?|ea|each|lot|mtr|meters?)[.:]?$/i.test(lines[j].trim())) {
+            unit = lines[j].trim();
             j++;
           }
           break;
         }
 
-        // Check if we hit another serial number (start of next item)
-        if (/^\d{1,3}$/.test(nextLine) && parseInt(nextLine, 10) === serialNum + 1) {
-          break;
-        }
-
         // Check if we hit a section boundary
-        if (/^(?:product\s+details|terms|regards|thank)/i.test(nextLine)) {
+        if (/^(?:product\s+details|terms|regards|thank|vendor\s+shall)/i.test(nextLine)) {
           break;
         }
 
         // Otherwise it's part of the description
         if (nextLine.length > 0 && /[a-zA-Z]/.test(nextLine)) {
-          descParts.push(nextLine);
+          if (!/^(?:sl\.?\s*no|item\s*description|quantity|units?)[.:*]*$/i.test(nextLine)) {
+            descParts.push(nextLine);
+          }
         }
         j++;
       }
@@ -570,8 +796,8 @@ function parseEmailBodyLineItems(bodyText) {
         if (fullDesc.length >= 5 && !isNonProductRow(fullDesc)) {
           products.push({
             productDescription: fullDesc,
-            quantity: qty,
-            unit: normalizeUnit('NOS'),
+            quantity: Math.round(qty),
+            unit: normalizeUnit(unit),
             productCategory: detectProductCategory(fullDesc),
             standardCode: detectStandardCode(fullDesc)
           });
@@ -705,6 +931,41 @@ function parseEmailBodyLineItems(bodyText) {
 
   if (products.length > 0) {
     console.log(`[Email Body Parser] Tabulated OCR strategy (Strategy 4) found ${products.length} line items.`);
+    return products;
+  }
+
+  // ── Strategy 5: Direct Single-Item Valve RFQ (Deterministic Extraction) ─
+  // Handles unstructured single-paragraph RFQs like:
+  // "Please quote 2 Nos Ball Valves, 50 mm, Class 150#, Body MOC ASTM A216 WCB. End connection: Flanged RF. PMI test required."
+  try {
+    const extractorRegistry = require('./extraction/ExtractorRegistry');
+    const tokenizer = require('./extraction/Tokenizer');
+    const tokText = tokenizer.tokenize(cleanedText);
+    const regexExtractions = extractorRegistry.runAll(tokText);
+
+    const valveTypeField = regexExtractions['ValveExtractor'];
+    const qtyField = regexExtractions['QuantityExtractor'];
+    const sizeField = regexExtractions['SizeExtractor'];
+    const classField = regexExtractions['ClassExtractor'];
+
+    if (valveTypeField && valveTypeField.normalizedValue && (sizeField?.normalizedValue || classField?.normalizedValue || qtyField?.normalizedValue)) {
+      const qtyVal = qtyField && qtyField.normalizedValue ? Number(qtyField.normalizedValue) : null;
+      const unitVal = qtyField && qtyField.unit ? normalizeUnit(qtyField.unit) : 'NOS';
+
+      products.push({
+        productDescription: cleanedText.split('\n')[0].trim().substring(0, 300) || cleanedText.trim().substring(0, 300),
+        quantity: qtyVal,
+        unit: unitVal,
+        productCategory: 'Valves',
+        standardCode: detectStandardCode(cleanedText),
+        confidence: 100
+      });
+
+      console.log(`[Email Body Parser] Direct single-item valve RFQ strategy (Strategy 5) found 1 deterministic product.`);
+      return products;
+    }
+  } catch (strat5Err) {
+    console.warn('[Email Body Parser] Strategy 5 error:', strat5Err.message);
   }
 
   return products;
@@ -758,5 +1019,7 @@ module.exports = {
   isNonProductRow,
   isProductIndicatorRow,
   detectStandardCode,
-  detectProductCategory
+  detectProductCategory,
+  extractGaDistributionFromText,
+  formatDestinationList
 };

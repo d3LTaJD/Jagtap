@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, CheckSquare, Settings, X, Database, Wrench, Shield, CalendarDays, Image, ClipboardList, Sparkles, ChevronRight, Package, Truck } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, CheckSquare, Settings, X, Database, Wrench, Shield, CalendarDays, Image, ClipboardList, Sparkles, ChevronRight, Package, Truck, FileCode2, Factory, ShoppingBag } from 'lucide-react';
 import { useAbility, getRoleCode } from '../context/AbilityContext';
 import logoImg from '../logo.png';
 
@@ -30,6 +30,9 @@ const Sidebar = ({ onClose }) => {
     { label: 'Gallery & Files', icon: Image, path: '/app/gallery', show: ability.can('view', 'Enquiry') },
     { label: 'Enquiries', icon: Users, path: '/app/enquiries', show: ability.can('view', 'Enquiry') },
     { label: 'Quotations', icon: FileText, path: '/app/quotations', show: ability.can('view', 'Quotation') },
+    { label: 'TDS / Drawings', icon: FileCode2, path: '/app/drawings', show: ability.can('view', 'Drawing') || ability.can('view', 'Quotation') },
+    { label: 'Work Orders', icon: Factory, path: '/app/work-orders', show: ability.can('view', 'WorkOrder') || ability.can('view', 'Quotation') },
+    { label: 'Purchase & BOM', icon: ShoppingBag, path: '/app/purchase', show: ability.can('view', 'Quotation') || ability.can('view', 'BOM') || ability.can('view', 'Purchase') },
     { label: 'Quality Assurance', icon: CheckSquare, path: '/app/qaps', show: ability.can('view', 'QAP') },
     { label: 'Follow-Up Board', icon: ClipboardList, path: '/app/follow-ups', show: ability.can('view', 'FollowUp') },
   ];

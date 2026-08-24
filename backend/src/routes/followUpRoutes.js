@@ -13,6 +13,6 @@ router.route('/')
 
 router.route('/:id')
   .patch(requirePermission('FollowUp', 'edit'), followUpController.updateFollowUp)
-  .delete(requirePermission('FollowUp', 'edit'), followUpController.deleteFollowUp);
+  .delete(requirePermission('FollowUp', 'delete'), followUpController.deleteFollowUp);
 
 module.exports = router;

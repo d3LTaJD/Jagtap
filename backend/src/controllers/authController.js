@@ -106,9 +106,29 @@ exports.verifyToken = async (req, res, next) => {
     let validRecord = null;
     
     for (let record of tokenRecords) {
-      if (record.expires_at > new Date() && await bcrypt.compare(token, record.token)) {
-        validRecord = record;
-        break;
+      // Check attempt limit
+      if (record.attempts >= 5) {
+        await Token.findByIdAndDelete(record._id);
+        continue;
+      }
+
+      if (record.expires_at > new Date()) {
+        const isMatch = await bcrypt.compare(token, record.token);
+        if (isMatch) {
+          validRecord = record;
+          break;
+        } else {
+          // Increment attempt count on failure
+          record.attempts = (record.attempts || 0) + 1;
+          if (record.attempts >= 5) {
+            await Token.findByIdAndDelete(record._id);
+          } else {
+            await record.save();
+          }
+        }
+      } else {
+        // Purge expired token
+        await Token.findByIdAndDelete(record._id);
       }
     }
 
@@ -132,14 +152,25 @@ exports.setPassword = async (req, res, next) => {
     }
 
     const tokenRecord = await Token.findById(referenceId);
-    if (!tokenRecord) return res.status(400).json({ status: 'error', message: 'Invalid token reference' });
+    if (!tokenRecord) return res.status(400).json({ status: 'error', message: 'Invalid or already used token reference' });
+
+    if (tokenRecord.expires_at < new Date()) {
+      await Token.findByIdAndDelete(tokenRecord._id);
+      return res.status(400).json({ status: 'error', message: 'Token reference has expired' });
+    }
 
     const user = await User.findById(tokenRecord.user_id);
+    if (!user) {
+      await Token.findByIdAndDelete(tokenRecord._id);
+      return res.status(404).json({ status: 'error', message: 'User not found' });
+    }
+
     user.password = new_password;
     user.is_verified = true;
     await user.save();
 
-    await Token.findByIdAndDelete(tokenRecord._id);
+    // Consume and delete all tokens for this user immediately (single-use)
+    await Token.deleteMany({ user_id: user._id });
 
     res.status(200).json({ status: 'success', data: { user } });
   } catch (err) {
@@ -166,12 +197,30 @@ exports.forgotPassword = async (req, res, next) => {
     const user = await User.findOne({ mobile_number });
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
 
+    // Rate limiting: Check if an OTP was generated within the last 60 seconds
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+    const recentToken = await Token.findOne({
+      user_id: user._id,
+      type: 'OTP',
+      created_at: { $gt: oneMinuteAgo }
+    });
+
+    if (recentToken) {
+      return res.status(429).json({
+        status: 'error',
+        message: 'Please wait at least 60 seconds before requesting a new OTP.'
+      });
+    }
+
+    // Invalidate previous OTP tokens for this user
+    await Token.deleteMany({ user_id: user._id, type: 'OTP' });
+
     const rawOTP = otpUtils.generateOTP();
     const hashedOTP = await otpUtils.hashToken(rawOTP);
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
-    await Token.create({ user_id: user._id, token: hashedOTP, type: 'OTP', expires_at: expiresAt });
+    await Token.create({ user_id: user._id, token: hashedOTP, type: 'OTP', attempts: 0, expires_at: expiresAt });
 
     const { sendEmail } = require('../services/notificationService');
     const subject = 'Password Reset OTP - Workflow Automation';

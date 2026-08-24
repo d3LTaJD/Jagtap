@@ -101,6 +101,18 @@ const DashboardLayout = () => {
     return <Navigate to="/app" replace />;
   }
 
+  if (path.includes('/app/drawings') && !ability.can('view', 'Drawing') && !ability.can('view', 'Quotation')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/work-orders') && !ability.can('view', 'WorkOrder') && !ability.can('view', 'Quotation')) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (path.includes('/app/purchase') && !ability.can('view', 'Quotation') && !ability.can('view', 'Purchase') && !ability.can('view', 'BOM')) {
+    return <Navigate to="/app" replace />;
+  }
+
   if (path.includes('/app/qaps') && !ability.can('view', 'QAP')) {
     return <Navigate to="/app" replace />;
   }

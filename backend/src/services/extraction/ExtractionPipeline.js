@@ -126,7 +126,8 @@ class ExtractionPipeline {
     fieldDefinitions,
     productDescription = '',
     enquiryId = null,
-    productIndex = 0
+    productIndex = 0,
+    lineItemId = null
   }) {
     const RawExtraction = require('../../models/RawExtraction');
     const ValidationLog = require('../../models/ValidationLog');
@@ -160,7 +161,7 @@ class ExtractionPipeline {
       regexExtractions[key] = val;
     }
     for (const [key, val] of Object.entries(scopedExtractions)) {
-      if (val && val.normalizedValue) {
+      if (val && (val.normalizedValue || val.validationState === 'INVALID' || val.validationState === 'AMBIGUOUS')) {
         regexExtractions[key] = val; // Override with scoped result
       }
     }
@@ -172,10 +173,26 @@ class ExtractionPipeline {
     // Map regex results to fieldNames
     const regexFieldMap = {};
     Object.entries(regexExtractions).forEach(([extractorId, fieldObj]) => {
-      if (fieldObj && fieldObj.fieldId && fieldObj.normalizedValue) {
+      if (fieldObj && fieldObj.fieldId && (fieldObj.normalizedValue !== undefined || fieldObj.validationState === 'INVALID' || fieldObj.validationState === 'AMBIGUOUS')) {
         regexFieldMap[fieldObj.fieldId] = fieldObj;
       }
     });
+
+// Set of Engineering-Derived fields that must be populated by contract review / engineering rules
+// unless explicit customer text was captured by regex/source extraction.
+const ENGINEERING_DERIVED_FIELDS = new Set([
+  'valve_design_std', 'valve_testing_std', 'valve_direction',
+  'valve_fire_safe', 'valve_service', 'valve_nace_req',
+  'valve_painting_dft', 'valve_packing', 'valve_dispatch',
+  'valve_location', 'valve_special_req', 'valve_hydro_shell',
+  'valve_hydro_seat', 'valve_air_seat', 'valve_back_seat',
+  'valve_dbb_hydro', 'valve_antistatic_test', 'valve_design_validation',
+  'annex_a', 'annex_b', 'annex_c', 'annex_d', 'annex_e',
+  'annex_f', 'annex_g', 'annex_h', 'annex_i', 'annex_j',
+  'annex_k', 'annex_l', 'annex_m',
+  'valve_calib_cert', 'valve_ibr_ce_cert', 'valve_qsl_level',
+  'valve_api6d_monogram'
+]);
 
     // Process fields defined for this form context
     const fieldsToExtractWithAI = [];
@@ -187,75 +204,153 @@ class ExtractionPipeline {
       // Check if regex extracted this field
       let regexMatch = null;
       if (lowerKey.includes('size')) regexMatch = regexFieldMap['valve_size'];
-      else if (lowerKey.includes('class') || lowerKey.includes('rating')) regexMatch = regexFieldMap['valve_class'];
+      else if (lowerKey.includes('operating') || lowerKey.includes('actuation') || lowerKey.includes('operation')) regexMatch = regexFieldMap['valve_operating'];
+      else if (lowerKey.includes('class') || lowerKey.includes('pressure_rating') || lowerKey.includes('pressure_class') || lowerKey === 'rating') regexMatch = regexFieldMap['valve_class'];
       else if (lowerKey.includes('type') && lowerKey.includes('valve')) regexMatch = regexFieldMap['valve_type'];
       else if (lowerKey.includes('material') || lowerKey.includes('moc')) regexMatch = regexFieldMap['shellMaterial'] || regexFieldMap['valve_moc_body'];
       else if (lowerKey.includes('end') || lowerKey.includes('connection')) regexMatch = regexFieldMap['endConnection'] || regexFieldMap['valve_end_connection'];
-      else if (lowerKey.includes('operating') || lowerKey.includes('actuation') || lowerKey.includes('operation')) regexMatch = regexFieldMap['valve_operating'];
-      else if (lowerKey.includes('standard')) regexMatch = regexFieldMap['designStandard'];
+      else if (lowerKey.includes('testing_std') || lowerKey.includes('testing')) {
+        const stdMatch = regexFieldMap['designStandard'];
+        if (stdMatch && /api\s*598|iso\s*15848|bs\s*6755/i.test(stdMatch.normalizedValue)) {
+          regexMatch = stdMatch;
+        }
+      }
+      else if (lowerKey.includes('standard') || lowerKey.includes('design_std')) regexMatch = regexFieldMap['designStandard'];
       else if (lowerKey.includes('qty') || lowerKey.includes('quantity')) regexMatch = regexFieldMap['quantity'];
+      else if (lowerKey.includes('drawing') || lowerKey.includes('dwg') || lowerKey.includes('pid')) regexMatch = regexFieldMap['drawingNumber'];
+      else if (lowerKey.includes('tag')) regexMatch = regexFieldMap['tagNumber'];
 
-      if (regexMatch && regexMatch.normalizedValue) {
-        // Validate regex result
-        const valRes = validationEngine.validateField(key, regexMatch.normalizedValue);
-
-        if (valRes.state === 'VALID') {
-          const confRes = fieldConfidenceEngine.calculateFieldConfidence({
-            fieldName: key,
-            rawValue: regexMatch.rawValue,
-            normalizedValue: valRes.canonicalValue,
-            extractionMethod: 'REGEX',
-            validationState: 'VALID',
-            isRequired: fDef.isRequired
-          });
-
-          validatedDynamicFields[key] = valRes.canonicalValue;
+      if (regexMatch) {
+        if (regexMatch.validationState === 'INVALID' || regexMatch.validationState === 'AMBIGUOUS') {
+          // Explicit customer negation or ambiguity detected — preserve raw evidence, set null canonical value, and do not send to AI
           fieldConfidences[key] = {
-            value: valRes.canonicalValue,
-            confidence: confRes.confidence,
+            value: null,
+            confidence: regexMatch.score?.confidence || 0,
             source: 'REGEX',
-            validationState: 'VALID',
-            reasoning: confRes.reasoning
+            provenance: 'CUSTOMER_EXTRACTED',
+            validationState: regexMatch.validationState,
+            reasoning: regexMatch.reasoning?.[0] || `Customer text is ${regexMatch.validationState.toLowerCase()}`
           };
 
           rawExtractionsToSave.push({
             enquiryId,
+            lineItemId,
             productIndex,
             field: key,
             rawValue: regexMatch.rawValue,
-            normalizedValue: valRes.canonicalValue,
+            normalizedValue: null,
             extractionMethod: 'REGEX',
-            confidence: confRes.confidence,
-            validationState: 'VALID',
-            validationReason: valRes.reason,
+            provenance: 'CUSTOMER_EXTRACTED',
+            confidence: regexMatch.score?.confidence || 0,
+            validationState: regexMatch.validationState,
+            validationReason: regexMatch.reasoning?.[0] || '',
             sourceText: regexMatch.reasoning?.[0] || '',
-            isAccepted: true
+            isAccepted: false
           });
 
-          continue; // Successfully extracted by deterministic regex — skip AI for this field!
+          continue; // Negated/ambiguous in customer text — do not send to AI to invent a positive requirement
+        }
+
+        if (regexMatch.normalizedValue) {
+          // Validate regex result
+          const valRes = validationEngine.validateField(key, regexMatch.normalizedValue);
+
+          if (valRes.state === 'VALID') {
+            const confRes = fieldConfidenceEngine.calculateFieldConfidence({
+              fieldName: key,
+              rawValue: regexMatch.rawValue,
+              normalizedValue: valRes.canonicalValue,
+              extractionMethod: 'REGEX',
+              validationState: 'VALID',
+              isRequired: fDef.isRequired
+            });
+
+            validatedDynamicFields[key] = valRes.canonicalValue;
+            fieldConfidences[key] = {
+              value: valRes.canonicalValue,
+              confidence: confRes.confidence,
+              source: 'REGEX',
+              provenance: 'CUSTOMER_EXTRACTED',
+              validationState: 'VALID',
+              reasoning: confRes.reasoning
+            };
+
+            rawExtractionsToSave.push({
+              enquiryId,
+              lineItemId,
+              productIndex,
+              field: key,
+              rawValue: regexMatch.rawValue,
+              normalizedValue: valRes.canonicalValue,
+              extractionMethod: 'REGEX',
+              provenance: 'CUSTOMER_EXTRACTED',
+              confidence: confRes.confidence,
+              validationState: 'VALID',
+              validationReason: valRes.reason,
+              sourceText: regexMatch.reasoning?.[0] || '',
+              isAccepted: true
+            });
+
+            continue; // Successfully extracted by deterministic regex — skip AI for this field!
+          }
         }
       }
 
-      // If regex did not extract a valid value, queue for AI extraction assistant
+      // FIELD PROVENANCE GATE:
+      // Engineering-derived fields (standards, annexures, DFT, etc.) must come from
+      // engineering/contract-review rules unless explicit text was matched by regex above.
+      // Do NOT send them to AI to guess/hallucinate.
+      if (ENGINEERING_DERIVED_FIELDS.has(key)) {
+        fieldConfidences[key] = {
+          value: null,
+          confidence: 0,
+          source: 'ENGINEERING_RULE',
+          provenance: 'ENGINEERING_RULE',
+          validationState: 'DEFERRED',
+          reasoning: 'Engineering-derived field — deferred to contract review rules'
+        };
+
+        rawExtractionsToSave.push({
+          enquiryId,
+          lineItemId,
+          productIndex,
+          field: key,
+          rawValue: null,
+          normalizedValue: null,
+          extractionMethod: 'ENGINEERING_RULE',
+          provenance: 'ENGINEERING_RULE',
+          confidence: 0,
+          validationState: 'DEFERRED',
+          validationReason: 'Deferred to engineering/contract review rules',
+          isAccepted: false
+        });
+
+        continue;
+      }
+
+      // If regex did not extract a customer field, queue for AI extraction assistant
       fieldsToExtractWithAI.push(fDef);
     }
 
-    // STAGE 2: AI Extraction Assistant (Only for missing fields)
-    // OPTIMIZATION: Document-level cache — if the same enquiry and the same
-    // missing field names have already been queried against the same document,
-    // reuse the cached AI result instead of making another API call.
+    // STAGE 2: AI Extraction Assistant (Only for missing customer fields)
+    // Isolated Cache Key: enquiryId + lineItemId/productIndex + descHash + sortedFieldNames
     let aiResults = {};
     if (fieldsToExtractWithAI.length > 0) {
+      const crypto = require('crypto');
+      const descHash = productDescription
+        ? crypto.createHash('md5').update(productDescription).digest('hex').slice(0, 8)
+        : 'NO_DESC';
       const sortedFieldNames = fieldsToExtractWithAI.map(f => f.fieldName).sort().join(',');
-      const cacheKey = `${enquiryId || 'SYSTEM'}::${sortedFieldNames}`;
+      const itemKey = lineItemId ? `li_${lineItemId}` : `p${productIndex}`;
+      const cacheKey = `${enquiryId || 'SYSTEM'}::${itemKey}::${descHash}::${sortedFieldNames}`;
 
       if (this._aiExtractionCache.has(cacheKey)) {
         aiResults = this._aiExtractionCache.get(cacheKey);
         console.log(`[Zero-Hallucination Pipeline] AI cache HIT for ${fieldsToExtractWithAI.length} fields (${sortedFieldNames}). Reusing cached result.`);
       } else {
-        console.log(`[Zero-Hallucination Pipeline] Calling AI Assistant for ${fieldsToExtractWithAI.length} missing fields (${sortedFieldNames})`);
+        console.log(`[Zero-Hallucination Pipeline] Calling AI Assistant for ${fieldsToExtractWithAI.length} missing customer fields (${sortedFieldNames})`);
         aiResults = await aiService.extractDynamicFields(textContext, fieldsToExtractWithAI, productDescription, enquiryId?.toString() || 'SYSTEM');
-        // Cache the result for subsequent products with the same missing fields
+        // Cache the result for identical extraction contexts
         this._aiExtractionCache.set(cacheKey, aiResults);
       }
     }
@@ -269,10 +364,10 @@ class ExtractionPipeline {
       let aiConf = 0;
       if (aiFieldOutput && typeof aiFieldOutput === 'object') {
         rawAiVal = aiFieldOutput.value;
-        aiConf = aiFieldOutput.confidence || 0;
-      } else if (aiFieldOutput !== undefined) {
+        aiConf = (aiFieldOutput.confidence !== undefined && aiFieldOutput.confidence !== null) ? Number(aiFieldOutput.confidence) : 0;
+      } else if (aiFieldOutput !== undefined && aiFieldOutput !== null) {
         rawAiVal = aiFieldOutput;
-        aiConf = 75;
+        aiConf = 0; // Explicit missing confidence must be 0, never assume 75
       }
 
       if (rawAiVal === null || rawAiVal === undefined || rawAiVal === '' || rawAiVal === 'null') {
@@ -281,17 +376,20 @@ class ExtractionPipeline {
           value: null,
           confidence: 0,
           source: 'NOT_FOUND',
+          provenance: 'NOT_FOUND',
           validationState: 'NOT_FOUND',
           reasoning: 'Field not present in provided document text'
         };
 
         rawExtractionsToSave.push({
           enquiryId,
+          lineItemId,
           productIndex,
           field: key,
           rawValue: null,
           normalizedValue: null,
           extractionMethod: 'AI',
+          provenance: 'NOT_FOUND',
           confidence: 0,
           validationState: 'NOT_FOUND',
           validationReason: 'Value not in document',
@@ -318,26 +416,33 @@ class ExtractionPipeline {
           value: valRes.canonicalValue,
           confidence: confRes.confidence,
           source: 'AI',
+          provenance: 'CUSTOMER_EXTRACTED',
           validationState: 'VALID',
           reasoning: confRes.reasoning
         };
 
         rawExtractionsToSave.push({
           enquiryId,
+          lineItemId,
           productIndex,
           field: key,
           rawValue: rawAiVal,
           normalizedValue: valRes.canonicalValue,
           extractionMethod: 'AI',
+          provenance: 'CUSTOMER_EXTRACTED',
           confidence: confRes.confidence,
           validationState: 'VALID',
           validationReason: valRes.reason,
           isAccepted: true
         });
 
-        if (enquiryId) {
+        const mongoose = require('mongoose');
+        const isValidObjectId = enquiryId && mongoose.Types.ObjectId.isValid(enquiryId);
+
+        if (isValidObjectId) {
           await ValidationLog.create({
             enquiryId,
+            lineItemId,
             productIndex,
             field: key,
             aiValue: rawAiVal,
@@ -357,17 +462,20 @@ class ExtractionPipeline {
           value: null,
           confidence: 0,
           source: 'AI_REJECTED',
+          provenance: 'CUSTOMER_EXTRACTED',
           validationState: 'INVALID',
           reasoning: `REJECTED: ${valRes.reason}`
         };
 
         rawExtractionsToSave.push({
           enquiryId,
+          lineItemId,
           productIndex,
           field: key,
           rawValue: rawAiVal,
           normalizedValue: null,
           extractionMethod: 'AI',
+          provenance: 'CUSTOMER_EXTRACTED',
           confidence: 0,
           validationState: 'INVALID',
           validationReason: valRes.reason,
@@ -375,9 +483,13 @@ class ExtractionPipeline {
           rejectionReason: valRes.reason
         });
 
-        if (enquiryId) {
+        const mongoose = require('mongoose');
+        const isValidObjectId = enquiryId && mongoose.Types.ObjectId.isValid(enquiryId);
+
+        if (isValidObjectId) {
           await ValidationLog.create({
             enquiryId,
+            lineItemId,
             productIndex,
             field: key,
             aiValue: rawAiVal,
@@ -392,8 +504,10 @@ class ExtractionPipeline {
       }
     }
 
-    // Persist Raw Extractions to DB if enquiryId present
-    if (enquiryId && rawExtractionsToSave.length > 0) {
+    // Persist Raw Extractions to DB if valid enquiry ObjectId present
+    const mongoose = require('mongoose');
+    const isValidEnquiryObjectId = enquiryId && mongoose.Types.ObjectId.isValid(enquiryId);
+    if (isValidEnquiryObjectId && rawExtractionsToSave.length > 0) {
       try {
         await RawExtraction.insertMany(rawExtractionsToSave.map(r => ({ ...r, enquiryId })));
       } catch (rawErr) {
@@ -420,6 +534,7 @@ class ExtractionPipeline {
     });
 
     return {
+      lineItemId,
       validatedDynamicFields,
       fieldConfidences,
       extractionStatus: statusEvaluation.status,

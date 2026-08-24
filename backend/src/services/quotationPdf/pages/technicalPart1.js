@@ -19,16 +19,16 @@ function renderTechnicalPart1(quotation) {
   const offerNo = formatPdfValue(quotation.quotationId, 'PV/J/QTN/P-001/26-27');
   const offerDate = formatDate(quotation.createdAt || new Date());
   
-  const rawCustomerName = quotation.senderCompany || enquiry.senderCompany || customer.companyName || quotation.clientName || 'ABC Contractor';
+  const rawCustomerName = quotation.customerName || quotation.senderCompany || enquiry.senderCompany || customer.companyName || quotation.clientName || 'ABC Contractor';
   const customerName = formatPdfValue(rawCustomerName, 'ABC Contractor');
 
-  const rawLocation = customer.address || customer.city || enquiry.location || 'Ahmedabad';
+  const rawLocation = quotation.customerAddress || customer.address || customer.city || enquiry.location || 'Ahmedabad';
   const location = formatPdfValue(rawLocation, 'Ahmedabad');
   
-  const rawContactNo = quotation.contactMobile || customer.mobileNumber || enquiry.contactMobile || '+91 90237232XX';
+  const rawContactNo = quotation.contactMobile || quotation.contactNo || customer.mobileNumber || customer.phoneNumber || enquiry.contactMobile || '+91 90237232XX';
   const contactNo = formatPdfValue(rawContactNo, '+91 90237232XX');
 
-  const rawEmailId = quotation.contactEmail || customer.emailAddress || enquiry.contactEmail || 'sales@petrovalves.co.in';
+  const rawEmailId = quotation.contactEmail || quotation.emailId || customer.emailAddress || enquiry.contactEmail || 'sales@petrovalves.co.in';
   const emailId = formatPdfValue(rawEmailId, 'sales@petrovalves.co.in');
   
   const rawKindAttention = quotation.kindAttention || customer.primaryContactName || enquiry.contactPerson || 'Mr. Jay';

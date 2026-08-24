@@ -1,9 +1,10 @@
 /**
  * TagExtractor Plugin
  * Deterministically extracts Equipment/Valve Tag Numbers (e.g. Tag: XV-101, 10-V-001).
+ * Rejects non-identifier phrases (e.g. "Tag required", "Tag attached", "Tag needed").
  */
 
-const { createEngineeringField, VALIDATION_STATES } = require('../../../types/EngineeringField');
+const { createEngineeringField, VALIDATION_STATES, REVIEW_REASONS } = require('../../../types/EngineeringField');
 
 class TagExtractor {
   constructor() {
@@ -13,11 +14,19 @@ class TagExtractor {
   extract(textContext) {
     if (!textContext || typeof textContext !== 'string') return null;
 
-    const pattern = /\b(?:tag|tag\s*no|item\s*tag)\s*[:=]?\s*([a-z0-9\-_]+)\b/i;
+    const pattern = /\b(?:valve\s*tag|item\s*tag|tag\s*no|tag)\s*[:=\-]?\s*([a-z0-9][a-z0-9\-_./]+)\b/i;
     const match = textContext.match(pattern);
 
     if (match && match[1]) {
       const rawValue = match[1].trim();
+      const lower = rawValue.toLowerCase();
+
+      // Disqualify non-identifier phrases
+      const invalidWords = ['required', 'available', 'attached', 'needed', 'yes', 'no', 'na', 'n/a', 'none', 'specified', 'applicable', 'provided', 'to_be_attached'];
+      if (invalidWords.includes(lower) || !/[0-9]/.test(rawValue)) {
+        return null;
+      }
+
       return createEngineeringField({
         fieldId: 'tagNumber',
         fieldName: 'Tag Number',

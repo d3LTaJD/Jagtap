@@ -3,34 +3,35 @@ const { renderOfficialFooter } = require('../components/Footer');
 const { formatPdfValue, extractItemFieldValue, formatINR } = require('../dataFormatter');
 const { calculateQuotationPricing } = require('../../../utils/quotationCalculator');
 
-function renderPricePart2(quotation) {
+function renderPricePart2(quotation, chunkItems = null, chunkIndex = 0, totalChunks = 1, isLastChunk = true) {
   const pricing = calculateQuotationPricing(quotation);
-  const items = pricing.items || [];
+  const items = chunkItems || pricing.items || [];
 
   const notice = formatPdfValue(
     quotation.pricingNoticeText || quotation.pricePartNotice,
     'Above mentioned rates are for supply of valves as per given in CONTRACT REVIEW CHECKLIST.'
   );
 
-  const totalCols = Math.max(items.length, 8);
+  const totalCols = 8;
   const colIndices = Array.from({ length: totalCols }, (_, i) => i);
 
   const computedItems = colIndices.map(i => {
     const item = items[i];
+    const globalSr = chunkIndex * 8 + i + 1;
     if (!item) {
       return {
-        sr: i + 1,
+        sr: globalSr,
         hasItem: false,
-        valveType: '0',
-        size: '0',
-        itemClass: '0',
-        qty: 0,
-        unitPrice: 0,
-        ndtText: 'Extra at actual',
-        spares: 0,
-        specTest: 0,
-        unitRate: 0,
-        totalRate: 0
+        valveType: '',
+        size: '',
+        itemClass: '',
+        qty: '',
+        unitPrice: '',
+        ndtText: '',
+        spares: '',
+        specTest: '',
+        unitRate: '',
+        totalRate: ''
       };
     }
 
@@ -38,7 +39,9 @@ function renderPricePart2(quotation) {
     const size = extractItemFieldValue(item, 'valve_size', '-');
     const itemClass = extractItemFieldValue(item, 'valve_class', '-');
     
-    const qty = Number(item.quantity) || 1;
+    const qty = (item.quantity !== undefined && item.quantity !== null && item.quantity !== '' && !isNaN(Number(item.quantity)) && Number(item.quantity) > 0) 
+      ? Number(item.quantity) 
+      : (item.quantity === null || item.quantity === undefined ? '-' : item.quantity);
     const unitPrice = Number(item.unitPrice) || 0;
     const specTest = Number(item.specialTestingCharges) || 0;
     const spares = Number(item.sparesCharges) || 0;
@@ -59,7 +62,7 @@ function renderPricePart2(quotation) {
     let ndtText = ndtParts.length > 0 ? ndtParts.join(', ') : 'No';
 
     return {
-      sr: i + 1,
+      sr: item.enquirySrNo || item.itemNo || globalSr,
       hasItem: true,
       valveType,
       size,
@@ -74,13 +77,15 @@ function renderPricePart2(quotation) {
     };
   });
 
+  const pageTitleSuffix = totalChunks > 1 ? ` (Page ${chunkIndex + 1} of ${totalChunks})` : '';
+
   return `
     <div class="pv-page">
       <div class="pv-page-content">
         ${renderHeader()}
 
         <div class="pv-section-title" style="margin-top: 10px; margin-bottom: 12px;">
-          PRICE PART – II
+          PRICE PART – II${pageTitleSuffix}
         </div>
 
         <div class="pv-price-intro">
@@ -98,15 +103,15 @@ function renderPricePart2(quotation) {
           <tbody>
             <tr>
               <td class="pv-price-label-col">Valve Type</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.valveType : '0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? c.valveType : ''}</td>`).join('')}
             </tr>
             <tr>
               <td class="pv-price-label-col">Size in MM</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.size : '0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? c.size : ''}</td>`).join('')}
             </tr>
             <tr>
               <td class="pv-price-label-col">Class</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.itemClass : '0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? c.itemClass : ''}</td>`).join('')}
             </tr>
             <tr>
               <td class="pv-price-label-col">Qunatity</td>
@@ -114,7 +119,7 @@ function renderPricePart2(quotation) {
             </tr>
             <tr>
               <td class="pv-price-label-col">Unit Price</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? formatINR(c.unitPrice) : ''}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? (c.unitPrice > 0 ? formatINR(c.unitPrice) : '₹ 0') : ''}</td>`).join('')}
             </tr>
             <tr>
               <td class="pv-price-label-col" style="font-size: 7px; line-height: 1.1;">
@@ -128,25 +133,26 @@ function renderPricePart2(quotation) {
                 If any Special Testing Requirement<br/>
                 (i.e. Helium, Nitrogen, Vaccum, IGC, PMI, NACE, Paint) then <strong>charges will be Extra at actual to your account.</strong>
               </td>
-              ${computedItems.map(c => `<td>${c.hasItem && c.specTest > 0 ? formatINR(c.specTest) : '₹ 0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? (c.specTest > 0 ? formatINR(c.specTest) : '₹ 0') : ''}</td>`).join('')}
             </tr>
             <tr>
               <td class="pv-price-label-col" style="font-size: 7px; line-height: 1.1;">
                 Spares, Manday required then <strong>charges will be Extra at actual to your account.</strong>
               </td>
-              ${computedItems.map(c => `<td>${c.hasItem ? formatINR(c.spares) : '₹ 0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? (c.spares > 0 ? formatINR(c.spares) : '₹ 0') : ''}</td>`).join('')}
             </tr>
             <tr style="background-color: #fafafa;">
               <td class="pv-price-label-col">Unit Rate</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? formatINR(c.unitRate) : '₹ 0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? (c.unitRate > 0 ? formatINR(c.unitRate) : '₹ 0') : ''}</td>`).join('')}
             </tr>
             <tr style="background-color: #f5f5f5; font-weight: bold;">
               <td class="pv-price-label-col">Total Rate</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? formatINR(c.totalRate) : '₹ 0'}</td>`).join('')}
+              ${computedItems.map(c => `<td>${c.hasItem ? (c.totalRate > 0 ? formatINR(c.totalRate) : '₹ 0') : ''}</td>`).join('')}
             </tr>
           </tbody>
         </table>
 
+        ${isLastChunk ? `
         <!-- Commercial Summary Rows Below Matrix Table -->
         <table class="pv-price-table" style="margin-top: 10px;">
           <tbody>
@@ -206,6 +212,11 @@ function renderPricePart2(quotation) {
             </tr>
           </tbody>
         </table>
+        ` : `
+        <div style="margin-top: 15px; text-align: right; font-size: 8px; color: #666; font-style: italic;">
+          (Price Table continued on next page...)
+        </div>
+        `}
 
       </div>
 

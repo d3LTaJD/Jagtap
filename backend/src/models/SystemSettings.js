@@ -28,6 +28,18 @@ const systemSettingsSchema = new mongoose.Schema({
   escalationThresholdDays: { type: Number, default: 5 },  // days of inactivity before alert
   quoteAbandonDays:        { type: Number, default: 60 }, // days — auto-flag as stale
 
+  // ─── M3 TDS / Drawing Management Defaults ─────────────────────
+  drawingDelayThresholdDays: { type: Number, default: 3 }, // days before drawing delay escalates to Director
+  vendorDrawingSlaDays:      { type: Number, default: 5 }, // default SLA days for vendor drawing delivery
+
+  // ─── M4 Purchase & BOM Defaults ────────────────────────────────
+  piPriceTolerancePercent:   { type: Number, default: 5 }, // % allowable price variation before flagging deviation
+  piQuantityTolerancePercent:{ type: Number, default: 0 }, // % allowable quantity variation
+  piDeliveryToleranceDays:   { type: Number, default: 2 }, // days of allowable delivery delay before flagging deviation
+  defaultVendorLeadTimeDays: { type: Number, default: 15 },// default vendor manufacturing + transit days
+  defaultQcInspectionDays:   { type: Number, default: 3 }, // default QC testing days
+  defaultMachiningBufferDays:{ type: Number, default: 5 }, // default assembly / buffer days
+
   // ─── Bank Details (printed on quotation PDF) ──────────────────
   bankName:          { type: String, default: '' },
   bankAccountNumber: { type: String, default: '' },
@@ -38,6 +50,9 @@ const systemSettingsSchema = new mongoose.Schema({
   notificationRules: {
     enquiryCreated: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } },
     quotationApproved: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: true } },
+    drawingAssigned: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: true } },
+    vendorSlaBreached: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: true } },
+    drawingEscalated: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: true } },
     followupDue: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } },
     taskAssigned: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } },
     lowInventory: { email: { type: Boolean, default: true }, whatsapp: { type: Boolean, default: false } }

@@ -494,15 +494,16 @@ async function handleAIExtraction({ emailMessageId }) {
     let allProducts = [];
     if (structuredProducts.length > 0) {
       // If we have structurally parsed BOQs (like the CSV), use them as the absolute source of truth!
-      allProducts = structuredProducts.map(item => ({
-        productCategory: item.productCategory || 'Custom',
+      allProducts = structuredProducts.map((item, idx) => ({
+        lineItemId: item.lineItemId || `LI-${String(idx + 1).padStart(3, '0')}`,
+        productCategory: item.productCategory || classification.category || 'Valves',
         productDescription: item.productDescription || '',
-        quantity: item.quantity || 1,
+        quantity: (item.quantity !== undefined && item.quantity !== null && item.quantity !== '') ? Number(item.quantity) : null,
         unit: item.unit || 'NOS',
-        standardCode: item.standardCode || 'Not specified',
+        standardCode: item.standardCode || null,
         specialRequirements: '',
         priority: 'Medium',
-        confidence: 100, // Structured parsing has 100% confidence
+        confidence: (item.confidence !== undefined && item.confidence !== null) ? Number(item.confidence) : 100, // Structured parsing has explicit confidence
         linkedAttachmentNames: []
       }));
       console.log(`[AI Extraction] Using ${allProducts.length} structured products from BOQ. Skipping AI-extracted products to avoid duplication.`);
@@ -510,15 +511,16 @@ async function handleAIExtraction({ emailMessageId }) {
       // Fallback: Use AI-extracted products from PDF/Email body
       const aiItems = extractedResult ? (extractedResult.line_items || extractedResult.enquiries) : null;
       if (aiItems && aiItems.length > 0) {
-        allProducts = aiItems.map(item => ({
-          productCategory: item.productCategory || 'Custom',
+        allProducts = aiItems.map((item, idx) => ({
+          lineItemId: item.lineItemId || `LI-${String(idx + 1).padStart(3, '0')}`,
+          productCategory: item.productCategory || classification.category || 'Valves',
           productDescription: item.productDescription || item.description || '',
-          quantity: item.quantity || 1,
+          quantity: (item.quantity !== undefined && item.quantity !== null && item.quantity !== '') ? Number(item.quantity) : null,
           unit: item.unit || 'NOS',
-          standardCode: item.standardCode || 'Not specified',
+          standardCode: item.standardCode || null,
           specialRequirements: item.specialRequirements || '',
           priority: item.priority || 'Medium',
-          confidence: item.confidence || 90,
+          confidence: (item.confidence !== undefined && item.confidence !== null) ? Number(item.confidence) : 0,
           linkedAttachmentNames: item.linkedAttachmentNames || []
         }));
       }
@@ -552,32 +554,44 @@ async function handleAIExtraction({ emailMessageId }) {
     const senderDomain = (emailMsg.sender || '').split('@')[1]?.toLowerCase();
     const isPublicDomain = PUBLIC_DOMAINS.includes(senderDomain);
 
-    const extractedCompany = (extractedResult && extractedResult.companyName && extractedResult.companyName !== 'Individual Customer') ? extractedResult.companyName : null;
-    const extractedContact = extractedResult?.primaryContactName && extractedResult.primaryContactName !== 'Email Sender' ? extractedResult.primaryContactName : null;
-    const extractedMobile = extractedResult?.mobileNumber && extractedResult.mobileNumber !== '0000000000' ? extractedResult.mobileNumber : null;
+    // Deterministic signature and contact details extraction
+    const { extractContactDetails } = require('./extraction/contactExtractor');
+    const signatureContacts = extractContactDetails(bodyText, emailMsg.sender, emailMsg.senderName);
 
-    let senderCompany = extractedCompany;
+    const extractedCompany = signatureContacts.companyName || ((extractedResult && extractedResult.companyName && extractedResult.companyName !== 'Individual Customer') ? extractedResult.companyName : null);
+    const extractedContact = signatureContacts.contactPerson || (extractedResult?.primaryContactName && extractedResult.primaryContactName !== 'Email Sender' ? extractedResult.primaryContactName : null);
+    const extractedMobile = signatureContacts.mobileNumber || (extractedResult?.mobileNumber && extractedResult.mobileNumber !== '0000000000' ? extractedResult.mobileNumber : null);
+    const extractedEmail = signatureContacts.contactEmail || emailMsg.sender.toLowerCase();
 
-    if (!isPublicDomain && extractedCompany && customer.companyName !== extractedCompany) {
+    let senderCompany = extractedCompany || (customer.companyName !== 'Individual Customer' ? customer.companyName : 'Individual Customer');
+
+    // Update customer records with genuine contact details
+    let customerNeedsSave = false;
+    if (extractedCompany && (customer.companyName === 'Individual Customer' || !isPublicDomain)) {
       customer.companyName = extractedCompany;
-      if (extractedContact) customer.primaryContactName = extractedContact;
-      if (extractedMobile) customer.mobileNumber = extractedMobile;
+      customerNeedsSave = true;
+    }
+    if (extractedContact && (customer.primaryContactName === 'Email Sender' || customer.primaryContactName === 'ab cd' || !customer.primaryContactName || !isPublicDomain)) {
+      customer.primaryContactName = extractedContact;
+      customerNeedsSave = true;
+    }
+    if (extractedMobile && (customer.mobileNumber === '0000000000' || !customer.mobileNumber || !isPublicDomain)) {
+      customer.mobileNumber = extractedMobile;
+      customerNeedsSave = true;
+    }
+    if (signatureContacts.contactEmail && customer.emailAddress !== signatureContacts.contactEmail) {
+      customer.alternateEmail = signatureContacts.contactEmail;
+      customerNeedsSave = true;
+    }
+    if (customerNeedsSave) {
       await customer.save();
-    } else if (isPublicDomain) {
-      // For public domains (@gmail.com, etc.), do not permanently overwrite Customer companyName
-      // Keep Customer companyName generic ("Individual Customer") and scope company per enquiry
-      if (!senderCompany && customer.companyName !== 'Individual Customer') {
-        senderCompany = customer.companyName;
-      }
-    } else if (!senderCompany) {
-      senderCompany = customer.companyName;
     }
 
     // Map products array with 0ms deterministic regex pre-extraction
     const extractorRegistry = require('./extraction/ExtractorRegistry');
     const tokenizer = require('./extraction/Tokenizer');
 
-    const productsArray = allProducts.map(item => {
+    const productsArray = allProducts.map((item, idx) => {
       const desc = item.productDescription || '';
       const tok = desc ? tokenizer.tokenize(desc) : '';
       const regexRes = tok ? extractorRegistry.runAll(tok) : {};
@@ -590,20 +604,35 @@ async function handleAIExtraction({ emailMessageId }) {
           dyn[fieldObj.fieldId] = fieldObj.normalizedValue;
           confs[fieldObj.fieldId] = {
             value: fieldObj.normalizedValue,
-            confidence: 100,
+            confidence: fieldObj.confidence !== undefined ? fieldObj.confidence : 100,
             source: 'REGEX',
+            provenance: 'CUSTOMER_EXTRACTED',
             validationState: 'VALID'
           };
         }
       });
 
+      const lineItemId = item.lineItemId || `LI-${String(idx + 1).padStart(3, '0')}`;
+      const qty = (item.quantity !== undefined && item.quantity !== null && item.quantity !== '') ? Number(item.quantity) : null;
+      const conf = (item.confidence !== undefined && item.confidence !== null) ? Number(item.confidence) : 0;
+      const isMissingQty = qty === null;
+
       return {
+        itemNo: idx + 1,
+        enquirySrNo: idx + 1,
+        lineItemId,
         description: desc,
-        quantity: item.quantity || 1,
+        quantity: qty,
         unit: item.unit || 'NOS',
         category: item.productCategory,
-        standardCode: item.standardCode,
-        confidence: item.confidence,
+        standardCode: item.standardCode || null,
+        confidence: conf,
+        extractionStatus: isMissingQty ? 'needs_review' : 'raw',
+        validation: {
+          isValid: !isMissingQty,
+          warnings: isMissingQty ? ['Missing quantity specification'] : [],
+          needsManualReview: isMissingQty
+        },
         dynamicFields: dyn,
         fieldConfidences: confs
       };
@@ -613,19 +642,20 @@ async function handleAIExtraction({ emailMessageId }) {
     const categories = [...new Set(allProducts.map(item => item.productCategory).filter(Boolean))];
     const mergedCategory = categories.length === 1 ? categories[0] : (categories.length > 1 ? 'Multiple' : 'Multiple');
 
-    const descParts = allProducts.map((item, idx) => `${idx + 1}. ${item.productDescription} (${item.quantity} ${item.unit || 'NOS'})`);
+    const descParts = allProducts.map((item, idx) => `${idx + 1}. ${item.productDescription} (${item.quantity !== null && item.quantity !== undefined ? item.quantity : 'Unspecified'} ${item.unit || 'NOS'})`);
     let mergedDescription = descParts.join(' | ');
     if (mergedDescription.length > 200) {
       mergedDescription = mergedDescription.substring(0, 197) + '...';
     }
 
-    const mergedQuantity = allProducts.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    const hasKnownQty = allProducts.some(item => item.quantity !== null && item.quantity !== undefined);
+    const mergedQuantity = hasKnownQty ? allProducts.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) : null;
 
     const units = [...new Set(allProducts.map(item => item.unit).filter(Boolean))];
     const mergedUnit = units.length === 1 ? units[0] : 'NOS';
 
     const standards = [...new Set(allProducts.map(item => item.standardCode).filter(Boolean))];
-    const mergedStandard = standards.length === 1 ? standards[0] : 'Not specified';
+    const mergedStandard = standards.length === 1 ? standards[0] : null;
 
     const reqs = [...new Set(allProducts.map(item => item.specialRequirements).filter(r => r && r.trim().length > 0))];
     let mergedSpecialRequirements = reqs.join(' | ');
@@ -645,14 +675,18 @@ async function handleAIExtraction({ emailMessageId }) {
     }
     const mergedPriority = maxPriority;
 
-    const averageConfidence = Math.round(
-      allProducts.reduce((sum, item) => sum + (item.confidence || 100), 0) / allProducts.length
-    );
+    const averageConfidence = allProducts.length > 0
+      ? Math.round(
+          allProducts.reduce((sum, item) => sum + (item.confidence !== undefined && item.confidence !== null ? Number(item.confidence) : 0), 0) / allProducts.length
+        )
+      : 0;
 
-    const minConfidence = allProducts.reduce(
-      (min, item) => Math.min(min, item.confidence || 100),
-      100
-    );
+    const minConfidence = allProducts.length > 0
+      ? allProducts.reduce(
+          (min, item) => Math.min(min, item.confidence !== undefined && item.confidence !== null ? Number(item.confidence) : 0),
+          100
+        )
+      : 0;
 
     const attachmentNames = [];
     for (const item of allProducts) {
@@ -730,9 +764,9 @@ async function handleAIExtraction({ emailMessageId }) {
         tenderDeadline: classification.tenderDeadline ? new Date(classification.tenderDeadline) : undefined,
         clientName: extractedResult?.clientName || undefined,
         pmcConsultant: extractedResult?.pmcConsultant || undefined,
-        contactPerson: customer.primaryContactName,
-        contactMobile: customer.mobileNumber,
-        contactEmail: emailMsg.sender.toLowerCase(),
+        contactPerson: extractedContact || customer.primaryContactName || 'Customer',
+        contactMobile: extractedMobile || customer.mobileNumber || '0000000000',
+        contactEmail: extractedEmail || emailMsg.sender.toLowerCase(),
         productCategory: mergedEnquiryItem.productCategory,
         productDescription: mergedEnquiryItem.productDescription,
         quantity: mergedEnquiryItem.quantity,
@@ -806,13 +840,29 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       const enquiry = await Enquiry.findById(enquiryId);
       if (!enquiry) continue;
 
-      enquiry.processingStatus = 'Processing';
-      enquiry.processingMessage = 'Recalculating specifications and confidence';
-      await enquiry.save();
+      await Enquiry.findByIdAndUpdate(enquiryId, {
+        $set: {
+          processingStatus: 'Processing',
+          processingMessage: 'Recalculating specifications and confidence'
+        }
+      });
 
-      // AI dynamic spec extraction per product — MERGE with existing fields (don't wipe)
-      const previousFields = { ...enquiry.dynamicFields };
-      const newlyExtractedGlobal = {};
+      // 1. Extract Enquiry/Tender-level customer fields ONCE (not per product)
+      const previousFields = { ...(enquiry.dynamicFields || {}) };
+      const rootFields = await FieldDefinition.find({
+        formContext: 'Enquiry',
+        isDeleted: false,
+        isActive: true,
+        $or: [
+          { productCategory: null },
+          { productCategory: '' }
+        ]
+      });
+      let extractedRootFields = {};
+      if (rootFields.length > 0) {
+        extractedRootFields = await aiService.extractDynamicFields(fullTextContext, rootFields, enquiry.productDescription, enquiry.enquiryId);
+      }
+      enquiry.dynamicFields = { ...previousFields, ...extractedRootFields };
       
       if (enquiry.products && enquiry.products.length > 0) {
         const aiConfig = require('../config/aiConfig');
@@ -833,16 +883,13 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         };
 
         await mapLimit(enquiry.products, aiConfig.MAX_AI_CONCURRENCY, async (prod) => {
-          const prodCategory = prod.category || enquiry.productCategory;
+          const prodCategory = prod.category || enquiry.productCategory || 'Valves';
+          // Line items ONLY receive category-specific fields, NEVER root tender/enquiry fields
           const fields = await FieldDefinition.find({
             formContext: 'Enquiry',
             isDeleted: false,
             isActive: true,
-            $or: [
-              { productCategory: prodCategory },
-              { productCategory: null },
-              { productCategory: '' }
-            ]
+            productCategory: prodCategory
           });
 
           const existingProdFields = { ...(prod.dynamicFields || {}) };
@@ -851,34 +898,31 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
             fieldDefinitions: fields,
             productDescription: prod.description,
             enquiryId: enquiry._id,
-            productIndex: enquiry.products.indexOf(prod)
+            productIndex: enquiry.products.indexOf(prod),
+            lineItemId: prod.lineItemId || `LI-${String(enquiry.products.indexOf(prod) + 1).padStart(3, '0')}`
           });
 
           prod.dynamicFields = { ...existingProdFields, ...gatedResult.validatedDynamicFields };
           prod.fieldConfidences = gatedResult.fieldConfidences;
           prod.extractionStatus = gatedResult.extractionStatus;
         });
-
-        enquiry.markModified('products');
       } else {
-        const fields = await FieldDefinition.find({
+        const catFields = await FieldDefinition.find({
           formContext: 'Enquiry',
           isDeleted: false,
           isActive: true,
-          $or: [
-            { productCategory: enquiry.productCategory },
-            { productCategory: null },
-            { productCategory: '' }
-          ]
+          productCategory: enquiry.productCategory
         });
-        const extractedFields = await aiService.extractDynamicFields(fullTextContext, fields, enquiry.productDescription, enquiry.enquiryId);
-        enquiry.dynamicFields = { ...previousFields, ...extractedFields };
+        if (catFields.length > 0) {
+          const extractedCatFields = await aiService.extractDynamicFields(fullTextContext, catFields, enquiry.productDescription, enquiry.enquiryId);
+          enquiry.dynamicFields = { ...enquiry.dynamicFields, ...extractedCatFields };
+        }
       }
 
       const updatedFieldsLog = [];
       for (const key of Object.keys(enquiry.dynamicFields)) {
         if (enquiry.dynamicFields[key] !== previousFields[key]) {
-          const fieldDef = fields.find(f => f.fieldName === key);
+          const fieldDef = rootFields.find(f => f.fieldName === key);
           updatedFieldsLog.push(`${fieldDef ? fieldDef.fieldLabel : key}: "${previousFields[key] || 'None'}" → "${enquiry.dynamicFields[key]}"`);
         }
       }
@@ -920,14 +964,12 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
                     prod.dynamicFields[missingField.fieldName] = matchedOption;
                   }
                 }
-                enquiry.markModified('products');
               }
               // Also set on root
               if (!enquiry.dynamicFields) enquiry.dynamicFields = {};
               if (!enquiry.dynamicFields[missingField.fieldName]) {
                 enquiry.dynamicFields[missingField.fieldName] = matchedOption;
               }
-              enquiry.markModified('dynamicFields');
             }
           }
         }
@@ -959,10 +1001,18 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         enquiry.status = 'Confirmed';
       }
 
-      enquiry.processingStatus = 'Completed';
-      enquiry.processingCompletedAt = new Date();
-      enquiry.markModified('dynamicFields');
-      await enquiry.save();
+      // Atomic MongoDB update to prevent Mongoose VersionError
+      await Enquiry.findByIdAndUpdate(enquiry._id, {
+        $set: {
+          dynamicFields: enquiry.dynamicFields,
+          products: enquiry.products,
+          attachmentsList: enquiry.attachmentsList,
+          extractionConfidence: finalConfidence,
+          status: enquiry.status,
+          processingStatus: 'Completed',
+          processingCompletedAt: new Date()
+        }
+      }, { new: true, runValidators: true });
 
       // Log FollowUp
       const cleanBody = stripQuotedText(emailMsg.bodyText);
@@ -1016,9 +1066,12 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       const enquiry = await Enquiry.findById(enquiryId);
       if (!enquiry) continue;
 
-      enquiry.processingStatus = 'Processing';
-      enquiry.processingMessage = 'Mapping specifications and computing confidence';
-      await enquiry.save();
+      await Enquiry.findByIdAndUpdate(enquiryId, {
+        $set: {
+          processingStatus: 'Processing',
+          processingMessage: 'Mapping specifications and computing confidence'
+        }
+      });
 
       // ── Tender Intelligence Extraction (Runs First for Tenders) ─────────
       let tenderIntelligence = null;
@@ -1031,7 +1084,6 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
             fullTextContext, attachmentFileNames, enquiry.enquiryId
           );
           enquiry.tenderIntelligence = tenderIntelligence;
-          enquiry.markModified('tenderIntelligence');
 
           // Backfill top-level tender fields from intelligence if not already set
           if (tenderIntelligence.tenderDetails) {
@@ -1056,7 +1108,31 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         }
       }
 
-      enquiry.dynamicFields = {};
+      // 1. Extract Enquiry/Tender-Level Customer Fields ONCE (not per product)
+      const rootFields = await FieldDefinition.find({
+        formContext: 'Enquiry',
+        isDeleted: false,
+        isActive: true,
+        $or: [
+          { productCategory: null },
+          { productCategory: '' }
+        ]
+      });
+
+      let rootDynamicFields = {};
+      if (rootFields.length > 0) {
+        const rootGatedResult = await extractionPipeline.processProductGatedPipeline({
+          textContext: fullTextContext,
+          fieldDefinitions: rootFields,
+          productDescription: enquiry.productDescription || '',
+          enquiryId: enquiry._id,
+          productIndex: 0,
+          lineItemId: `${enquiry.enquiryId || 'ENQ'}-ROOT`
+        });
+        rootDynamicFields = rootGatedResult.validatedDynamicFields || {};
+      }
+      enquiry.dynamicFields = rootDynamicFields;
+
       // Clear AI extraction cache before processing this enquiry's products
       // to prevent cross-enquiry cache contamination
       extractionPipeline.clearCache();
@@ -1091,46 +1167,24 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
             }
           }
 
-          // Fallback: Use Zero-Hallucination Gated Pipeline
+          // Fallback: Use Zero-Hallucination Gated Pipeline with category-specific fields ONLY
           if (!prodFields) {
-            const prodCategory = prod.category || enquiry.productCategory;
-            let fields = await FieldDefinition.find({
+            const prodCategory = prod.category || enquiry.productCategory || 'Valves';
+            // STRICT PRODUCT-ONLY FIELDS: Do NOT include productCategory: null/'' here
+            const fields = await FieldDefinition.find({
               formContext: 'Enquiry',
               isDeleted: false,
               isActive: true,
-              $or: [
-                { productCategory: prodCategory },
-                { productCategory: null },
-                { productCategory: '' }
-              ]
+              productCategory: prodCategory
             });
-
-            // CATEGORY-SPECIFIC FIELD FILTERING:
-            // Skip fields irrelevant to the product category to avoid
-            // wasting AI calls on fields that will never be found.
-            const VALVE_IRRELEVANT_FIELDS = [
-              'tankCapacity', 'tankType', 'temaType', 'tubeLength',
-              'surfaceArea', 'radiographyPercent', 'designPressure',
-              'shellThickness', 'headType', 'baffleType', 'tubePitch',
-              'numberOfPasses', 'numberOfTubes'
-            ];
-            const TANK_IRRELEVANT_FIELDS = [
-              'valve_type', 'valve_bore', 'valve_ball_type', 'valve_operating',
-              'valve_end_connection', 'seatMaterial', 'sealType'
-            ];
-
-            if (prodCategory === 'Valves') {
-              fields = fields.filter(f => !VALVE_IRRELEVANT_FIELDS.includes(f.fieldName));
-            } else if (prodCategory === 'Storage Tank' || prodCategory === 'Heat Exchanger') {
-              fields = fields.filter(f => !TANK_IRRELEVANT_FIELDS.includes(f.fieldName));
-            }
 
             const gatedResult = await extractionPipeline.processProductGatedPipeline({
               textContext: fullTextContext,
               fieldDefinitions: fields,
               productDescription: prod.description,
               enquiryId: enquiry._id,
-              productIndex: enquiry.products.indexOf(prod)
+              productIndex: enquiry.products.indexOf(prod),
+              lineItemId: prod.lineItemId || `LI-${String(enquiry.products.indexOf(prod) + 1).padStart(3, '0')}`
             });
             prodFields = gatedResult.validatedDynamicFields;
             prod.fieldConfidences = gatedResult.fieldConfidences;
@@ -1139,29 +1193,26 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
 
           prod.dynamicFields = prodFields;
         });
-        enquiry.markModified('products');
       } else {
-        const fields = await FieldDefinition.find({
+        const catFields = await FieldDefinition.find({
           formContext: 'Enquiry',
           isDeleted: false,
           isActive: true,
-          $or: [
-            { productCategory: enquiry.productCategory },
-            { productCategory: null },
-            { productCategory: '' }
-          ]
+          productCategory: enquiry.productCategory
         });
+
         const gatedResult = await extractionPipeline.processProductGatedPipeline({
           textContext: fullTextContext,
-          fieldDefinitions: fields,
+          fieldDefinitions: catFields,
           productDescription: enquiry.productDescription,
           enquiryId: enquiry._id,
-          productIndex: 0
+          productIndex: 0,
+          lineItemId: `${enquiry.enquiryId || 'ENQ'}-LI-001`
         });
-        enquiry.dynamicFields = gatedResult.validatedDynamicFields;
+        enquiry.dynamicFields = { ...rootDynamicFields, ...gatedResult.validatedDynamicFields };
       }
       const mappedAttachments = freshAttachments.filter(att =>
-        (aiItem.linkedAttachmentNames || []).some(name =>
+        (aiItem?.linkedAttachmentNames || []).some(name =>
           name && att.originalFileName && name.toLowerCase() === att.originalFileName.toLowerCase()
         )
       );
@@ -1181,11 +1232,11 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       }
 
       // Calculate confidence
-      let finalConfidence = aiItem.confidence || 100;
+      let finalConfidence = (aiItem && aiItem.confidence !== undefined && aiItem.confidence !== null) ? Number(aiItem.confidence) : 0;
       const ocrLinked = attachmentsToLink.filter(att => att.ocrConfidence !== undefined);
       if (ocrLinked.length > 0) {
         const avgOcr = ocrLinked.reduce((sum, att) => sum + att.ocrConfidence, 0) / ocrLinked.length;
-        finalConfidence = Math.round((aiItem.confidence * 0.7) + (avgOcr * 0.3));
+        finalConfidence = Math.round(((aiItem?.confidence || 0) * 0.7) + (avgOcr * 0.3));
       }
       enquiry.extractionConfidence = finalConfidence;
 
@@ -1206,10 +1257,26 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
         status = 'Confirmed';
       }
 
-      enquiry.processingStatus = 'Completed';
-      enquiry.processingCompletedAt = new Date();
-      enquiry.markModified('dynamicFields');
-      await enquiry.save();
+      // Atomic MongoDB update to prevent Mongoose VersionError
+      const updatePayload = {
+        dynamicFields: enquiry.dynamicFields,
+        products: enquiry.products,
+        attachmentsList: attachmentsToLink.map(a => a._id),
+        extractionConfidence: finalConfidence,
+        status: status,
+        isUnverified: isUnverified,
+        processingStatus: 'Completed',
+        processingCompletedAt: new Date()
+      };
+      if (tenderIntelligence) {
+        updatePayload.tenderIntelligence = tenderIntelligence;
+        if (enquiry.tenderNumber) updatePayload.tenderNumber = enquiry.tenderNumber;
+        if (enquiry.gemTenderNo) updatePayload.gemTenderNo = enquiry.gemTenderNo;
+        if (enquiry.tenderDeadline) updatePayload.tenderDeadline = enquiry.tenderDeadline;
+        if (enquiry.requiredDeliveryWeeks) updatePayload.requiredDeliveryWeeks = enquiry.requiredDeliveryWeeks;
+      }
+
+      await Enquiry.findByIdAndUpdate(enquiryId, { $set: updatePayload }, { new: true, runValidators: true });
 
       // Create tasks
       if (enquiry.assignedTo) {

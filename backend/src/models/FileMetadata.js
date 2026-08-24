@@ -9,7 +9,10 @@ const fileMetadataSchema = new mongoose.Schema({
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   module: { type: String, enum: ['Enquiry', 'Quotation', 'QAP', 'FollowUp', 'General', 'Temp', 'Task'], required: true, default: 'Temp' },
   entityId: { type: mongoose.Schema.Types.ObjectId },
-  isPrivate: { type: Boolean, default: true }
+  isPrivate: { type: Boolean, default: true },
+  revisionNumber: { type: Number },
+  isGeneratedPdf: { type: Boolean, default: false },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
 
 // Add index for fast exact matches

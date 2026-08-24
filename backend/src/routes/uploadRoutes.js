@@ -4,10 +4,10 @@ const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Public download route for window.open downloads
-router.get('/download-local/:key', uploadController.downloadLocalFile);
-
 router.use(protect); // Secure all file operations
+
+// Authenticated local file download
+router.get('/download-local/:key', uploadController.downloadLocalFile);
 
 router.get('/', uploadController.getAllFiles);
 // POST /api/files/upload (multipart/form-data)

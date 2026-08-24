@@ -15,14 +15,23 @@ const FieldDefinition = require('../models/FieldDefinition');
 
 const COMPLETE_VALVE_TYPES = [
   'Ball Valve',
+  'Floating Ball Valve',
+  'Trunnion Mounted Ball Valve',
   'Gate Valve',
+  'Wedge Gate Valve',
+  'Knife Gate Valve',
   'Globe Valve',
   'Check Valve',
+  'Swing Check Valve',
+  'Lift Check Valve',
+  'Dual Plate Check Valve',
+  'Non Return Valve',
   'Butterfly Valve',
   'Plug Valve',
   'Control Valve',
   'Needle Valve',
-  'Safety Valve'
+  'Safety Valve',
+  'Pressure Relief Valve'
 ];
 
 async function runMigration() {

@@ -44,6 +44,7 @@ class LearningEngine {
    */
   async recordCorrection({
     enquiryId = null,
+    lineItemId = null,
     productIndex = 0,
     fieldCategory,
     field,
@@ -62,6 +63,7 @@ class LearningEngine {
       // Save the new correction as PENDING (not yet applied to knowledge)
       const corrDoc = await ExtractionCorrection.create({
         enquiryId,
+        lineItemId,
         productIndex,
         fieldCategory,
         field: field || fieldCategory,

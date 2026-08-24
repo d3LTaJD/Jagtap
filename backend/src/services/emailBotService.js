@@ -296,7 +296,7 @@ Email: ${process.env.EMAIL_USER || 'ai@petrovalves.co.in'}
       secure: port === 465,
       auth: {
         user: process.env.SMTP_USER || 'ai@petrovalves.co.in',
-        pass: process.env.SMTP_PASS || 'Ai@@27042026'
+        pass: process.env.SMTP_PASS
       },
       connectionTimeout: 5000,
       greetingTimeout: 5000
@@ -540,6 +540,85 @@ async function processEmailMessage(parsed) {
     processingMessage: 'Enqueued for background parsing'
   });
 
+  // 4b. Step 7: Detect Client Reply on Existing Quotation
+  try {
+    const quotationMatch = (subject || '').match(/QT-\d{4}-\d{2}-\d{4}/i) || (bodyText || '').match(/QT-\d{4}-\d{2}-\d{4}/i);
+    if (quotationMatch) {
+      const qId = quotationMatch[0].toUpperCase();
+      const Quotation = require('../models/Quotation');
+      const matchedQuotation = await Quotation.findOne({ quotationId: qId });
+      if (matchedQuotation && ['SENT', 'APPROVED', 'Sent', 'Accepted'].includes(matchedQuotation.status)) {
+        matchedQuotation.status = 'REVISION_REQUESTED';
+        await matchedQuotation.save();
+        console.log(`[Email Bot] Client reply detected for Quotation ${qId}. Status updated to REVISION_REQUESTED.`);
+
+        const { notifyRoles, createNotification } = require('./notificationService');
+        if (matchedQuotation.preparedBy) {
+          await createNotification({
+            user_id: matchedQuotation.preparedBy,
+            type: 'CLIENT_QUOTATION_REPLY_DETECTED',
+            title: `📩 Client Reply Received for ${matchedQuotation.quotationId}`,
+            message: `Client ${senderEmail} has replied regarding Quotation ${matchedQuotation.quotationId}. Status updated to Revision Requested.`,
+            related_id: matchedQuotation._id
+          });
+        }
+
+        await notifyRoles({
+          roles: ['SALES', 'DIR', 'SA'],
+          type: 'CLIENT_QUOTATION_REPLY_DETECTED',
+          title: `📩 Client Reply on Quotation ${matchedQuotation.quotationId}`,
+          message: `Client ${senderEmail} replied to Quotation ${matchedQuotation.quotationId}. Revision flagged for review.`,
+          related_id: matchedQuotation._id
+        });
+      }
+    }
+  } catch (qErr) {
+    console.error('[Email Bot] Error checking quotation reply status:', qErr.message);
+  }
+
+  // 4c. M3: Detect Inbound Customer Drawing & Route to TDS Queue
+  try {
+    const drawingTokens = (subject + ' ' + bodyText).match(/\b(?:dwg|pid|p&id)[-_][a-z0-9\-_./]+\b/i);
+    const hasDrawingFiles = (parsed.attachments || []).some(att => {
+      const ext = (att.filename || '').split('.').pop().toLowerCase();
+      return ['dwg', 'dxf', 'pdf'].includes(ext);
+    });
+
+    if (drawingTokens || hasDrawingFiles) {
+      const tdsService = require('./tdsService');
+      await tdsService.routeCustomerDrawingFromEmail({
+        customer,
+        emailSubject: subject,
+        emailBody: bodyText,
+        attachments: parsed.attachments || [],
+        threadId
+      });
+    }
+  } catch (tdsErr) {
+    console.error('[Email Bot] Error routing drawing to TDS queue:', tdsErr.message);
+  }
+
+  // M4: Inbound Vendor Proforma Invoice (PI) AI Hook
+  try {
+    const isPiEmail = /\b(?:proforma\s*invoice|proforma|vendor\s*pi|pi\s*for\s*po)\b/i.test(subject + ' ' + bodyText) ||
+                      /\b(?:PI[-/]\d+|PO[-/]\d+)/i.test(subject);
+    const hasPdfAttachment = (parsed.attachments || []).some(att => (att.filename || '').toLowerCase().endsWith('.pdf'));
+
+    if (isPiEmail && hasPdfAttachment) {
+      const piAiService = require('./proformaInvoiceAiService');
+      const pdfAtt = parsed.attachments.find(att => (att.filename || '').toLowerCase().endsWith('.pdf'));
+      await piAiService.processVendorPiFromEmail({
+        emailSubject: subject,
+        emailBody: bodyText,
+        senderEmail,
+        attachmentPath: pdfAtt?.path || null,
+        fileName: pdfAtt?.filename || 'vendor_pi.pdf'
+      });
+    }
+  } catch (piErr) {
+    console.error('[Email Bot] Error processing vendor PI:', piErr.message);
+  }
+
   // 5. Queue on EmailProcessingQueue
   const { emailProcessingQueue } = require('./queueHandlers');
   await emailProcessingQueue.add({ emailMessageId: emailMsg._id });
@@ -633,7 +712,7 @@ exports.start = () => {
 
   console.log('[Email Bot] Starting background AI email processing service (1-minute polling interval)...');
   checkEmails();
-  intervalId = setInterval(checkEmails, 60000);
+  intervalId = setInterval(checkEmails, 15000);
 };
 
 /**
