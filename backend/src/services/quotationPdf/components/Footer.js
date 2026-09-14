@@ -1,3 +1,14 @@
+function renderFormatOnlyFooter() {
+  return `
+    <div class="pv-footer-container pv-footer-container-format-only">
+      <div class="pv-footer-top-line">
+        <span class="pv-footer-format-no">Format No. R/5.1.1/3 Rev 00 Effective From 15-May-2026</span>
+        <span class="pv-footer-unit2-tag">Unit-II : API 6D Monogram Licencee Unit</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderOfficialFooter() {
   return `
     <div class="pv-footer-container">
@@ -28,4 +39,4 @@ function renderOfficialFooter() {
   `;
 }
 
-module.exports = { renderOfficialFooter };
+module.exports = { renderOfficialFooter, renderFormatOnlyFooter };

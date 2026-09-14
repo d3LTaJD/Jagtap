@@ -18,6 +18,7 @@ const TYPE_COLOR = {
 
 const Navbar = ({ onMenuClick }) => {
   const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -39,8 +40,12 @@ const Navbar = ({ onMenuClick }) => {
 
   const fetchNotifications = async () => {
     try {
-      const res = await api.get('/notifications');
-      setNotifications(res.data.data.notifications);
+      const res = await api.get('/notifications?limit=30');
+      const data = res.data?.data;
+      if (data) {
+        setNotifications(data.notifications || []);
+        setUnreadCount(typeof data.unreadCount === 'number' ? data.unreadCount : (data.notifications || []).filter(n => !n.is_read).length);
+      }
     } catch (err) { console.error('Failed to fetch notifications'); }
   };
 
@@ -89,20 +94,20 @@ const Navbar = ({ onMenuClick }) => {
     navigate(result.link);
   };
 
-  const unreadCount = notifications.filter(n => !n.is_read).length;
-
   const markAsRead = async (id, e) => {
     if (e) e.stopPropagation();
     try {
       await api.patch(`/notifications/${id}/read`);
-      setNotifications(notifications.map(n => n._id === id ? { ...n, is_read: true } : n));
+      setNotifications(prev => prev.map(n => n._id === id ? { ...n, is_read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (err) {}
   };
 
   const markAllAsRead = async () => {
     try {
       await api.patch('/notifications/read-all');
-      setNotifications(notifications.map(n => ({ ...n, is_read: true })));
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      setUnreadCount(0);
     } catch (err) {}
   };
 
@@ -110,14 +115,24 @@ const Navbar = ({ onMenuClick }) => {
     markAsRead(notif._id);
     setShowDropdown(false);
     const id = notif.related_id;
-    if (notif.type?.includes('TASK')) {
+    const type = (notif.type || '').toUpperCase();
+
+    if (type.includes('TASK')) {
       navigate('/app/tasks');
-    } else if (notif.type?.includes('ENQUIRY') || notif.type?.includes('FOLLOWUP') || notif.type?.includes('FOLLOW_UP') || notif.type?.includes('REMINDER') || notif.type?.includes('ESCALATION') || notif.type?.includes('URGENT')) {
-      navigate(id ? `/app/enquiries/${id}` : '/app/enquiries');
-    } else if (notif.type?.includes('QUOTE') || notif.type?.includes('QUOTATION')) {
+    } else if (type.includes('DRAWING')) {
+      navigate(id ? `/app/drawings/${id}` : '/app/drawings');
+    } else if (type.includes('WORK_ORDER') || type.includes('WO_')) {
+      navigate('/app/work-orders');
+    } else if (type.includes('BOM') || type.includes('PI_') || type.includes('PO_') || type.includes('PR_') || type.includes('PURCHASE')) {
+      navigate('/app/purchase');
+    } else if (type.includes('QUOTE') || type.includes('QUOTATION')) {
       navigate(id ? `/app/quotations/${id}` : '/app/quotations');
-    } else if (notif.type?.includes('QAP')) {
+    } else if (type.includes('QAP')) {
       navigate(id ? `/app/qaps/${id}` : '/app/qaps');
+    } else if (type.includes('CUSTOMER')) {
+      navigate('/app/customers');
+    } else if (type.includes('ENQUIRY') || type.includes('FOLLOWUP') || type.includes('FOLLOW_UP') || type.includes('REMINDER') || type.includes('ESCALATION') || type.includes('URGENT') || type.includes('SYSTEM')) {
+      navigate(id ? `/app/enquiries/${id}` : '/app/enquiries');
     } else {
       navigate('/app');
     }
@@ -198,6 +213,7 @@ const Navbar = ({ onMenuClick }) => {
           <div ref={dropdownRef} className="relative">
             <button
               onClick={() => setShowDropdown(!showDropdown)}
+              title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'Notifications'}
               className="relative p-2 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-full transition-colors animate-in"
             >
               <Bell className="w-5 h-5" />
@@ -209,11 +225,20 @@ const Navbar = ({ onMenuClick }) => {
             </button>
 
             {showDropdown && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                  <h3 className="font-bold text-slate-800">Notifications</h3>
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50">
+                <div className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-800 text-sm">Notifications</h3>
+                    {unreadCount > 0 && (
+                      <span className="text-[11px] font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                        {unreadCount > 99 ? `${unreadCount} unread` : `${unreadCount} new`}
+                      </span>
+                    )}
+                  </div>
                   {unreadCount > 0 && (
-                    <button onClick={markAllAsRead} className="text-xs font-semibold text-brand-600 hover:text-brand-700">Mark all as read</button>
+                    <button onClick={markAllAsRead} className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline transition-colors">
+                      Mark all as read
+                    </button>
                   )}
                 </div>
                 <div className="max-h-96 overflow-y-auto">

@@ -12,6 +12,7 @@ const quotationItemSchema = new mongoose.Schema({
   quantity: Number,
   unit: String,
   unitPrice: { type: Number, default: 0 },
+  ndtRequirement: { type: String, default: '' },
   testingCharges: { type: Number, default: 0 },
   inspectionCharges: { type: Number, default: 0 },
   ndtCharges: { type: Number, default: 0 },
@@ -160,7 +161,7 @@ const quotationSchema = new mongoose.Schema({
   deliveryTimeHeader: { type: String, default: 'Provided in COMMERCIAL PART - III' },
 
   // Price Part-II parameters
-  pricePartNotice: { type: String, default: 'We offer our Valves as below, considering Contract Review Check (Format No. R/S.1.3.5/2 Rev04).' },
+  pricePartNotice: { type: String, default: 'We offer our Valves as below, considering Contract Review Check (Format No. R/5.1.3.5/2 Rev04).' },
   ndtRequirementText: { type: String, default: 'Any NDT Requirement (i.e. RT, UT, MPT) then charges will be Extra at actual to your account.' },
   specialTestingRequirementText: { type: String, default: 'If any Special Testing Requirement (i.e. Helium, Nitrogen, Vacuum, IGC, PMI, NACE, Paint) then charges will be Extra at actual to your account.' },
   sparesMandayChargesText: { type: String, default: 'Spares, Manday required then charges will be Extra at actual to your account.' },
@@ -170,6 +171,9 @@ const quotationSchema = new mongoose.Schema({
   pfPercent: { type: Number, default: 5 },
   tpiaNoticeText: { type: String, default: 'Third Party Inspection (TPIA) required then charges will be Extra to your account.' },
   tpiCharges: { type: Number, default: 0 },
+  ndtCharges: { type: Number, default: 0 },
+  specialTestingCharges: { type: Number, default: 0 },
+  sparesCharges: { type: Number, default: 0 },
   gstRate: { type: Number, default: 18 },
 
   // Commercial Part-III parameters
@@ -195,6 +199,9 @@ const quotationSchema = new mongoose.Schema({
     totalTestingCharges: Number,
     totalInspectionCharges: Number,
     freightCharges: Number,
+    ndtAmount: Number,
+    specialTestingAmount: Number,
+    sparesAmount: Number,
     cert32Amount: Number,
     pfAmount: Number,
     tpiAmount: Number,

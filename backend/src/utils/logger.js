@@ -37,17 +37,21 @@ const logActivity = async ({
       }
     }
 
+    const clientIp = req?.headers?.['x-forwarded-for']?.split(',')[0].trim() || req?.ip || req?.connection?.remoteAddress || '127.0.0.1';
+    const clientUserAgent = req?.get ? req.get('User-Agent') : (req?.headers ? req.headers['user-agent'] : 'Web Client');
+    const resolvedResourceName = resourceName || (details?.includes(':') ? details.split(':')[1].trim() : null) || action;
+
     await ActivityLog.create({
-      user_id: req.user?._id,
+      user_id: req?.user?._id,
       action,
       module,
       related_id: resourceId,
-      resourceName,
+      resourceName: resolvedResourceName,
       previousState: diffPrevious,
       newState: diffNew,
       details,
-      ipAddress: req.ip || req.connection?.remoteAddress,
-      userAgent: req.get('User-Agent')
+      ipAddress: clientIp,
+      userAgent: clientUserAgent
     });
   } catch (err) {
     console.error('Audit Log Error:', err);

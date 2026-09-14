@@ -3,57 +3,57 @@ const { renderOfficialFooter } = require('../components/Footer');
 const { formatPdfValue } = require('../dataFormatter');
 
 function formatDate(d) {
-  if (!d) return new Date().toLocaleDateString('en-GB');
+  if (!d) return new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
   const date = new Date(d);
   if (isNaN(date.getTime())) return formatPdfValue(d);
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = String(date.getFullYear()).slice(-2);
-  return `${day}/${month}/${year}`;
+  const year = String(date.getFullYear());
+  return `${day}-${month}-${year}`;
 }
 
 function renderTechnicalPart1(quotation) {
   const customer = quotation.customer || {};
   const enquiry = quotation.enquiry || {};
 
-  const offerNo = formatPdfValue(quotation.quotationId, 'PV/J/QTN/P-001/26-27');
+  const offerNo = formatPdfValue(quotation.quotationId, 'PV/S/QTN/P-013/26-27');
   const offerDate = formatDate(quotation.createdAt || new Date());
   
-  const rawCustomerName = quotation.customerName || quotation.senderCompany || enquiry.senderCompany || customer.companyName || quotation.clientName || 'ABC Contractor';
-  const customerName = formatPdfValue(rawCustomerName, 'ABC Contractor');
+  const rawCustomerName = quotation.customerName || quotation.senderCompany || enquiry.senderCompany || customer.companyName || quotation.clientName || 'Petro Valves';
+  const customerName = formatPdfValue(rawCustomerName, 'Petro Valves');
 
   const rawLocation = quotation.customerAddress || customer.address || customer.city || enquiry.location || 'Ahmedabad';
   const location = formatPdfValue(rawLocation, 'Ahmedabad');
   
-  const rawContactNo = quotation.contactMobile || quotation.contactNo || customer.mobileNumber || customer.phoneNumber || enquiry.contactMobile || '+91 90237232XX';
-  const contactNo = formatPdfValue(rawContactNo, '+91 90237232XX');
+  const rawContactNo = quotation.contactMobile || quotation.contactNo || customer.mobileNumber || customer.phoneNumber || enquiry.contactMobile || '+91 9829790121';
+  const contactNo = formatPdfValue(rawContactNo, '+91 9829790121');
 
-  const rawEmailId = quotation.contactEmail || quotation.emailId || customer.emailAddress || enquiry.contactEmail || 'sales@petrovalves.co.in';
-  const emailId = formatPdfValue(rawEmailId, 'sales@petrovalves.co.in');
+  const rawEmailId = quotation.contactEmail || quotation.emailId || customer.emailAddress || enquiry.contactEmail || 'shubh@petrovalves.co.in';
+  const emailId = formatPdfValue(rawEmailId, 'shubh@petrovalves.co.in');
   
-  const rawKindAttention = quotation.kindAttention || customer.primaryContactName || enquiry.contactPerson || 'Mr. Jay';
-  const kindAttention = formatPdfValue(rawKindAttention, 'Mr. Jay');
+  const rawKindAttention = quotation.kindAttention || customer.primaryContactName || enquiry.contactPerson || 'Mr.Shubh Patel';
+  const kindAttention = formatPdfValue(rawKindAttention, 'Mr.Shubh Patel');
   
   let enquiryRef = quotation.enquiryRefText;
   if (!enquiryRef) {
-    const enqDate = enquiry.createdAt ? formatDate(enquiry.createdAt) : '05/07/26';
+    const enqDate = enquiry.createdAt ? formatDate(enquiry.createdAt) : '16-07-2026';
     enquiryRef = `Your Enquiry by &nbsp; E-Mail &nbsp; on DT. &nbsp; ${enqDate}`;
   } else {
     enquiryRef = formatPdfValue(enquiryRef);
   }
 
-  const rawProject = quotation.projectName || enquiry.projectName || enquiry.subject || 'Pipeline Project';
-  const project = formatPdfValue(rawProject, 'Pipeline Project');
+  const rawProject = quotation.projectName || enquiry.projectName || enquiry.subject || 'IGGL';
+  const project = formatPdfValue(rawProject, 'IGGL');
 
-  const rawSubject = quotation.subjectText || 'Offer for Valves as per your requirements.';
-  const subject = formatPdfValue(rawSubject, 'Offer for Valves as per your requirements.');
+  const rawSubject = quotation.subjectText || 'Offer for valves as per your requirements.';
+  const subject = formatPdfValue(rawSubject, 'Offer for valves as per your requirements.');
   
   const rawOpeningText = quotation.salutationOpeningText || 'We acknowledge with thanks the receipt of your above referred enquiry and we are pleased to submit our proposal as under.';
   let openingText = formatPdfValue(rawOpeningText, 'We acknowledge with thanks the receipt of your above referred enquiry and we are pleased to submit our proposal as under.');
   openingText = openingText.replace(/^(?:Dear Sir,?\s*)+/i, '').trim();
 
-  const rawTechClause = quotation.technicalSpecificationClause || 'We offered our valves as per Specification given in Contract Review Check.';
-  const techClause = formatPdfValue(rawTechClause, 'We offered our valves as per Specification given in Contract Review Check.');
+  const rawTechClause = quotation.technicalSpecificationClause || 'We offered our valves as per Specification given in Contract Review Checklist.';
+  const techClause = formatPdfValue(rawTechClause, 'We offered our valves as per Specification given in Contract Review Checklist.');
   
   let deviations = quotation.technicalDeviations || '';
   if (typeof deviations === 'object') {

@@ -468,9 +468,17 @@ async function handleAIExtraction({ emailMessageId }) {
     // Filter out successfully parsed BOQs from files sent to AI
     const remainingAttachmentsForAI = savedAttachments.filter(att => !successfullyParsedBoqIds.has(att._id.toString()));
 
-    // ── Deterministic Email Body Line Item Parsing ──────────────────
-    // Try to split email body text into structured line items BEFORE calling AI.
-    // This handles numbered lists like "1 4" Shut off valve Nos. 16"
+    // ── Deterministic Email Table & Body Line Item Parsing ─────────
+    // 1. First, attempt to parse structured HTML <table> elements from emailMsg.htmlBody
+    if (structuredProducts.length === 0 && emailMsg.htmlBody) {
+      const htmlTableProducts = boqParserService.parseHtmlTableLineItems(emailMsg.htmlBody);
+      if (htmlTableProducts.length > 0) {
+        structuredProducts.push(...htmlTableProducts);
+        console.log(`[AI Extraction] HTML table parser found ${htmlTableProducts.length} line items from email HTML.`);
+      }
+    }
+
+    // 2. If no HTML table was found, try deterministic plain-text email body line item parsing
     if (structuredProducts.length === 0) {
       const emailBodyProducts = boqParserService.parseEmailBodyLineItems(bodyText);
       if (emailBodyProducts.length > 0) {
@@ -731,7 +739,17 @@ async function handleAIExtraction({ emailMessageId }) {
 
     const existingEnq = await Enquiry.findOne(dupQuery);
     if (existingEnq) {
-      console.log(`[AI Extraction] Enquiry ${existingEnq.enquiryId} already exists for "${mergedDescription}". Skipping creation.`);
+      console.log(`[AI Extraction] Enquiry ${existingEnq.enquiryId} already exists for "${mergedDescription}".`);
+      if (!existingEnq.products || existingEnq.products.length < productsArray.length || existingEnq.products.some(p => p.quantity === null || !p.validation?.isValid)) {
+        console.log(`[AI Extraction] Updating existing enquiry ${existingEnq.enquiryId} with ${productsArray.length} newly parsed products.`);
+        existingEnq.products = productsArray;
+        existingEnq.quantity = mergedQuantity;
+        existingEnq.productDescription = mergedDescription;
+        existingEnq.productSummary = productSummary;
+        existingEnq.productCategory = mergedCategory;
+        existingEnq.standardCode = mergedStandard;
+        await existingEnq.save();
+      }
       enquiriesCreatedIds.push(existingEnq._id);
     } else {
       const year = new Date().getFullYear();
@@ -789,6 +807,28 @@ async function handleAIExtraction({ emailMessageId }) {
         processingMessage: `${classification.category} document initialized`
       });
       enquiriesCreatedIds.push(enquiry._id);
+
+      try {
+        const ActivityLog = require('../models/ActivityLog');
+        await ActivityLog.create({
+          user_id: agentId,
+          action: 'CREATE',
+          module: 'ENQUIRY',
+          resourceName: enquiry.enquiryId,
+          related_id: enquiry._id,
+          newState: {
+            enquiryId: enquiry.enquiryId,
+            company: enquiry.senderCompany,
+            category: enquiry.productCategory,
+            quantity: enquiry.quantity
+          },
+          ipAddress: 'System Background Worker',
+          userAgent: 'Petro AI Email Extractor',
+          details: `AI extracted and created enquiry ${enquiry.enquiryId} from email (${enquiry.senderCompany})`
+        });
+      } catch (logErr) {
+        console.error('[ActivityLog] Failed to log email enquiry creation:', logErr.message);
+      }
     }
 
     // Queue confidence and dynamic fields calculation
@@ -999,6 +1039,24 @@ async function handleConfidenceCalculation({ emailMessageId, isReply, matchedEnq
       const completion = await checkEnquiryCompletion(enquiry);
       if (completion.isComplete && ['New', 'Contacted', 'Verified'].includes(enquiry.status)) {
         enquiry.status = 'Confirmed';
+
+        try {
+          const ActivityLog = require('../models/ActivityLog');
+          await ActivityLog.create({
+            user_id: enquiry.assignedTo || enquiry.createdBy,
+            action: 'STATUS_CHANGE',
+            module: 'ENQUIRY',
+            resourceName: enquiry.enquiryId,
+            related_id: enquiry._id,
+            previousState: { status: 'New' },
+            newState: { status: 'Confirmed', extractionConfidence: finalConfidence },
+            ipAddress: 'System Background Worker',
+            userAgent: 'Petro AI Auto-Promotion Engine',
+            details: `Enquiry ${enquiry.enquiryId} verified complete and auto-promoted to Confirmed`
+          });
+        } catch (logErr) {
+          console.error('[ActivityLog] Failed to log enquiry auto-confirmation:', logErr.message);
+        }
       }
 
       // Atomic MongoDB update to prevent Mongoose VersionError

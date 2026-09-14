@@ -5,7 +5,7 @@ import {
   Clock, AlertCircle, ArrowLeft, Loader2, IndianRupee,
   Send, GitBranch, History, Printer, Lock, X, AlertTriangle, Save, File,
   Edit, Sliders, Shield, FileSpreadsheet, Settings, HelpCircle, Plus, Trash2, RefreshCw,
-  ClipboardCheck, LayoutGrid, Table2, Upload, Sparkles
+  ClipboardCheck, LayoutGrid, Table2, Upload, Sparkles, Info
 } from 'lucide-react';
 import api from '../api/client';
 import { getRoleCode, useAbility } from '../context/AbilityContext';
@@ -184,7 +184,7 @@ const QuotationDetail = () => {
           setTechFields(initialTech);
 
           const initialPrice = {
-            pricePartNotice: q.pricePartNotice || 'We offer our Valves as below, considering Contract Review Check (Format No. R/S.1.3.5/2 Rev04).',
+            pricePartNotice: q.pricePartNotice || 'We offer our Valves as below, considering Contract Review Check (Format No. R/5.1.3.5/2 Rev04).',
             ndtRequirementText: q.ndtRequirementText || 'Any NDT Requirement (i.e. RT, UT, MPT) then charges will be Extra at actual to your account.',
             specialTestingRequirementText: q.specialTestingRequirementText || 'If any Special Testing Requirement (i.e. Helium, Nitrogen, Vacuum, IGC, PMI, NACE, Paint) then charges will be Extra at actual to your account.',
             sparesMandayChargesText: q.sparesMandayChargesText || 'Spares, Manday required then charges will be Extra at actual to your account.',
@@ -192,7 +192,12 @@ const QuotationDetail = () => {
             cert32Percent: q.cert32Percent !== undefined ? q.cert32Percent : 5,
             pfTerms: q.pfTerms || 'Extra for Packing & Forwarding Charges (5%)',
             pfPercent: q.pfPercent !== undefined ? q.pfPercent : 5,
-            tpiaNoticeText: q.tpiaNoticeText || 'Third Party Inspection (TPIA) required then charges will be Extra to your account.'
+            tpiaNoticeText: q.tpiaNoticeText || 'Third Party Inspection (TPIA) required then charges will be Extra to your account.',
+            tpiCharges: q.tpiCharges !== undefined ? q.tpiCharges : (q.commercialTotals?.tpiAmount || 0),
+            ndtCharges: q.ndtCharges !== undefined ? q.ndtCharges : (q.commercialTotals?.ndtAmount || 0),
+            specialTestingCharges: q.specialTestingCharges !== undefined ? q.specialTestingCharges : (q.commercialTotals?.specialTestingAmount || 0),
+            sparesCharges: q.sparesCharges !== undefined ? q.sparesCharges : (q.commercialTotals?.sparesAmount || 0),
+            gstRate: q.gstRate !== undefined ? q.gstRate : 18
           };
           setPriceFields(initialPrice);
 
@@ -291,7 +296,7 @@ const QuotationDetail = () => {
 
   const handleItemPricingChange = (idx, field, val) => {
     const newItems = [...items];
-    if (field === 'description' || field === 'productCategory' || field === 'materialGrade' || field === 'applicableStandard' || field === 'unit') {
+    if (typeof val === 'string' || typeof val === 'object' || ['description', 'productCategory', 'materialGrade', 'applicableStandard', 'unit', 'ndtRequirement', 'dynamicFields'].includes(field)) {
       newItems[idx][field] = val;
     } else {
       newItems[idx][field] = Number(val) || 0;
@@ -306,8 +311,11 @@ const QuotationDetail = () => {
     return calculateQuotationPricing(items, {
       cert32Percent: priceFields.cert32Percent,
       pfPercent: priceFields.pfPercent,
-      gstRate: 18,
-      tpiCharges: quotation?.tpiCharges || quotation?.commercialTotals?.tpiAmount || quotation?.commercialTotals?.totalInspectionCharges || 0
+      gstRate: priceFields.gstRate || 18,
+      tpiCharges: priceFields.tpiCharges !== undefined ? priceFields.tpiCharges : (quotation?.tpiCharges || quotation?.commercialTotals?.tpiAmount || 0),
+      ndtCharges: priceFields.ndtCharges !== undefined ? priceFields.ndtCharges : (quotation?.ndtCharges || quotation?.commercialTotals?.ndtAmount || 0),
+      specialTestingCharges: priceFields.specialTestingCharges !== undefined ? priceFields.specialTestingCharges : (quotation?.specialTestingCharges || quotation?.commercialTotals?.specialTestingAmount || 0),
+      sparesCharges: priceFields.sparesCharges !== undefined ? priceFields.sparesCharges : (quotation?.sparesCharges || quotation?.commercialTotals?.sparesAmount || 0)
     });
   };
 
@@ -336,6 +344,543 @@ const QuotationDetail = () => {
       }
       if (fieldKey === 'valve_design_std') {
         targetItem.applicableStandard = value;
+      }
+
+      // If class, size, or valve type changes, re-evaluate standard defaults if not manually overridden by user
+      if (fieldKey === 'valve_class' || fieldKey === 'valve_size' || fieldKey === 'valve_type') {
+        const vType = String(dynamic.valve_type || targetItem.productCategory || 'Ball Valve').toUpperCase();
+        const cl = parseInt(String(dynamic.valve_class || dynamic.pressure_class || targetItem.pressureClass || 150).replace(/[^0-9]/g, ''), 10) || 150;
+        const sz = parseInt(String(dynamic.valve_size || dynamic.size || targetItem.size || 50).replace(/[^0-9]/g, ''), 10) || 50;
+
+        // 1. End Type (Re-derive default if not a client custom override like Butt weld / NPT)
+        const currentEnd = dynamic.valve_end_connection;
+        const isStandardEndDefault = !currentEnd || ['Flange end', 'Flanged RF', 'Socket Weld with Pups', 'Socket Weld', 'Flanged RTJ', 'Flanged FF', '-'].includes(currentEnd);
+        if (isStandardEndDefault) {
+          const newEnd = cl === 800 ? (vType.includes('GLOBE') ? 'Socket Weld' : 'Socket Weld with Pups') : 'Flange end';
+          dynamic.valve_end_connection = newEnd;
+          norm.valve_end_connection = newEnd;
+        }
+
+        // 2. Operating (Re-derive default if not an explicit client actuator override)
+        const currentOp = dynamic.valve_operating;
+        const isStandardOpDefault = !currentOp || currentOp !== 'Actuator';
+        if (isStandardOpDefault) {
+          if (vType.includes('CHECK')) {
+            dynamic.valve_operating = '-';
+            norm.valve_operating = '-';
+          } else if (vType.includes('GLOBE')) {
+            let requiresGear = false;
+            if (cl === 150) requiresGear = sz >= 300;
+            else if (cl === 300) requiresGear = sz >= 250;
+            else if (cl === 600) requiresGear = sz >= 200;
+            else if (cl === 800) requiresGear = false; // 800# has no Gear Box rating in standard
+            else if (cl >= 900) requiresGear = sz >= 100;
+            const newOp = requiresGear ? 'Gear Box' : 'Hand Wheel';
+            dynamic.valve_operating = newOp;
+            norm.valve_operating = newOp;
+          } else {
+            // Ball Valve
+            let requiresGear = false;
+            if (cl === 150) requiresGear = sz >= 200;
+            else if (cl === 300) requiresGear = sz >= 150;
+            else if (cl === 600) requiresGear = sz >= 100;
+            else if (cl === 800) requiresGear = false; // 800# has no Gear Box rating in standard
+            else if (cl >= 900) requiresGear = sz >= 100;
+            const newOp = requiresGear ? 'Gear Box' : 'Handle';
+            dynamic.valve_operating = newOp;
+            norm.valve_operating = newOp;
+          }
+        }
+
+        // 3. Design Type (Pieces: 2 p/c vs 3 p/c)
+        if (vType.includes('BALL')) {
+          const newPieces = [800, 900, 1500, 2500].includes(cl) ? '3 p/c' : (sz >= 650 ? '3 p/c' : '2 p/c');
+          dynamic.valve_design_type = newPieces;
+          norm.valve_design_type = newPieces;
+          dynamic.design_type_pieces = newPieces;
+
+          // 4. Ball Type (Floating vs TMBV)
+          let isTmbv = false;
+          if (cl === 150 || cl === 300) isTmbv = sz >= 200;
+          else if (cl === 600) isTmbv = sz >= 50;
+          else if (cl === 800) isTmbv = sz >= 65;
+          else if (cl >= 900) isTmbv = true;
+          const newBallType = isTmbv ? 'TMBV' : 'Floating';
+          dynamic.valve_ball_type = newBallType;
+          norm.valve_ball_type = newBallType;
+
+          // 5. Seat Type
+          const newSeat = isTmbv ? 'Primary Metal Secondary Soft' : 'Soft Seat';
+          dynamic.valve_seat_type = newSeat;
+          norm.valve_seat_type = newSeat;
+        } else if (vType.includes('CHECK')) {
+          const checkType = sz <= 40 ? 'Lift Check Valve' : 'Swing Check Valve';
+          dynamic.valve_type = checkType;
+          norm.valve_type = checkType;
+
+          const checkDesign = sz <= 40 ? 'Lift' : 'Swing';
+          dynamic.valve_design_type = checkDesign;
+          norm.valve_design_type = checkDesign;
+
+          dynamic.valve_bore = '-';
+          norm.valve_bore = '-';
+
+          dynamic.valve_ball_type = '-';
+          norm.valve_ball_type = '-';
+
+          dynamic.valve_direction = 'Uni Directional';
+          norm.valve_direction = 'Uni Directional';
+
+          dynamic.valve_service = 'Liquid/Gas (Default)';
+          norm.valve_service = 'Liquid/Gas (Default)';
+
+          dynamic.valve_seat_type = 'Metal Seat';
+          norm.valve_seat_type = 'Metal Seat';
+
+          dynamic.valve_operating = '-';
+          norm.valve_operating = '-';
+        } else if (vType.includes('GLOBE')) {
+          dynamic.valve_type = 'Globe Valve';
+          norm.valve_type = 'Globe Valve';
+
+          dynamic.valve_design_type = 'OS&Y';
+          norm.valve_design_type = 'OS&Y';
+
+          dynamic.valve_bore = '-';
+          norm.valve_bore = '-';
+
+          dynamic.valve_ball_type = 'Globe';
+          norm.valve_ball_type = 'Globe';
+
+          dynamic.valve_direction = 'Uni Directional';
+          norm.valve_direction = 'Uni Directional';
+
+          dynamic.valve_seat_type = 'Metal Seat';
+          norm.valve_seat_type = 'Metal Seat';
+
+          dynamic.valve_end_connection = cl === 800 ? 'Socket Weld' : 'Flange end';
+          norm.valve_end_connection = cl === 800 ? 'Socket Weld' : 'Flange end';
+        }
+
+        // 6. Design & Testing Standards
+        const currentDesignStd = dynamic.valve_design_std || targetItem.applicableStandard;
+        const isStandardDesignDefault = !currentDesignStd || ['API 6D', 'API 6D 25TH ED', 'API 6D 25th Ed', 'API 6D / ASME B16.34', 'ISO 17292', 'BS 1868', 'BS 1873', 'ISO 15761'].includes(currentDesignStd);
+        if (isStandardDesignDefault) {
+          let newDesignStd = 'API 6D 25TH ED';
+          if (vType.includes('CHECK')) newDesignStd = sz <= 40 ? 'BS 1868' : 'API 6D 25th Ed';
+          else if (vType.includes('GLOBE')) newDesignStd = sz <= 40 ? 'ISO 15761' : 'BS 1873';
+          else newDesignStd = sz <= 40 ? 'ISO 17292' : 'API 6D 25TH ED';
+          dynamic.valve_design_std = newDesignStd;
+          norm.valve_design_std = newDesignStd;
+          targetItem.applicableStandard = newDesignStd;
+        }
+
+        const currentTestingStd = dynamic.valve_testing_std;
+        const isStandardTestingDefault = !currentTestingStd || ['API 6D', 'API 6D 25TH ED', 'API 6D 25th Ed', 'API 6D / API 598', 'API 598', 'API 6D 25TH ED.'].includes(currentTestingStd);
+        if (isStandardTestingDefault) {
+          let newTestingStd = 'API 6D 25TH ED.';
+          if (vType.includes('CHECK')) newTestingStd = sz <= 40 ? 'API 598' : 'API 6D 25th Ed';
+          else if (vType.includes('GLOBE')) newTestingStd = 'API 598';
+          else newTestingStd = sz <= 40 ? 'API 598' : 'API 6D 25TH ED.';
+          dynamic.valve_testing_std = newTestingStd;
+          norm.valve_testing_std = newTestingStd;
+        }
+
+        // 7. Design Operating Pressures at Max & Min Temp
+        const maxTempMap = { 150: '240 PSI', 300: '677 PSI', 600: '1335 PSI', 800: '1750 PSI', 900: '2000 PSI', 1500: '3333 PSI', 2500: '5553 PSI' };
+        const minTempMap = { 150: '285 PSI', 300: '740 PSI', 600: '1480 PSI', 800: '1975 PSI', 900: '2220 PSI', 1500: '3705 PSI', 2500: '6170 PSI' };
+        const isStandardMaxTempPres = !dynamic.valve_min_design_pressure || ['0 PSI', '0', '240 PSI', '240', '677 PSI', '677', '1335 PSI', '1335', '1750 PSI', '1750', '2000 PSI', '2000', '3333 PSI', '3333', '5553 PSI', '5553', '-'].includes(String(dynamic.valve_min_design_pressure).trim());
+        if (isStandardMaxTempPres) {
+          const val = maxTempMap[cl] || '240 PSI';
+          dynamic.valve_min_design_pressure = val;
+          norm.valve_min_design_pressure = val;
+          dynamic.design_operating_pressure_max_temp_psi = parseInt(val, 10);
+        }
+
+        const isStandardMinTempPres = !dynamic.valve_max_design_pressure || ['As per ASME B16.34', '285 PSI', '285', '740 PSI', '740', '1480 PSI', '1480', '1975 PSI', '1975', '2220 PSI', '2220', '3705 PSI', '3705', '6170 PSI', '6170', '0 PSI', '-'].includes(String(dynamic.valve_max_design_pressure).trim());
+        if (isStandardMinTempPres) {
+          const val = minTempMap[cl] || '285 PSI';
+          dynamic.valve_max_design_pressure = val;
+          norm.valve_max_design_pressure = val;
+          dynamic.design_operating_pressure_min_temp_psi = parseInt(val, 10);
+        }
+
+        // 8. Design Temperatures (0° C default; 800# is fixed at -29° C per Petro Std)
+        const currentMinTemp = dynamic.valve_min_design_temp;
+        const isStandardMinTemp = !currentMinTemp || ['0° C', '0° C (Default)', '0°C', '-29° C', '-29°C'].includes(String(currentMinTemp).trim());
+        if (isStandardMinTemp) {
+          const newMinTemp = cl === 800 ? '-29° C' : '0° C';
+          dynamic.valve_min_design_temp = newMinTemp;
+          norm.valve_min_design_temp = newMinTemp;
+        }
+
+        const currentMaxTemp = dynamic.valve_max_design_temp;
+        const isStandardMaxTemp = !currentMaxTemp || ['65° C', '65° C (Default)', '65°C', '200°C', '200° C'].includes(String(currentMaxTemp).trim());
+        if (isStandardMaxTemp) {
+          const newMaxTemp = '65° C';
+          dynamic.valve_max_design_temp = newMaxTemp;
+          norm.valve_max_design_temp = newMaxTemp;
+        }
+
+        // 9. Drain & Vent Connections
+        const currentDrain = dynamic.valve_drain_size;
+        const isStandardDrain = !currentDrain || ['No', 'NO', '15 mm', '15mm', '25 mm', '25mm', '15 mm (1/2" NPT)'].includes(String(currentDrain).trim());
+        if (isStandardDrain) {
+          let newDrain = 'No';
+          if (vType.includes('BALL')) {
+            let isTmbv = false;
+            if (cl === 150 || cl === 300) isTmbv = sz >= 200;
+            else if (cl === 600) isTmbv = sz >= 50;
+            else if (cl === 800) isTmbv = sz >= 65;
+            else if (cl >= 900) isTmbv = true;
+            newDrain = isTmbv ? (sz >= 200 ? '25 mm' : '15 mm') : 'No';
+          }
+          dynamic.valve_drain_size = newDrain;
+          norm.valve_drain_size = newDrain;
+        }
+
+        const currentVent = dynamic.valve_vent_size;
+        const isStandardVent = !currentVent || ['No', 'NO', '15 mm', '15mm', '25 mm', '25mm', '15 mm (1/2" NPT)'].includes(String(currentVent).trim());
+        if (isStandardVent) {
+          let newVent = 'No';
+          if (vType.includes('BALL')) {
+            let isTmbv = false;
+            if (cl === 150 || cl === 300) isTmbv = sz >= 200;
+            else if (cl === 600) isTmbv = sz >= 50;
+            else if (cl === 800) isTmbv = sz >= 65;
+            else if (cl >= 900) isTmbv = true;
+            newVent = isTmbv ? (sz >= 200 ? '25 mm' : 'No') : 'No';
+          }
+          dynamic.valve_vent_size = newVent;
+          norm.valve_vent_size = newVent;
+        }
+
+        // 10. Lifting Lug, Support Foot, and Fire Safe Design
+        let isTmbv = false;
+        if (vType.includes('BALL')) {
+          if (cl === 150 || cl === 300) isTmbv = sz >= 200;
+          else if (cl === 600) isTmbv = sz >= 50;
+          else if (cl === 800) isTmbv = sz >= 65;
+          else if (cl >= 900) isTmbv = true;
+        }
+
+        const currentLug = dynamic.valve_lifting_lug;
+        const isStandardLug = !currentLug || ['Yes', 'No', 'NO', 'YES', 'Applicable for > 25 kg', 'Yes (≥ 25 kg)'].includes(String(currentLug).trim());
+        if (isStandardLug) {
+          let hasLiftingLug = false;
+          if (!isTmbv) {
+            if (cl === 150 && sz >= 100) hasLiftingLug = true;
+            if (cl >= 300 && sz >= 80) hasLiftingLug = true;
+          } else {
+            if ((cl === 150 || cl === 300) && sz >= 80) hasLiftingLug = true;
+            if (cl >= 600 && sz >= 50) hasLiftingLug = true;
+          }
+          const newLug = hasLiftingLug ? 'Yes' : 'No';
+          dynamic.valve_lifting_lug = newLug;
+          norm.valve_lifting_lug = newLug;
+        }
+
+        const currentFoot = dynamic.valve_support_foot;
+        const isStandardFoot = !currentFoot || ['Yes', 'No', 'NO', 'YES', 'As per Standard', 'For 8" & Above', 'Yes (200mm & Above)'].includes(String(currentFoot).trim());
+        if (isStandardFoot) {
+          const newFoot = sz >= 200 ? 'Yes' : 'No';
+          dynamic.valve_support_foot = newFoot;
+          norm.valve_support_foot = newFoot;
+        }
+
+        const currentFireSafe = dynamic.valve_fire_safe;
+        const isStandardFireSafe = !currentFireSafe || ['API 607', 'API 6FA', 'API 607 / API 6FA', 'As per API 6FA', 'As per API 607', 'Yes', 'No', 'API 6FA (TMBV)', 'API 607 (Floating)', '-'].includes(String(currentFireSafe).trim());
+        if (isStandardFireSafe) {
+          let newFireSafe = '-';
+          if (vType.includes('BALL')) newFireSafe = isTmbv ? 'API 6FA' : 'API 607';
+          else if (vType.includes('CHECK')) newFireSafe = 'API 607';
+          else if (vType.includes('GLOBE')) newFireSafe = '-';
+          dynamic.valve_fire_safe = newFireSafe;
+          norm.valve_fire_safe = newFireSafe;
+        }
+
+        const currentAnti = dynamic.valve_antistatic;
+        if (!currentAnti || ['Yes', 'No', 'YES', 'NO', '-'].includes(String(currentAnti).trim())) {
+          const newAnti = (vType.includes('CHECK') || vType.includes('GLOBE')) ? 'No' : 'Yes';
+          dynamic.valve_antistatic = newAnti;
+          norm.valve_antistatic = newAnti;
+        }
+
+        const currentLock = dynamic.valve_locking;
+        if (!currentLock || ['Yes', 'No', 'YES', 'NO'].includes(String(currentLock).trim())) {
+          dynamic.valve_locking = 'No';
+          norm.valve_locking = 'No';
+        }
+
+        // 11. Material Of Construction (MOC)
+        const currentBodyMoc = dynamic.valve_body_moc;
+        const isStandardBody = !currentBodyMoc || ['ASTM A216 Gr. WCB', 'ASTM A105', 'WCB', 'A105'].includes(String(currentBodyMoc).trim());
+        if (isStandardBody) {
+          const newBody = cl === 800 ? 'ASTM A105' : 'ASTM A216 Gr. WCB';
+          dynamic.valve_body_moc = newBody;
+          norm.valve_body_moc = newBody;
+        }
+
+        const currentBallMoc = dynamic.valve_ball_moc;
+        const isStandardBall = !currentBallMoc || ['ASTM A216 Gr. WCB + STELLITED', '13% Cr Steel', 'ASTM A216 Gr. WCB + 75 MIC ENP', 'SS316', 'ASTM A182 Gr. F316 / CF8M', 'ASTM A105 + ENP', 'WCB + ENP'].includes(String(currentBallMoc).trim());
+        if (isStandardBall) {
+          let newBall = cl === 800 ? 'SS316' : 'ASTM A216 Gr. WCB + 75 MIC ENP';
+          if (vType.includes('GLOBE')) {
+            newBall = '13% Cr Steel';
+          } else if (vType.includes('CHECK')) {
+            newBall = cl === 800 ? '13% Cr Steel' : 'ASTM A216 Gr. WCB + STELLITED';
+          }
+          dynamic.valve_ball_moc = newBall;
+          norm.valve_ball_moc = newBall;
+        }
+
+        const currentStemMoc = dynamic.valve_stem_moc;
+        const isStandardStem = !currentStemMoc || ['ASTM A479 Gr. 410', 'ASTM 182 Gr. F6 cl2', '13% Cr Steel', 'ASTM A276 Type 316 / 410', 'ASTM A276 Type 410'].includes(String(currentStemMoc).trim());
+        if (isStandardStem) {
+          let newStem = cl === 150 ? 'ASTM A479 Gr. 410' : 'ASTM 182 Gr. F6 cl2';
+          if (vType.includes('GLOBE')) {
+            newStem = '13% Cr Steel';
+          } else if (vType.includes('CHECK')) {
+            newStem = 'ASTM A479 Gr. 410';
+          }
+          dynamic.valve_stem_moc = newStem;
+          norm.valve_stem_moc = newStem;
+        }
+
+        const currentSeatRingMoc = dynamic.valve_seat_ring_moc;
+        const isStandardSeatRing = !currentSeatRingMoc || ['ASTM A216 Gr. WCB + STELLITED', 'PTFE', 'RPTFE', 'PTFE + ASTM 182 Gr. F6 cl1', 'RPTFE + ASTM 182 Gr. F6 cl1', 'RPTFE / SS316 + Devlon'].includes(String(currentSeatRingMoc).trim());
+        if (isStandardSeatRing) {
+          let newSeatRing = 'PTFE';
+          if (vType.includes('CHECK') || vType.includes('GLOBE')) {
+            newSeatRing = 'ASTM A216 Gr. WCB + STELLITED';
+          } else if (!isTmbv) {
+            newSeatRing = cl === 150 ? 'PTFE' : 'RPTFE';
+          } else {
+            newSeatRing = cl === 150 ? 'PTFE + ASTM 182 Gr. F6 cl1' : 'RPTFE + ASTM 182 Gr. F6 cl1';
+          }
+          dynamic.valve_seat_ring_moc = newSeatRing;
+          norm.valve_seat_ring_moc = newSeatRing;
+        }
+
+        const currentFasteners = dynamic.valve_fasteners_moc;
+        const isStandardFasteners = !currentFasteners || ['ASTM A193 Gr. B7 / A194 Gr. 2H', 'ASTM A193 Gr. B7 & ASTM A194 Gr. 2H', 'B7/2H', 'B7 & 2H'].includes(String(currentFasteners).trim());
+        if (isStandardFasteners) {
+          const newFasteners = 'ASTM A193 Gr. B7 & ASTM A194 Gr. 2H';
+          dynamic.valve_fasteners_moc = newFasteners;
+          norm.valve_fasteners_moc = newFasteners;
+        }
+
+        const currentBonnet = dynamic.valve_extended_bonnet;
+        const isStandardBonnet = !currentBonnet || currentBonnet === 'Flanged RF' || ['No', 'Yes', 'NO', 'YES'].includes(String(currentBonnet).trim());
+        if (isStandardBonnet) {
+          const newBonnet = 'No';
+          dynamic.valve_extended_bonnet = newBonnet;
+          norm.valve_extended_bonnet = newBonnet;
+        }
+
+        // 12. Testing Details (Rows 34-37)
+        const currentMtc = dynamic.test_mtc;
+        const isStandardMtc = !currentMtc || ['EN 10204 Type 3.1', 'EN 10204 3.1', '3.1', 'EN 10204 3.2'].includes(String(currentMtc).trim());
+        if (isStandardMtc) {
+          const newMtc = 'EN 10204 3.1';
+          dynamic.test_mtc = newMtc;
+          norm.test_mtc = newMtc;
+        }
+
+        const currentRt = dynamic.test_rt;
+        const isStandardRt = !currentRt || ['Yes', 'No', 'YES', 'NO', 'As per ASME B16.34', '100% Full RT', 'No, if not asked specifically'].includes(String(currentRt).trim());
+        if (isStandardRt) {
+          let reqRt = false;
+          if ([600, 900, 1500, 2500].includes(cl)) reqRt = true;
+          else if ((cl === 150 || cl === 300) && sz >= 350) reqRt = true;
+          const newRt = reqRt ? 'Yes' : 'No';
+          dynamic.test_rt = newRt;
+          norm.test_rt = newRt;
+        }
+
+        const currentUt = dynamic.test_ut;
+        const isStandardUt = !currentUt || ['Yes', 'No', 'YES', 'NO', 'As per ASME B16.34', 'No, if not asked specifically'].includes(String(currentUt).trim());
+        if (isStandardUt) {
+          const newUt = cl === 800 ? 'Yes' : 'No';
+          dynamic.test_ut = newUt;
+          norm.test_ut = newUt;
+        }
+
+        const currentDpt = dynamic.test_dpt;
+        const isStandardDpt = !currentDpt || ['Yes', 'No', 'YES', 'NO', '100% Machined Sealing Surfaces', 'NO - default.'].includes(String(currentDpt).trim());
+        if (isStandardDpt) {
+          const newDpt = 'No';
+          dynamic.test_dpt = newDpt;
+          norm.test_dpt = newDpt;
+        }
+
+        ['test_mpt', 'test_nace', 'test_fugitive_emission', 'test_cryogenic', 'test_load_moments', 'test_igc', 'test_pmi', 'test_heat_treatment_chart'].forEach(key => {
+          const cur = dynamic[key];
+          const isStd = !cur || ['Yes', 'No', 'YES', 'NO', 'NO - default.', 'As per ASME B16.34', 'As per Client RFQ', 'As per ISO 15848-1 / API 641', 'As per API 6D Annex F', 'ASTM A262 Practice E (For SS)', '100% Alloy & SS Components', 'Yes (Furnace Chart Available)'].includes(String(cur).trim());
+          if (isStd) {
+            dynamic[key] = 'No';
+            norm[key] = 'No';
+          }
+        });
+
+        ['test_chemical', 'test_physical', 'test_hardness_pressure_containing', 'test_hardness_pressure_controlling', 'test_pqr_wps', 'test_calibration'].forEach(key => {
+          const cur = dynamic[key];
+          const isStd = !cur || ['Yes', 'No', 'YES', 'NO', 'Yes (Heat Wise in MTC)', 'Yes (<= 22 HRC for NACE)', 'Yes (As per Standard)', 'Yes (As per ASTM)', 'As per ASME Section IX', 'Yes (For Stainless Steel)', 'Yes (NABL Traceable Gauges)'].includes(String(cur).trim());
+          if (isStd) {
+            dynamic[key] = 'Yes';
+            norm[key] = 'Yes';
+          }
+        });
+
+        const curSolAnn = dynamic.test_solution_annealing;
+        const isStdSolAnn = !curSolAnn || ['Yes', 'No', 'YES', 'NO', 'NO - default.', 'Yes (For Stainless Steel)'].includes(String(curSolAnn).trim());
+        if (isStdSolAnn) {
+          const newSol = vType.includes('CHECK') ? 'No' : 'Yes';
+          dynamic.test_solution_annealing = newSol;
+          norm.test_solution_annealing = newSol;
+        }
+
+        ['test_seismic', 'test_ibr_ce', 'test_api6d_validation'].forEach(key => {
+          const cur = dynamic[key];
+          const isStd = !cur || ['Yes', 'No', 'YES', 'NO', 'No (API Spec)', 'Complied to API 6D Annex F'].includes(String(cur).trim());
+          if (isStd) {
+            dynamic[key] = 'No';
+            norm[key] = 'No';
+          }
+        });
+
+        const currentImpact = dynamic.test_impact;
+        const isStandardImpact = !currentImpact || ['0° C', '-29° C', '-45° C', 'At -29°C / -46°C (For LCB/LTCS)', 'At -29°C (Standard)'].includes(String(currentImpact).trim());
+        if (isStandardImpact) {
+          const minTemp = dynamic.valve_min_design_temp || dynamic.min_temp;
+          const newImpact = cl === 800 ? '-29° C' : (minTemp && ['0° C', '-29° C', '-45° C'].includes(minTemp) ? minTemp : '0° C');
+          dynamic.test_impact = newImpact;
+          norm.test_impact = newImpact;
+        }
+
+        // 13. Final Pressure Testing (Rows 57-61)
+        const shellMap = { 150: 450, 300: 1125, 600: 2250, 800: 3050, 900: 3300, 1500: 5500, 2500: 9200 };
+        const seatMap = { 150: 325, 300: 825, 600: 1650, 800: 2250, 900: 2450, 1500: 4050, 2500: 6700 };
+        const shellP = shellMap[cl] || 450;
+        const seatP = seatMap[cl] || 325;
+        let shellDur = '2 Min';
+        let seatDur = '2 Min';
+        if (sz >= 500) { shellDur = '30 Min'; seatDur = '10 Min'; }
+        else if (sz >= 300) { shellDur = '15 Min'; seatDur = '5 Min'; }
+        else if (sz >= 150) { shellDur = '5 Min'; seatDur = '5 Min'; }
+
+        const currentHydroShell = dynamic.test_hydro_shell;
+        if (!currentHydroShell || currentHydroShell.includes('PSI') || currentHydroShell.includes('As per')) {
+          const newShell = `${shellP} PSI`;
+          dynamic.test_hydro_shell = newShell;
+          norm.test_hydro_shell = newShell;
+        }
+
+        const currentHydroSeat = dynamic.test_hydro_seat;
+        if (!currentHydroSeat || currentHydroSeat.includes('PSI') || currentHydroSeat.includes('As per')) {
+          const newSeat = `${seatP} PSI`;
+          dynamic.test_hydro_seat = newSeat;
+          norm.test_hydro_seat = newSeat;
+        }
+
+        const currentAirSeat = dynamic.test_air_seat;
+        if (!currentAirSeat || currentAirSeat.includes('PSI') || currentAirSeat.includes('80-100') || currentAirSeat === '-') {
+          const newAir = vType.includes('CHECK') ? '-' : '100 PSI';
+          dynamic.test_air_seat = newAir;
+          norm.test_air_seat = newAir;
+        }
+
+        const currentDurShell = dynamic.test_duration_shell;
+        if (!currentDurShell || currentDurShell.includes('Min')) {
+          dynamic.test_duration_shell = shellDur;
+          norm.test_duration_shell = shellDur;
+        }
+
+        const currentDurSeat = dynamic.test_duration_seat;
+        if (!currentDurSeat || currentDurSeat.includes('Min')) {
+          dynamic.test_duration_seat = seatDur;
+          norm.test_duration_seat = seatDur;
+        }
+
+        const currentDbb = dynamic.test_dbb_hydro;
+        if (!currentDbb || currentDbb.includes('As per API 6D') || currentDbb === '-' || currentDbb.includes('Seat Test:')) {
+          const newDbb = (!vType.includes('CHECK') && !vType.includes('GLOBE') && isTmbv) ? `Seat Test: ${seatP} PSI / ${seatDur}` : '-';
+          dynamic.test_dbb_hydro = newDbb;
+          norm.test_dbb_hydro = newDbb;
+        }
+
+        const currentBackSeat = dynamic.test_back_seat;
+        if (!currentBackSeat || currentBackSeat === '-' || currentBackSeat.includes('Seat Test:')) {
+          const newBackSeat = vType.includes('GLOBE') ? `Seat Test: ${seatP} PSI / ${seatDur}` : '-';
+          dynamic.test_back_seat = newBackSeat;
+          norm.test_back_seat = newBackSeat;
+        }
+
+        const currentAntistaticTest = dynamic.test_antistatic_test;
+        if (!currentAntistaticTest || ['< 10 Ohms at 12V DC (API 6D)', 'Yes', 'No', '-'].includes(String(currentAntistaticTest).trim())) {
+          let newAnti = 'Yes';
+          if (vType.includes('CHECK')) newAnti = '-';
+          else if (vType.includes('GLOBE')) newAnti = 'No';
+          dynamic.test_antistatic_test = newAnti;
+          norm.test_antistatic_test = newAnti;
+        }
+
+        // 14. Other Specification & Shipment (Rows 62-66)
+        const currentPainting = dynamic.spec_painting;
+        if (!currentPainting || currentPainting.includes('Epoxy Primer') || currentPainting === '120 (default)') {
+          dynamic.spec_painting = '120 (default)';
+          norm.spec_painting = '120 (default)';
+        }
+
+        const currentPacking = dynamic.spec_packing;
+        if (!currentPacking || currentPacking.includes('Seaworthy') || currentPacking === 'Yes') {
+          dynamic.spec_packing = 'Yes';
+          norm.spec_packing = 'Yes';
+        }
+
+        const currentDispatch = dynamic.spec_dispatch;
+        if (!currentDispatch || currentDispatch.includes('Road') || currentDispatch === 'Road (default)') {
+          dynamic.spec_dispatch = 'Road (default)';
+          norm.spec_dispatch = 'Road (default)';
+        }
+
+        const currentLocation = dynamic.spec_location;
+        if (!currentLocation || currentLocation.includes('Site') || currentLocation === 'As Per client Req') {
+          dynamic.spec_location = 'As Per client Req';
+          norm.spec_location = 'As Per client Req';
+        }
+
+        const currentSpecialClause = dynamic.spec_special_clause;
+        if (!currentSpecialClause || currentSpecialClause.includes('RFQ') || currentSpecialClause === 'NO' || currentSpecialClause === 'No') {
+          dynamic.spec_special_clause = 'NO';
+          norm.spec_special_clause = 'NO';
+        }
+
+        // 15. API 6D Annexures Requirements
+        const isApi6dApplicable = !vType.includes('CHECK') && !vType.includes('GLOBE');
+        ['annex_c', 'annex_d', 'annex_g', 'annex_h'].forEach(key => {
+          const cur = dynamic[key];
+          if (!cur || ['Yes', 'No', 'YES', 'NO'].includes(String(cur).trim())) {
+            const newAnnex = isApi6dApplicable ? 'Yes' : 'No';
+            dynamic[key] = newAnnex;
+            norm[key] = newAnnex;
+          }
+        });
+
+        const curAnnexE = dynamic.annex_e;
+        if (!curAnnexE || ['Yes', 'No', 'YES', 'NO'].includes(String(curAnnexE).trim())) {
+          const valE = (isApi6dApplicable && isTmbv) ? 'Yes' : 'No';
+          dynamic.annex_e = valE;
+          norm.annex_e = valE;
+        }
+
+        ['annex_a', 'annex_b', 'annex_f', 'annex_i', 'annex_j', 'annex_k', 'annex_l', 'annex_m'].forEach(key => {
+          const cur = dynamic[key];
+          if (!cur || ['Yes', 'No', 'YES', 'NO'].includes(String(cur).trim())) {
+            dynamic[key] = 'No';
+            norm[key] = 'No';
+          }
+        });
       }
 
       targetItem.dynamicFields = dynamic;
@@ -1088,8 +1633,13 @@ const QuotationDetail = () => {
                   onItemFieldChange={handleItemPricingChange}
                   onRemoveItem={handleRemoveItem}
                   onOpenCopySpecs={(idx) => setCopySpecsModalState({ isOpen: true, sourceIdx: idx })}
+                  onOpenSpecsModal={(idx) => setActiveItemIndex(idx)}
                   onExportExcel={handleExportPricingExcel}
                   onOpenImportModal={() => setExcelImportModalOpen(true)}
+                  onAddItem={handleAddItem}
+                  priceFields={priceFields}
+                  onPriceFieldsChange={setPriceFields}
+                  pricing={pricing}
                   readOnly={isApproved || !ability.can('editCommercial', 'Quotation')}
                 />
                 
@@ -1106,17 +1656,10 @@ const QuotationDetail = () => {
             ) : (
               <div className="space-y-4">
                 {items.map((item, idx) => {
-                  const unitPrice = item.unitPrice || 0;
-                  const ndt = item.ndtCharges || 0;
-                  const spec = item.specialTestingCharges || 0;
-                  const spares = item.sparesCharges || 0;
-                  const cert = item.cert32Charges || 0;
-                  const pf = item.pfCharges || 0;
-                  const tpi = item.tpiCharges || 0;
-                  const discount = item.discountPercent || 0;
-
-                  const unitRate = (unitPrice + ndt + spec + spares + cert + pf + tpi) * (1 - discount / 100);
-                  const totalRate = unitRate * (item.quantity || 1);
+                  const unitPrice = Number(item.unitPrice) || 0;
+                  const discount = Number(item.discountPercent) || 0;
+                  const unitRate = unitPrice * (1 - discount / 100);
+                  const totalRate = unitRate * (Number(item.quantity) || 1);
 
                   return (
                     <div key={idx} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 space-y-4 relative overflow-hidden">
@@ -1191,15 +1734,16 @@ const QuotationDetail = () => {
 
                       {canSeePricing && (
                         <>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2 border-t border-slate-200/60">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-200/60">
                             <div>
                               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Quantity</label>
                               <input
                                 type="number"
+                                min="1"
                                 disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                                 value={item.quantity}
                                 onChange={e => handleItemPricingChange(idx, 'quantity', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:ring-2 focus:ring-brand-500/20 outline-none"
                               />
                             </div>
                             <div>
@@ -1218,72 +1762,30 @@ const QuotationDetail = () => {
                               </div>
                               <input
                                 type="number"
+                                min="0"
                                 disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                                 value={item.unitPrice}
                                 onChange={e => handleItemPricingChange(idx, 'unitPrice', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">NDT Charges (₹)</label>
-                              <input
-                                type="number"
-                                disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
-                                value={item.ndtCharges}
-                                onChange={e => handleItemPricingChange(idx, 'ndtCharges', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Special Testing (₹)</label>
-                              <input
-                                type="number"
-                                disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
-                                value={item.specialTestingCharges}
-                                onChange={e => handleItemPricingChange(idx, 'specialTestingCharges', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Spares Charges (₹)</label>
-                              <input
-                                type="number"
-                                disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
-                                value={item.sparesCharges}
-                                onChange={e => handleItemPricingChange(idx, 'sparesCharges', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">P&F Charges (₹)</label>
-                              <input
-                                type="number"
-                                disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
-                                value={item.pfCharges}
-                                onChange={e => handleItemPricingChange(idx, 'pfCharges', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">TPIA Charges (₹)</label>
-                              <input
-                                type="number"
-                                disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
-                                value={item.tpiCharges}
-                                onChange={e => handleItemPricingChange(idx, 'tpiCharges', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:ring-2 focus:ring-brand-500/20 outline-none"
                               />
                             </div>
                             <div>
                               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Discount %</label>
                               <input
                                 type="number"
+                                min="0"
+                                max="100"
                                 disabled={isApproved || !ability.can('editCommercial', 'Quotation')}
                                 value={item.discountPercent}
                                 onChange={e => handleItemPricingChange(idx, 'discountPercent', e.target.value)}
                                 className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-500/20 outline-none"
                               />
                             </div>
+                          </div>
+
+                          <div className="text-[11px] text-slate-500 bg-slate-100/70 border border-slate-200/60 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
+                            <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            NDT, TPIA, Special Testing, and Spares charges are common across all items (configured below in quotation charges).
                           </div>
 
                           <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
@@ -1420,9 +1922,27 @@ const QuotationDetail = () => {
                       <span className="font-semibold text-slate-800">₹{Math.round(pricing.pfAmount).toLocaleString('en-IN')}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-500">TPIA Inspection Charges</span>
-                      <span className="font-semibold text-slate-800">₹{Math.round(pricing.tpiAmount).toLocaleString('en-IN')}</span>
+                      <span className="text-slate-500">TPIA Charges (Common)</span>
+                      <span className="font-semibold text-slate-800">₹{Math.round(pricing.tpiAmount || 0).toLocaleString('en-IN')}</span>
                     </div>
+                    {pricing.ndtAmount > 0 && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">NDT Charges (Common)</span>
+                        <span className="font-semibold text-slate-800">₹{Math.round(pricing.ndtAmount).toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                    {pricing.specialTestingAmount > 0 && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">Special Testing (Common)</span>
+                        <span className="font-semibold text-slate-800">₹{Math.round(pricing.specialTestingAmount).toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                    {pricing.sparesAmount > 0 && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">Spares & Manday (Common)</span>
+                        <span className="font-semibold text-slate-800">₹{Math.round(pricing.sparesAmount).toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center pt-2 border-t border-slate-100 font-semibold text-slate-700">
                       <span>Grand Total Before GST</span>
                       <span>₹{Math.round(pricing.grandTotalBeforeGST).toLocaleString('en-IN')}</span>
@@ -1928,9 +2448,27 @@ const QuotationDetail = () => {
                   <span className="font-semibold text-slate-800">₹{Math.round(pricing.pfAmount).toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-500">TPIA Inspection Charges</span>
-                  <span className="font-semibold text-slate-800">₹{Math.round(pricing.tpiAmount).toLocaleString('en-IN')}</span>
+                  <span className="text-slate-500">TPIA Charges (Common)</span>
+                  <span className="font-semibold text-slate-800">₹{Math.round(pricing.tpiAmount || 0).toLocaleString('en-IN')}</span>
                 </div>
+                {pricing.ndtAmount > 0 && (
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500">NDT Charges (Common)</span>
+                    <span className="font-semibold text-slate-800">₹{Math.round(pricing.ndtAmount).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+                {pricing.specialTestingAmount > 0 && (
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500">Special Testing (Common)</span>
+                    <span className="font-semibold text-slate-800">₹{Math.round(pricing.specialTestingAmount).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+                {pricing.sparesAmount > 0 && (
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500">Spares & Manday (Common)</span>
+                    <span className="font-semibold text-slate-800">₹{Math.round(pricing.sparesAmount).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center pt-2 border-t border-slate-100 font-semibold text-slate-700">
                   <span>Grand Total Before GST</span>
                   <span>₹{Math.round(pricing.grandTotalBeforeGST).toLocaleString('en-IN')}</span>

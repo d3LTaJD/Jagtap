@@ -99,9 +99,16 @@ exports.createEnquiry = async (req, res, next) => {
     if (customerData._id) {
       customer = await Customer.findById(customerData._id);
     } else {
-      // Auto-generate unique customerId
-      customerData.customerId = `CUS-${Date.now().toString().slice(-6)}`;
-      customer = await Customer.create(customerData);
+      if (customerData.emailAddress) {
+        customer = await Customer.findOne({ emailAddress: customerData.emailAddress.toLowerCase() });
+      }
+      if (!customer && customerData.companyName && customerData.companyName !== 'Individual Customer') {
+        customer = await Customer.findOne({ companyName: customerData.companyName });
+      }
+      if (!customer) {
+        customerData.customerId = `CUS-${Date.now().toString().slice(-6)}`;
+        customer = await Customer.create(customerData);
+      }
     }
 
     enquiryData.customer = customer._id;
@@ -174,6 +181,14 @@ exports.createEnquiry = async (req, res, next) => {
       enquiry.status = 'Confirmed';
       await enquiry.save();
     }
+
+    await notifyRoles({
+      roles: ['SALES', 'SA', 'DIR'],
+      type: completion.isComplete ? 'ENQUIRY_CONFIRMED' : 'ENQUIRY_CREATED',
+      title: completion.isComplete ? `✅ Enquiry Confirmed: ${enquiry.enquiryId}` : `📥 New Enquiry: ${enquiry.enquiryId}`,
+      message: `Enquiry ${enquiry.enquiryId} (${customer?.companyName || 'Customer'}) is ${completion.isComplete ? 'complete and ready for quotation' : 'registered and awaiting details'}.`,
+      related_id: enquiry._id
+    });
 
     // Send automated email if contactEmail is present
     if (enquiry.contactEmail) {
@@ -972,7 +987,12 @@ exports.updateEnquiryProducts = async (req, res, next) => {
           valveSize: normSize.canonicalValue || rawSize,
           valveClass: normClass.canonicalValue || rawClass,
           endConnection: rawConn,
-          bodyMoc: rawMoc
+          bodyMoc: rawMoc || getFieldVal('valve_body_moc'),
+          ballMoc: getFieldVal('valve_ball_moc') || getFieldVal('valve_moc_ball'),
+          stemMoc: getFieldVal('valve_stem_moc') || getFieldVal('valve_moc_stem'),
+          seatMoc: getFieldVal('valve_seat_ring_moc') || getFieldVal('valve_moc_seat'),
+          studsMoc: getFieldVal('valve_fasteners_moc') || getFieldVal('valve_moc_stud_nuts'),
+          description: newProd.description || oldProd.description || ''
         });
 
         if (rules && rules.derived) {

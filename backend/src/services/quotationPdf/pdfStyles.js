@@ -45,12 +45,7 @@ const pdfStyles = `
     flex-direction: column;
   }
 
-  /* Compact Page for Checklist (Pages 2 & 3) */
-  .pv-page-checklist {
-    padding: 6mm 10mm 5mm 10mm;
-    font-size: 6.2px;
-    line-height: 1.05;
-  }
+
 
   /* Header Styles */
   .pv-header {
@@ -291,23 +286,38 @@ const pdfStyles = `
     letter-spacing: 0.3px;
   }
 
+  /* Compact Page for Checklist (Pages 2 & 3) */
+  .pv-page-checklist {
+    padding: 4mm 8mm 3mm 8mm;
+    font-size: 5.5px;
+    line-height: 1.0;
+  }
+
   /* Checklist Header (Pages 2 & 3) */
   .pv-chk-header {
     text-align: center;
     position: relative;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .pv-chk-company-name {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #000000;
+    margin-bottom: 1px;
+  }
+
+  .pv-chk-company-sub {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 8.5px;
     font-weight: bold;
     color: #000000;
     margin-bottom: 2px;
   }
 
   .pv-chk-title {
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: bold;
     letter-spacing: 0.5px;
   }
@@ -317,13 +327,13 @@ const pdfStyles = `
     top: 0;
     right: 0;
     border: 1px solid #000000;
-    font-size: 7.5px;
+    font-size: 7px;
     border-collapse: collapse;
   }
 
   .pv-chk-meta-box td {
     border: 1px solid #000000;
-    padding: 1.5px 5px;
+    padding: 1px 4px;
     font-weight: bold;
   }
 
@@ -332,15 +342,15 @@ const pdfStyles = `
     width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
-    font-size: 6.2px;
-    line-height: 1.05;
+    font-size: 5.5px;
+    line-height: 1.0;
     font-family: Arial, Helvetica, sans-serif;
     word-wrap: break-word;
   }
 
   .pv-chk-table th, .pv-chk-table td {
     border: 0.5px solid #000000;
-    padding: 1px 1.5px;
+    padding: 0.6px 1px;
     vertical-align: middle;
     overflow: hidden;
   }
@@ -349,38 +359,40 @@ const pdfStyles = `
     background-color: #ffffff;
     font-weight: bold;
     text-align: center;
-    font-size: 6.2px;
+    font-size: 5.5px;
   }
 
   .pv-chk-table .col-sr {
-    width: 22px;
+    width: 18px;
     text-align: center;
     font-weight: bold;
-    font-size: 6px;
+    font-size: 5.5px;
   }
 
   .pv-chk-table .col-desc {
-    width: 150px;
+    width: 140px;
     text-align: left;
     font-weight: 500;
-    font-size: 6px;
-    line-height: 1.05;
+    font-size: 5.5px;
+    line-height: 1.02;
   }
 
   .pv-chk-table .col-val {
     text-align: center;
-    font-size: 6px;
+    font-size: 5.5px;
     word-break: break-word;
     overflow: hidden;
   }
 
-  .pv-chk-section-header {
+  .pv-chk-table .section-hdr td,
+  .pv-chk-table tr.section-hdr td {
     background-color: #ffffff;
-    font-weight: bold;
+    font-weight: 900;
     text-align: center;
-    font-size: 7px;
-    padding: 1.5px 0;
-    letter-spacing: 0.3px;
+    font-size: 8px;
+    padding: 2.5px 0;
+    letter-spacing: 0.5px;
+    color: #000000;
   }
 
   /* Checklist Footer */
@@ -433,9 +445,11 @@ const pdfStyles = `
 
   .pv-general-review-title {
     text-align: center;
-    font-weight: bold;
-    font-size: 7px;
-    padding: 1.5px 0;
+    font-weight: 900;
+    font-size: 8px;
+    padding: 2.5px 0;
+    letter-spacing: 0.5px;
+    color: #000000;
   }
 
   .pv-checkbox-checked {
@@ -444,50 +458,60 @@ const pdfStyles = `
   }
 
   /* Price Part-II Table */
+  .pv-price-title {
+    text-align: center;
+    font-size: 13px;
+    font-weight: bold;
+    text-decoration: underline;
+    font-family: 'Times New Roman', Times, serif;
+    margin-top: 5px;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+    color: #000000;
+  }
+
+  .pv-price-intro {
+    font-size: 9.5px;
+    font-weight: bold;
+    font-family: 'Times New Roman', Times, serif;
+    margin-bottom: 8px;
+    line-height: 1.4;
+    color: #000000;
+  }
+
   .pv-price-table {
     width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 7.5px;
-    margin-top: 8px;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 8px;
+    border: 1.5px solid #000000;
+    margin-top: 4px;
     word-wrap: break-word;
   }
 
   .pv-price-table th, .pv-price-table td {
-    border: 0.5px solid #000000;
-    padding: 2px 2px;
+    border: 1px solid #000000;
+    padding: 3px 2px;
     text-align: center;
     vertical-align: middle;
     overflow: hidden;
+    color: #000000;
+  }
+
+  .pv-price-table th {
+    font-weight: bold;
+    font-size: 8.5px;
   }
 
   .pv-price-table .pv-price-label-col {
     text-align: left;
     font-weight: bold;
     width: 155px;
-    font-size: 7px;
-  }
-
-  .pv-price-table .pv-price-summary-label {
-    text-align: left;
-    font-weight: bold;
     padding-left: 6px;
-    font-size: 7.5px;
+    font-size: 8px;
   }
 
-  .pv-price-table .pv-price-summary-val {
-    text-align: right;
-    padding-right: 8px;
-    font-weight: bold;
-    font-size: 7.5px;
-  }
-
-  .pv-price-intro {
-    font-size: 10.5px;
-    margin-bottom: 6px;
-    line-height: 1.4;
-  }
 
   /* Commercial Part-III Terms */
   .pv-comm-table {

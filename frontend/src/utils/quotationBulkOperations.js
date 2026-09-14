@@ -37,13 +37,8 @@ export function calculateItemTotals(item) {
   const qty = Number(item.quantity) || 1;
   const unitPrice = Number(item.unitPrice) || 0;
   const discount = Number(item.discountPercent) || 0;
-  const ndt = Number(item.ndtCharges) || 0;
-  const specTest = Number(item.specialTestingCharges) || 0;
-  const spares = Number(item.sparesCharges) || 0;
-  const pf = Number(item.pfCharges) || 0;
-  const tpia = Number(item.tpiCharges) || 0;
 
-  const effectiveUnitRate = Math.round(((unitPrice * (1 - discount / 100)) + ndt + specTest + spares + pf + tpia) * 100) / 100;
+  const effectiveUnitRate = Math.round(unitPrice * (1 - discount / 100) * 100) / 100;
   const lineTotalExclGST = Math.round(effectiveUnitRate * qty * 100) / 100;
   const gstAmount = Math.round(lineTotalExclGST * 0.18 * 100) / 100;
   const lineTotalInclGST = Math.round((lineTotalExclGST + gstAmount) * 100) / 100;
@@ -51,12 +46,14 @@ export function calculateItemTotals(item) {
   return {
     ...item,
     unitPrice,
+    unitRate: effectiveUnitRate,
     discountPercent: discount,
-    ndtCharges: ndt,
-    specialTestingCharges: specTest,
-    sparesCharges: spares,
-    pfCharges: pf,
-    tpiCharges: tpia,
+    ndtCharges: 0,
+    specialTestingCharges: 0,
+    sparesCharges: 0,
+    pfCharges: 0,
+    tpiCharges: 0,
+    cert32Charges: 0,
     lineTotalExclGST,
     gstAmount,
     lineTotalInclGST

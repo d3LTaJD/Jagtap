@@ -191,11 +191,34 @@ const ENGINEERING_DERIVED_FIELDS = new Set([
   'annex_f', 'annex_g', 'annex_h', 'annex_i', 'annex_j',
   'annex_k', 'annex_l', 'annex_m',
   'valve_calib_cert', 'valve_ibr_ce_cert', 'valve_qsl_level',
-  'valve_api6d_monogram'
+  'valve_api6d_monogram',
+  'valve_moc_ball', 'valve_ball_moc',
+  'valve_moc_stem', 'valve_stem_moc',
+  'valve_moc_seat', 'valve_seat_ring_moc',
+  'valve_moc_stud_nuts', 'valve_fasteners_moc'
 ]);
 
     // Process fields defined for this form context
     const fieldsToExtractWithAI = [];
+
+    const compMocs = (function(text) {
+      if (!text || typeof text !== 'string') return {};
+      const clean = s => s ? s.replace(/^[\s:=–-]+/, '').replace(/[,;:\s]+$/, '').trim() : null;
+      const body = text.match(/(?:body\s*(?:moc|material)|body)\s*[:=–-]?\s*([A-Za-z0-9\s\.\,\/\+\%\(\)\-]+?)(?=\s*[|\n]|\s*(?:ball|stem|seat|trim|disc|wedge|fasteners?|studs?|nuts?|end|size|class|qty|quantity|feature|paint|$))/i)?.[1];
+      const ball = text.match(/(?:(?:ball|disc|wedge)\s*(?:moc|material)|(?:disc\/trim\s*moc))\s*[:=–-]?\s*([A-Za-z0-9\s\.\,\/\+\%\(\)\-]+?)(?=\s*[|\n]|\s*(?:body|stem|seat|trim|disc|wedge|fasteners?|studs?|nuts?|end|size|class|qty|quantity|feature|paint|$))/i)?.[1];
+      const stem = text.match(/(?:stem\s*(?:moc|material))\s*[:=–-]?\s*([A-Za-z0-9\s\.\,\/\+\%\(\)\-]+?)(?=\s*[|\n]|\s*(?:body|ball|seat|trim|disc|wedge|fasteners?|studs?|nuts?|end|size|class|qty|quantity|feature|paint|$))/i)?.[1];
+      const seat = text.match(/(?:seat(?:\s*ring)?\s*(?:moc|material))\s*[:=–-]?\s*([A-Za-z0-9\s\.\,\/\+\%\(\)\-]+?)(?=\s*[|\n]|\s*(?:body|ball|stem|trim|disc|wedge|fasteners?|studs?|nuts?|end|size|class|qty|quantity|feature|paint|$))/i)?.[1];
+      const trim = text.match(/(?:trim\s*(?:moc|material))\s*[:=–-]?\s*([A-Za-z0-9\s\.\,\/\+\%\(\)\-]+?)(?=\s*[|\n]|\s*(?:body|ball|stem|seat|disc|wedge|fasteners?|studs?|nuts?|end|size|class|qty|quantity|feature|paint|$))/i)?.[1];
+      const studs = text.match(/(?:(?:fasteners?|studs?\s*(?:&|and)\s*nuts?)\s*(?:moc|material)?)\s*[:=–-]?\s*([A-Za-z0-9\s\.\,\/\+\%\(\)\-]+?)(?=\s*[|\n]|\s*(?:body|ball|stem|seat|trim|disc|wedge|end|size|class|qty|quantity|feature|paint|$))/i)?.[1];
+      return { 
+        body: clean(body), 
+        ball: clean(ball) || clean(trim), 
+        stem: clean(stem), 
+        seat: clean(seat), 
+        trim: clean(trim), 
+        studs: clean(studs) 
+      };
+    })(productDescription);
 
     for (const fDef of fieldDefinitions) {
       const key = fDef.fieldName;
@@ -207,7 +230,76 @@ const ENGINEERING_DERIVED_FIELDS = new Set([
       else if (lowerKey.includes('operating') || lowerKey.includes('actuation') || lowerKey.includes('operation')) regexMatch = regexFieldMap['valve_operating'];
       else if (lowerKey.includes('class') || lowerKey.includes('pressure_rating') || lowerKey.includes('pressure_class') || lowerKey === 'rating') regexMatch = regexFieldMap['valve_class'];
       else if (lowerKey.includes('type') && lowerKey.includes('valve')) regexMatch = regexFieldMap['valve_type'];
-      else if (lowerKey.includes('material') || lowerKey.includes('moc')) regexMatch = regexFieldMap['shellMaterial'] || regexFieldMap['valve_moc_body'];
+      else if (lowerKey.includes('ball') || lowerKey.includes('disc') || lowerKey.includes('wedge')) {
+        if (compMocs.ball) {
+          regexMatch = {
+            fieldId: key,
+            fieldName: 'Ball/Disc/Wedge Material',
+            rawValue: compMocs.ball,
+            normalizedValue: compMocs.ball,
+            validationState: 'VALID',
+            score: { confidence: 95 }
+          };
+        } else {
+          regexMatch = regexFieldMap['valve_moc_ball'];
+        }
+      }
+      else if (lowerKey.includes('stem')) {
+        if (compMocs.stem) {
+          regexMatch = {
+            fieldId: key,
+            fieldName: 'Stem Material',
+            rawValue: compMocs.stem,
+            normalizedValue: compMocs.stem,
+            validationState: 'VALID',
+            score: { confidence: 95 }
+          };
+        } else {
+          regexMatch = regexFieldMap['valve_moc_stem'];
+        }
+      }
+      else if (lowerKey.includes('seat')) {
+        if (compMocs.seat) {
+          regexMatch = {
+            fieldId: key,
+            fieldName: 'Seat Material',
+            rawValue: compMocs.seat,
+            normalizedValue: compMocs.seat,
+            validationState: 'VALID',
+            score: { confidence: 95 }
+          };
+        } else {
+          regexMatch = regexFieldMap['valve_moc_seat'];
+        }
+      }
+      else if (lowerKey.includes('fastener') || lowerKey.includes('stud') || lowerKey.includes('nut')) {
+        if (compMocs.studs) {
+          regexMatch = {
+            fieldId: key,
+            fieldName: 'Fasteners Material',
+            rawValue: compMocs.studs,
+            normalizedValue: compMocs.studs,
+            validationState: 'VALID',
+            score: { confidence: 95 }
+          };
+        } else {
+          regexMatch = regexFieldMap['valve_moc_stud_nuts'];
+        }
+      }
+      else if (lowerKey.includes('body') || lowerKey.includes('shell') || lowerKey === 'valve_moc_body' || lowerKey === 'valve_body_moc' || lowerKey === 'material' || lowerKey === 'moc' || lowerKey === 'shellmaterial') {
+        if (compMocs.body) {
+          regexMatch = {
+            fieldId: key,
+            fieldName: 'Body Material',
+            rawValue: compMocs.body,
+            normalizedValue: compMocs.body,
+            validationState: 'VALID',
+            score: { confidence: 95 }
+          };
+        } else {
+          regexMatch = regexFieldMap['shellMaterial'] || regexFieldMap['valve_moc_body'];
+        }
+      }
       else if (lowerKey.includes('end') || lowerKey.includes('connection')) regexMatch = regexFieldMap['endConnection'] || regexFieldMap['valve_end_connection'];
       else if (lowerKey.includes('testing_std') || lowerKey.includes('testing')) {
         const stdMatch = regexFieldMap['designStandard'];
@@ -513,6 +605,33 @@ const ENGINEERING_DERIVED_FIELDS = new Set([
       } catch (rawErr) {
         console.error('[RawExtraction] Error inserting raw extraction records:', rawErr.message);
       }
+    }
+
+    // Ensure component MOCs are populated in dynamic fields
+    if (compMocs.body) {
+      if (!validatedDynamicFields.valve_moc_body) validatedDynamicFields.valve_moc_body = compMocs.body;
+      if (!validatedDynamicFields.valve_body_moc) validatedDynamicFields.valve_body_moc = compMocs.body;
+      if (!fieldConfidences.valve_moc_body) fieldConfidences.valve_moc_body = { value: compMocs.body, confidence: 95, source: 'REGEX', provenance: 'CUSTOMER_EXTRACTED', validationState: 'VALID' };
+    }
+    if (compMocs.ball) {
+      if (!validatedDynamicFields.valve_moc_ball) validatedDynamicFields.valve_moc_ball = compMocs.ball;
+      if (!validatedDynamicFields.valve_ball_moc) validatedDynamicFields.valve_ball_moc = compMocs.ball;
+      if (!fieldConfidences.valve_moc_ball) fieldConfidences.valve_moc_ball = { value: compMocs.ball, confidence: 95, source: 'REGEX', provenance: 'CUSTOMER_EXTRACTED', validationState: 'VALID' };
+    }
+    if (compMocs.stem) {
+      if (!validatedDynamicFields.valve_moc_stem) validatedDynamicFields.valve_moc_stem = compMocs.stem;
+      if (!validatedDynamicFields.valve_stem_moc) validatedDynamicFields.valve_stem_moc = compMocs.stem;
+      if (!fieldConfidences.valve_moc_stem) fieldConfidences.valve_moc_stem = { value: compMocs.stem, confidence: 95, source: 'REGEX', provenance: 'CUSTOMER_EXTRACTED', validationState: 'VALID' };
+    }
+    if (compMocs.seat) {
+      if (!validatedDynamicFields.valve_moc_seat) validatedDynamicFields.valve_moc_seat = compMocs.seat;
+      if (!validatedDynamicFields.valve_seat_ring_moc) validatedDynamicFields.valve_seat_ring_moc = compMocs.seat;
+      if (!fieldConfidences.valve_moc_seat) fieldConfidences.valve_moc_seat = { value: compMocs.seat, confidence: 95, source: 'REGEX', provenance: 'CUSTOMER_EXTRACTED', validationState: 'VALID' };
+    }
+    if (compMocs.studs) {
+      if (!validatedDynamicFields.valve_moc_stud_nuts) validatedDynamicFields.valve_moc_stud_nuts = compMocs.studs;
+      if (!validatedDynamicFields.valve_fasteners_moc) validatedDynamicFields.valve_fasteners_moc = compMocs.studs;
+      if (!fieldConfidences.valve_moc_stud_nuts) fieldConfidences.valve_moc_stud_nuts = { value: compMocs.studs, confidence: 95, source: 'REGEX', provenance: 'CUSTOMER_EXTRACTED', validationState: 'VALID' };
     }
 
     // STAGE 5: Evaluate Product Verification Status

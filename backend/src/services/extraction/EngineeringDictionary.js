@@ -303,7 +303,53 @@ const ALLOWED_MATERIALS = Object.freeze([
   'Inconel 625',
   'Hastelloy C276',
   'Cast Iron',
-  'Ductile Iron'
+  'Ductile Iron',
+  // Component MOCs & Trim Grades (PART Wise MOC)
+  'ASTM A216 Gr. WCC',
+  'ASTM A352 Gr. LCC',
+  'ASTM A351 Gr. CF3',
+  'ASTM A351 Gr. CF3M',
+  'ASTM A351 Gr. CN7M',
+  'ASTM A217 Gr. CA15',
+  '13% Cr. STEEL',
+  '13% Cr Steel',
+  'SS410',
+  'ASTM A182 Gr. F6a CL.1',
+  'ASTM A182 Gr. F6a CL.2',
+  'ASTM A182 Gr. F6 cl1',
+  'ASTM A182 Gr. F6 cl2',
+  'ASTM A479 Gr. 410',
+  'ASTM A479 Gr. SS304',
+  'ASTM A479 Gr. SS316',
+  'ASTM A182 Gr. F51',
+  'ASTM A182 Gr. F53',
+  'ASTM A182 Gr. F55',
+  'ASTM A216 Gr. WCB + 75 MIC ENP',
+  'ASTM A105 + 75 MIC ENP',
+  'ASTM A352 Gr. LCC + 75 MIC ENP',
+  'ASTM A216 Gr. WCB + 13% Cr.',
+  'PTFE',
+  'RPTFE',
+  'CFT',
+  'NYLON 6',
+  'DEVLON-S',
+  'PEEK',
+  'NCB',
+  'RPTFE + ASTM A182 Gr. F6a CL.1',
+  'PTFE + ASTM A182 Gr. F6 cl1',
+  'ASTM A193 Gr. B7 & ASTM A194 Gr. 2H',
+  'ASTM A193 Gr. B7',
+  'ASTM A194 Gr. 2H',
+  'ASTM A193 Gr. B7M',
+  'ASTM A194 Gr. 2HM',
+  'ASTM A320 Gr. L7',
+  'ASTM A194 Gr. 7',
+  'ASTM A320 Gr. L7M',
+  'ASTM A194 Gr. 7M',
+  'ASTM A193 Gr. B8',
+  'ASTM A194 Gr. 8',
+  'ASTM A193 Gr. B8M',
+  'ASTM A194 Gr. 8M'
 ]);
 
 const MATERIAL_ALIASES = Object.freeze({
@@ -668,7 +714,7 @@ class EngineeringDictionary {
     }
 
     // 6. Material (MOC)
-    if (key.includes('material') || key.includes('moc')) {
+    if (key.includes('material') || key.includes('moc') || key.includes('ball') || key.includes('stem') || key.includes('seat') || key.includes('trim') || key.includes('fastener') || key.includes('stud') || key.includes('nut')) {
       const cleanMat = strVal.toLowerCase().replace(/[^a-z0-9]/g, '');
       const canonical = MATERIAL_ALIASES[cleanMat] || MATERIAL_ALIASES[strVal.toLowerCase()] || this.dynamicAliases.get(`mat:${cleanKey}`);
       if (canonical) {
@@ -677,6 +723,11 @@ class EngineeringDictionary {
       const exact = ALLOWED_MATERIALS.find(m => m.toLowerCase() === strVal.toLowerCase());
       if (exact) {
         return { isValid: true, state: VALIDATION_STATES.VALID, canonicalValue: exact, reason: 'Exact match in material whitelist' };
+      }
+
+      // Check if it's a recognized valve alloy, stainless steel, polymer, or fastener grade
+      if (/(?:astm|ss\s*\d+|aisi|cr\b|ptfe|rptfe|cft|peek|nylon|devlon|viton|nbr|epdm|stellit|enp|monel|inconel|hastelloy|duplex|b7|2h|b8|l7|f6|f51|f53|f55|wcb|wcc|lcb|lcc|cf8|cf3|410|316|304|b7m|2hm|l7m|b8m)/i.test(strVal)) {
+        return { isValid: true, state: VALIDATION_STATES.VALID, canonicalValue: strVal, reason: 'Matched recognized valve material specification' };
       }
 
       return {

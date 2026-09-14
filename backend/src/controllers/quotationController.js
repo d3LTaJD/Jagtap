@@ -209,6 +209,15 @@ exports.createQuotation = async (req, res, next) => {
       metadata: { quotationId: quotation._id, enquiryId: req.body.enquiry }
     }).catch(err => console.error('[Quotation Controller] Failed to log quotation metric:', err.message));
 
+    // Notify team about quotation creation
+    await notifyRoles({
+      roles: ['SALES', 'SA', 'DIR', 'MGR'],
+      type: 'QUOTATION_CREATED',
+      title: `📄 Quotation Generated: ${quotation.quotationId}`,
+      message: `Quotation ${quotation.quotationId} has been created and is ready for review.`,
+      related_id: quotation._id
+    });
+
     res.status(201).json({ status: 'success', data: { quotation: stripQuotationPricing(quotation, req.user) } });
   } catch (err) {
     next(err);
@@ -320,7 +329,7 @@ exports.updateQuotationStatus = async (req, res, next) => {
       'paymentTerms', 'commercialTotals', 'costSummary', 'validUntil', 'deliverySchedule',
       'pricePartNotice', 'ndtRequirementText', 'specialTestingRequirementText',
       'sparesMandayChargesText', 'cert32Terms', 'cert32Percent', 'pfTerms', 'pfPercent',
-      'tpiaNoticeText', 'tpiCharges', 'gstRate', 'certificationChargesTerms',
+      'tpiaNoticeText', 'tpiCharges', 'ndtCharges', 'specialTestingCharges', 'sparesCharges', 'gstRate', 'certificationChargesTerms',
       'commercialNotes', 'cancellationTerms', 'jurisdictionTerms',
       'signatoryName', 'signatoryDesignation', 'signatoryPhone'
     ];
@@ -357,7 +366,7 @@ exports.updateQuotationStatus = async (req, res, next) => {
         const technicalItemKeys = [
           'itemNo', 'description', 'productCategory', 'materialGrade', 
           'applicableStandard', 'quantity', 'unit', 'testsRequired', 
-          'manufacturingProcess', 'deliveryWeeks', 'technicalDeviations', 'dynamicFields'
+          'manufacturingProcess', 'deliveryWeeks', 'technicalDeviations', 'ndtRequirement', 'dynamicFields'
         ];
         technicalItemKeys.forEach(k => {
           if (item[k] !== undefined && isChanged(item[k], origItem[k])) {
@@ -385,7 +394,7 @@ exports.updateQuotationStatus = async (req, res, next) => {
       'pmcConsultant', 'projectName', 'kindAttention', 'enquiryRefText', 'subjectText', 'salutationOpeningText',
       'technicalSpecificationClause', 'technicalDeviations',
       'pricePartNotice', 'ndtRequirementText', 'specialTestingRequirementText', 'sparesMandayChargesText',
-      'cert32Terms', 'cert32Percent', 'pfTerms', 'pfPercent', 'tpiaNoticeText', 'tpiCharges', 'gstRate',
+      'cert32Terms', 'cert32Percent', 'pfTerms', 'pfPercent', 'tpiaNoticeText', 'tpiCharges', 'ndtCharges', 'specialTestingCharges', 'sparesCharges', 'gstRate',
       'certificationChargesTerms', 'commercialNotes', 'cancellationTerms', 'jurisdictionTerms',
       'signatoryName', 'signatoryDesignation', 'signatoryPhone'
     ];
@@ -396,7 +405,7 @@ exports.updateQuotationStatus = async (req, res, next) => {
       }
     });
 
-    if (updateData.items || updateData.cert32Percent !== undefined || updateData.pfPercent !== undefined || updateData.tpiCharges !== undefined || updateData.gstRate !== undefined) {
+    if (updateData.items || updateData.cert32Percent !== undefined || updateData.pfPercent !== undefined || updateData.tpiCharges !== undefined || updateData.ndtCharges !== undefined || updateData.specialTestingCharges !== undefined || updateData.sparesCharges !== undefined || updateData.gstRate !== undefined) {
       const mergedForCalc = {
         ...originalQuotation.toObject(),
         ...updateData,
@@ -601,6 +610,41 @@ async function extractItemsFromEnquiry(enquiry) {
       if (pDynamic.body_material && !pDynamic.valve_moc_body) pDynamic.valve_moc_body = pDynamic.body_material;
       if (pDynamic.shellMaterial && !pDynamic.valve_moc_body) pDynamic.valve_moc_body = pDynamic.shellMaterial;
 
+      // Run engineering derivation rules to populate all 66 specs including p/c design type
+      const EngineeringRulesEngine = require('../services/extraction/EngineeringRulesEngine');
+      let derivedSpecs = { ...(p.derivedSpecifications || {}) };
+      const vType = pDynamic.valve_type || p.productCategory || enquiry.productCategory || 'Ball Valve';
+      const vSize = pDynamic.valve_size || p.size || '50';
+      const vClass = pDynamic.valve_class || p.pressureClass || '150#';
+
+      const ruleEval = EngineeringRulesEngine.evaluateContractReviewRules({
+        valveType: vType,
+        valveSize: vSize,
+        valveClass: vClass,
+        bodyMoc: pDynamic.valve_body_moc || pDynamic.valve_moc_body || pDynamic.body_material || pDynamic.shellMaterial || p.materialGrade,
+        ballMoc: pDynamic.valve_ball_moc || pDynamic.valve_moc_ball,
+        stemMoc: pDynamic.valve_stem_moc || pDynamic.valve_moc_stem,
+        seatMoc: pDynamic.valve_seat_ring_moc || pDynamic.valve_moc_seat,
+        studsMoc: pDynamic.valve_fasteners_moc || pDynamic.valve_moc_stud_nuts,
+        customerTestingStd: p.applicableStandard,
+        description: p.description || ''
+      });
+
+      if (ruleEval && ruleEval.derived) {
+        derivedSpecs = { ...derivedSpecs, ...ruleEval.derived };
+        if (ruleEval.derived.valve_design_type) pDynamic.valve_design_type = ruleEval.derived.valve_design_type;
+        if (ruleEval.derived.valve_ball_type) pDynamic.valve_ball_type = ruleEval.derived.valve_ball_type;
+        if (ruleEval.derived.valve_seat_type) pDynamic.valve_seat_type = ruleEval.derived.valve_seat_type;
+        if (ruleEval.derived.design_type_pieces) pDynamic.design_type_pieces = ruleEval.derived.design_type_pieces;
+        if (ruleEval.derived.valve_end_connection) pDynamic.valve_end_connection = ruleEval.derived.valve_end_connection;
+        if (ruleEval.derived.valve_operating) pDynamic.valve_operating = ruleEval.derived.valve_operating;
+        if (ruleEval.derived.moc_body && !pDynamic.valve_body_moc) pDynamic.valve_body_moc = ruleEval.derived.moc_body;
+        if (ruleEval.derived.moc_ball && !pDynamic.valve_ball_moc) pDynamic.valve_ball_moc = ruleEval.derived.moc_ball;
+        if (ruleEval.derived.moc_stem && !pDynamic.valve_stem_moc) pDynamic.valve_stem_moc = ruleEval.derived.moc_stem;
+        if (ruleEval.derived.moc_seat && !pDynamic.valve_seat_ring_moc) pDynamic.valve_seat_ring_moc = ruleEval.derived.moc_seat;
+        if (ruleEval.derived.moc_stud_nuts && !pDynamic.valve_fasteners_moc) pDynamic.valve_fasteners_moc = ruleEval.derived.moc_stud_nuts;
+      }
+
       return {
         itemNo: p.itemNo || idx + 1,
         enquirySrNo: p.enquirySrNo || p.itemNo || idx + 1,
@@ -610,14 +654,14 @@ async function extractItemsFromEnquiry(enquiry) {
         productCategory: p.category || enquiry.productCategory || 'Valves',
         quantity: (p.quantity !== undefined && p.quantity !== null && p.quantity !== '') ? Number(p.quantity) : null,
         unit: p.unit || 'NOS',
-        materialGrade: pDynamic.valve_moc_body?.value || pDynamic.valve_moc_body || p.materialGrade || '',
+        materialGrade: pDynamic.valve_body_moc?.value || pDynamic.valve_body_moc || pDynamic.valve_moc_body?.value || pDynamic.valve_moc_body || p.materialGrade || '',
         applicableStandard: p.standardCode || enquiry.standardCode || '',
         unitPrice: p.unitPrice || 0,
         lineTotalExclGST: p.lineTotalExclGST || 0,
         sourceSpecifications: p.sourceSpecifications || {},
         normalizedSpecifications: p.normalizedSpecifications || {},
         masterData: p.masterData || {},
-        derivedSpecifications: p.derivedSpecifications || {},
+        derivedSpecifications: derivedSpecs,
         validation: p.validation || { isValid: true, warnings: [], needsManualReview: false },
         fieldConfidences: p.fieldConfidences || {},
         dynamicFields: pDynamic

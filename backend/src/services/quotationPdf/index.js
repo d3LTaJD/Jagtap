@@ -6,7 +6,7 @@ const { renderContractReviewPart2 } = require('./pages/contractReviewPart2');
 const { renderPricePart2 } = require('./pages/pricePart2');
 const { renderCommercialPart3 } = require('./pages/commercialPart3');
 
-const CHUNK_SIZE = 8;
+const CHUNK_SIZE = 10;
 
 function chunkArray(array, size) {
   if (!array || array.length === 0) return [[]];
@@ -45,9 +45,12 @@ async function generateQuotationPdf(quotationOrId) {
     ${renderContractReviewPart2(quotation, chunk, idx, totalChunks)}
   `).join('\n');
 
-  const pricePages = itemChunks.map((chunk, idx) => `
-    <!-- PRICE PART - II (CHUNK ${idx + 1}/${totalChunks}) -->
-    ${renderPricePart2(quotation, chunk, idx, totalChunks, idx === totalChunks - 1)}
+  const priceChunks = chunkArray(items, 10);
+  const totalPriceChunks = priceChunks.length;
+
+  const pricePages = priceChunks.map((chunk, idx) => `
+    <!-- PRICE PART - II (CHUNK ${idx + 1}/${totalPriceChunks}) -->
+    ${renderPricePart2(quotation, chunk, idx, totalPriceChunks, idx === totalPriceChunks - 1)}
   `).join('\n');
 
   const htmlContent = `

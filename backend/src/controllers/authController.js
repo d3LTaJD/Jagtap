@@ -73,11 +73,17 @@ exports.login = async (req, res, next) => {
     user.last_login = new Date();
     await user.save();
 
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection?.remoteAddress || '127.0.0.1';
+    const userAgent = req.get ? req.get('User-Agent') : (req.headers ? req.headers['user-agent'] : 'Browser');
+
     await ActivityLog.create({
       user_id: user._id,
       action: 'LOGIN',
       module: 'AUTH',
-      details: `User logged in from ${req.ip}`
+      resourceName: user.name || user.email,
+      ipAddress: clientIp,
+      userAgent: userAgent,
+      details: `User logged in from ${clientIp}`
     });
 
     const responsePayload = await buildLoginResponse(user);
@@ -292,11 +298,17 @@ exports.changePassword = async (req, res, next) => {
     user.password = newPassword;
     await user.save();
 
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection?.remoteAddress || '127.0.0.1';
+    const userAgent = req.get ? req.get('User-Agent') : (req.headers ? req.headers['user-agent'] : 'Browser');
+
     await ActivityLog.create({
       user_id: user._id,
       action: 'PASSWORD_CHANGE',
       module: 'AUTH',
-      details: 'User changed their password'
+      resourceName: user.name || user.email,
+      ipAddress: clientIp,
+      userAgent: userAgent,
+      details: `User ${user.name} changed their password`
     });
 
     res.status(200).json({ status: 'success', message: 'Password updated successfully' });

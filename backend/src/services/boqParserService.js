@@ -611,11 +611,95 @@ function isProductIndicatorRow(text) {
 }
 
 /**
+ * Task 1: Parses HTML table elements directly from inbound emails.
+ * Maps columns dynamically: Item, Description, Size, Class, Qty, Body MOC, Seat, End Connection, Standard.
+ */
+function parseHtmlTableLineItems(html) {
+  if (!html || typeof html !== 'string' || !/<table/i.test(html)) return [];
+
+  const tableMatches = html.match(/<table[\s\S]*?<\/table>/gi) || [];
+  const products = [];
+
+  for (const tableHtml of tableMatches) {
+    const rowMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+    if (rowMatches.length < 2) continue;
+
+    let headers = [];
+    let startIdx = 0;
+
+    const firstRowCells = (rowMatches[0].match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [])
+      .map(c => c.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim());
+
+    const isHeaderRow = firstRowCells.some(c => /item|description|size|class|qty|quantity|moc|material|seat|standard/i.test(c));
+    if (isHeaderRow) {
+      headers = firstRowCells.map(h => h.toLowerCase());
+      startIdx = 1;
+    }
+
+    let itemCol = headers.findIndex(h => /^(?:item|sr|sl|s\.?\s*no|#)/i.test(h));
+    let descCol = headers.findIndex(h => /desc|particular|valve|product/i.test(h));
+    let sizeCol = headers.findIndex(h => /^size/i.test(h));
+    let classCol = headers.findIndex(h => /^class|rating|pressure/i.test(h));
+    let qtyCol = headers.findIndex(h => /^qty|quantity|nos|numbers?/i.test(h));
+    let mocCol = headers.findIndex(h => /moc|material|body/i.test(h));
+    let seatCol = headers.findIndex(h => /seat/i.test(h));
+    let endConnCol = headers.findIndex(h => /end\s*conn/i.test(h));
+    let stdCol = headers.findIndex(h => /standard|code/i.test(h));
+
+    for (let r = startIdx; r < rowMatches.length; r++) {
+      const cells = (rowMatches[r].match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [])
+        .map(c => c.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim());
+
+      if (cells.length < 3) continue;
+
+      const rawItemNo = itemCol !== -1 && cells[itemCol] ? cells[itemCol] : `${products.length + 1}`;
+      const rawDesc = descCol !== -1 && cells[descCol] ? cells[descCol] : '';
+      const rawSize = sizeCol !== -1 && cells[sizeCol] ? cells[sizeCol] : '';
+      const rawClass = classCol !== -1 && cells[classCol] ? cells[classCol] : '';
+      const rawQty = qtyCol !== -1 && cells[qtyCol] ? cells[qtyCol] : '1';
+      const rawMoc = mocCol !== -1 && cells[mocCol] ? cells[mocCol] : '';
+      const rawSeat = seatCol !== -1 && cells[seatCol] ? cells[seatCol] : '';
+      const rawEndConn = endConnCol !== -1 && cells[endConnCol] ? cells[endConnCol] : '';
+      const rawStd = stdCol !== -1 && cells[stdCol] ? cells[stdCol] : '';
+
+      const qty = parseInt(rawQty, 10) || 1;
+      
+      let fullDesc = rawDesc;
+      if (rawSize && !fullDesc.includes(rawSize)) fullDesc += ` ${rawSize}`;
+      if (rawClass && !fullDesc.includes(rawClass)) fullDesc += ` ${rawClass}`;
+      if (rawMoc && !fullDesc.includes(rawMoc)) fullDesc += ` Body MOC: ${rawMoc}`;
+      if (rawSeat && !fullDesc.includes(rawSeat)) fullDesc += ` Seat: ${rawSeat}`;
+      if (rawEndConn && !fullDesc.includes(rawEndConn)) fullDesc += ` End Conn: ${rawEndConn}`;
+      if (rawStd && !fullDesc.includes(rawStd)) fullDesc += ` Standard: ${rawStd}`;
+
+      if (fullDesc.length >= 5 && /[a-zA-Z]/.test(fullDesc) && !isNonProductRow(fullDesc)) {
+        products.push({
+          lineItemId: `LI-${String(products.length + 1).padStart(3, '0')}`,
+          itemNo: rawItemNo,
+          productDescription: fullDesc.trim(),
+          quantity: qty,
+          unit: 'NOS',
+          productCategory: detectProductCategory(fullDesc),
+          standardCode: rawStd || detectStandardCode(fullDesc),
+          confidence: 100
+        });
+      }
+    }
+  }
+
+  if (products.length > 0) {
+    console.log(`[HTML Table Parser] Extracted ${products.length} deterministic line items from HTML table.`);
+  }
+  return products;
+}
+
+/**
  * Deterministic email body line item parser.
  * Splits numbered/bulleted line items from email body text into separate products.
  *
  * Handles real-world formats:
  *   Strategy 1: Single-line (numbered or bulleted with quantity indicator)
+ *   Strategy 1b: Mid-column quantity tabular rows (Item | Desc | Size | Class | Qty | MOC...)
  *   Strategy 2: Multi-line (serial on one line, desc on next, qty after)
  *   Strategy 3: BOQ table rows without serial numbers
  *   Strategy 4: Tab/pipe-delimited OCR table rows
@@ -676,6 +760,46 @@ function parseEmailBodyLineItems(bodyText) {
   }
 
   const lines = cleanedText.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // ── Strategy 1b: Mid-Column Quantity Tabular Rows ────────────────────────
+  // Target: Item | Description | Size | Class | Qty | MOC | Seat | End Conn | Standard
+  // Example: "1.01 Carbon Steel Ball Valve, Full Bore 2\" 600# 12 ASTM A216 WCB Metal-to-Metal RF Flanged API 6D"
+  const midColumnTableRegex = /^\s*(?:item\s*)?(\d+(?:\.\d+)?)\s+(.+?)\s+((?:\d+(?:[\/.]\d+)?|\d+)(?:\s*mm|\s*inch|\s*in|\s*")?)\s+(\d{3,4}\s*#?|\bclass\s*\d+)\s+(\d+)\s+(.+)$/i;
+  const tableRowProducts = [];
+
+  for (const line of lines) {
+    if (/^\s*(?:item|sr|sl|description|size|class|qty|body|seat|standard)/i.test(line) && !/^\s*\d/i.test(line)) continue;
+
+    const m = line.match(midColumnTableRegex);
+    if (m) {
+      const itemNo = m[1];
+      const desc = m[2].trim();
+      const size = m[3].trim();
+      const cls = m[4].trim();
+      const qty = parseInt(m[5], 10) || 1;
+      const rest = m[6].trim();
+
+      const fullDesc = `${desc} ${size} ${cls} ${rest}`.trim();
+      if (fullDesc.length >= 5 && /[a-zA-Z]/.test(fullDesc) && !isNonProductRow(fullDesc)) {
+        tableRowProducts.push({
+          lineItemId: `LI-${String(tableRowProducts.length + 1).padStart(3, '0')}`,
+          itemNo,
+          productDescription: fullDesc,
+          quantity: qty,
+          unit: 'NOS',
+          productCategory: detectProductCategory(fullDesc),
+          standardCode: detectStandardCode(fullDesc),
+          confidence: 100
+        });
+      }
+    }
+  }
+
+  if (tableRowProducts.length >= 2) {
+    console.log(`[Email Body Parser] Mid-column quantity table strategy (Strategy 1b) found ${tableRowProducts.length} line items.`);
+    return tableRowProducts;
+  }
+
   const products = [];
 
   // ── Strategy 1: Single-line format (Numbered, Bulleted, or Prefixed) ──────
@@ -952,17 +1076,37 @@ function parseEmailBodyLineItems(bodyText) {
       const qtyVal = qtyField && qtyField.normalizedValue ? Number(qtyField.normalizedValue) : null;
       const unitVal = qtyField && qtyField.unit ? normalizeUnit(qtyField.unit) : 'NOS';
 
-      products.push({
-        productDescription: cleanedText.split('\n')[0].trim().substring(0, 300) || cleanedText.trim().substring(0, 300),
-        quantity: qtyVal,
-        unit: unitVal,
-        productCategory: 'Valves',
-        standardCode: detectStandardCode(cleanedText),
-        confidence: 100
-      });
+      // Find the first line that actually contains engineering/product details (NOT greetings/salutations)
+      const nonGreetingLines = cleanedText
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => {
+          if (!l || l.length < 5) return false;
+          if (/^(?:dear\s+(?:sir|madam|team|all)|hello|hi|good\s+morning|good\s+afternoon|regards|best\s+regards|warm\s+regards|thanks|thank\s+you|please\s+(?:find|review|note|quote|provide)|we\s+(?:are\s+looking|require|request)|technical\s+requirements?|commercial\s+offer|attached\s+herewith)/i.test(l)) {
+            // If the line also contains strong valve keywords, keep it, otherwise reject greeting
+            if (!/\b(?:ball|gate|globe|check|butterfly|plug)\s+valve\b/i.test(l) && !/\b(?:wcb|cf8m|150#|300#|600#)\b/i.test(l)) {
+              return false;
+            }
+          }
+          return true;
+        });
 
-      console.log(`[Email Body Parser] Direct single-item valve RFQ strategy (Strategy 5) found 1 deterministic product.`);
-      return products;
+      const bestDesc = nonGreetingLines.length > 0 ? nonGreetingLines[0].substring(0, 300) : null;
+
+      // Only accept if we have a valid engineering description line
+      if (bestDesc && isProductIndicatorRow(bestDesc)) {
+        products.push({
+          productDescription: bestDesc,
+          quantity: qtyVal,
+          unit: unitVal,
+          productCategory: 'Valves',
+          standardCode: detectStandardCode(cleanedText),
+          confidence: 100
+        });
+
+        console.log(`[Email Body Parser] Direct single-item valve RFQ strategy (Strategy 5) found 1 deterministic product.`);
+        return products;
+      }
     }
   } catch (strat5Err) {
     console.warn('[Email Body Parser] Strategy 5 error:', strat5Err.message);
@@ -970,18 +1114,6 @@ function parseEmailBodyLineItems(bodyText) {
 
   return products;
 }
-
-module.exports = {
-  parseExcelBOQ,
-  parsePdfTableBOQ,
-  parseStructuredBOQ,
-  mergeEnquiryProducts,
-  normalizeUnit,
-  parseEmailBodyLineItems,
-  stripNonValveSections,
-  isNonProductRow,
-  isProductIndicatorRow
-};
 
 /**
  * Pass-through function: Preserves 100% of BOQ line items as independent rows.
@@ -1011,6 +1143,7 @@ module.exports = {
   parseExcelBOQ,
   parsePdfTableBOQ,
   parseStructuredBOQ,
+  parseHtmlTableLineItems,
   mergeEnquiryProducts,
   generateProductSummary,
   normalizeUnit,

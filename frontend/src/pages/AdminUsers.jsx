@@ -7,54 +7,109 @@ import { useAbility } from '../context/AbilityContext';
 const ActivityLogModal = ({ user, onClose }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
+  const [search, setSearch] = useState('');
+
+  const fetchLogs = async (query = '') => {
+    setLoading(true);
+    try {
+      const q = query ? `&q=${encodeURIComponent(query)}` : '';
+      const res = await api.get(`/admin/users/${user._id}/logs?limit=100${q}`);
+      const data = res.data?.data;
+      if (data) {
+        setLogs(data.logs || []);
+        setTotalCount(data.total ?? (data.logs || []).length);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchLogs = async () => {
-      try {
-        const res = await api.get(`/admin/users/${user._id}/logs`);
-        setLogs(res.data.data.logs);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchLogs();
+    fetchLogs(search);
   }, [user._id]);
 
+  const handleSearch = (e) => {
+    const val = e.target.value;
+    setSearch(val);
+    fetchLogs(val);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200">
+        
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Activity Log</h2>
-            <p className="text-xs text-slate-500 font-medium">{user.name} ({user.role})</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900">User Activity Log</h2>
+              <span className="text-[11px] font-bold px-2 py-0.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-full">
+                {totalCount} Total Events
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">{user.name} ({user.role}) • {user.email}</p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Search bar inside modal */}
+        <div className="p-3.5 border-b border-slate-100 bg-white">
+          <input
+            type="text"
+            placeholder="Search activities (e.g. Quotation, Delete, Login, IP)..."
+            value={search}
+            onChange={handleSearch}
+            className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:border-brand-400 focus:ring-2 focus:ring-brand-500/10 transition-all font-medium placeholder:text-slate-400"
+          />
+        </div>
         
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* Logs list */}
+        <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
           {loading ? (
-            <div className="flex justify-center py-12"><Loader2 className="animate-spin w-6 h-6 text-brand-600" /></div>
+            <div className="flex justify-center py-16"><Loader2 className="animate-spin w-7 h-7 text-brand-600" /></div>
           ) : logs.length === 0 ? (
-            <p className="text-center py-12 text-slate-400 italic">No activity recorded yet.</p>
+            <div className="text-center py-16 text-slate-400">
+              <History className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              <p className="text-sm font-bold text-slate-600">No activity matching your search</p>
+              <p className="text-xs text-slate-400 mt-1">Actions performed by this user will appear here in chronological order.</p>
+            </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {logs.map((log, idx) => (
-                <div key={idx} className="flex gap-4 relative">
-                  {idx !== logs.length - 1 && <div className="absolute left-[15px] top-8 bottom-[-24px] w-px bg-slate-100"></div>}
-                  <div className="mt-1 w-8 h-8 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center flex-shrink-0 relative z-10">
-                    <Clock className="w-4 h-4 text-slate-400" />
+                <div key={idx} className="flex gap-3.5 p-3 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50/50 transition-all">
+                  <div className="mt-0.5 w-7 h-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-black text-brand-600 uppercase tracking-widest">{log.action}</span>
-                      <span className="text-[10px] text-slate-400 font-bold">• {new Date(log.timestamp).toLocaleString()}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-black text-brand-600 uppercase tracking-wider bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded">
+                        {log.action?.replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded uppercase">
+                        {log.module}
+                      </span>
+                      {log.resourceName && (
+                        <span className="text-[10px] font-mono text-slate-500 font-bold">
+                          {log.resourceName}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400 font-medium ml-auto">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </span>
                     </div>
-                    <p className="text-sm text-slate-700 font-medium">{log.details}</p>
-                    <span className="inline-block mt-2 text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-tighter">{log.module}</span>
+                    <p className="text-xs text-slate-700 font-semibold mt-1.5 leading-relaxed">
+                      {log.details || `Performed ${log.action} on ${log.resourceName || log.module}`}
+                    </p>
+                    {log.ipAddress && (
+                      <p className="text-[10px] text-slate-400 font-mono mt-1">
+                        IP: {log.ipAddress === '::1' ? '::1 (Localhost)' : log.ipAddress}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -62,8 +117,14 @@ const ActivityLogModal = ({ user, onClose }) => {
           )}
         </div>
         
-        <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex justify-end">
-          <button onClick={onClose} className="px-5 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">Close</button>
+        {/* Footer */}
+        <div className="p-3.5 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between">
+          <span className="text-xs text-slate-500 font-medium pl-2">
+            Showing latest {logs.length} of {totalCount} events
+          </span>
+          <button onClick={onClose} className="px-5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-sm">
+            Close
+          </button>
         </div>
       </div>
     </div>

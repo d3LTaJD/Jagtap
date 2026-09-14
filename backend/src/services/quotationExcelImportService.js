@@ -70,10 +70,57 @@ function parseAndValidatePricingSpreadsheet(fileBuffer, quotation) {
     }
   }
 
+  // Check if this is the Price Part-II Matrix format (Offer Formates.xlsx)
+  const matrixSrRow = rows.find(r => String(r[0] || '').trim().toLowerCase().includes('enquiry sr. no'));
+  const matrixPriceRow = rows.find(r => String(r[0] || '').trim().toLowerCase().includes('unit price'));
+  const matrixQtyRow = rows.find(r => String(r[0] || '').trim().toLowerCase().includes('qunatity') || String(r[0] || '').trim().toLowerCase().includes('quantity'));
+
+  if (matrixSrRow && matrixPriceRow) {
+    // Find the starting column for line items (usually col index 5: Col F)
+    let startCol = -1;
+    for (let c = 1; c < matrixSrRow.length; c++) {
+      if (matrixSrRow[c] !== '' && matrixSrRow[c] !== undefined && matrixSrRow[c] !== null) {
+        startCol = c;
+        break;
+      }
+    }
+    if (startCol === -1) startCol = 5;
+
+    const updatedItems = dbItems.map((dbItem, itemIdx) => {
+      const c = startCol + itemIdx;
+      const rawPrice = matrixPriceRow[c];
+      const parsedPrice = (rawPrice !== undefined && rawPrice !== null && !isNaN(Number(rawPrice))) ? Number(rawPrice) : (dbItem.unitPrice || 0);
+      const rawQty = matrixQtyRow ? matrixQtyRow[c] : null;
+      const parsedQty = (rawQty !== undefined && rawQty !== null && !isNaN(Number(rawQty)) && Number(rawQty) > 0) ? Number(rawQty) : (dbItem.quantity || 1);
+
+      return {
+        ...(dbItem.toObject ? dbItem.toObject() : dbItem),
+        unitPrice: parsedPrice,
+        quantity: parsedQty,
+        ndtCharges: 0,
+        specialTestingCharges: 0,
+        sparesCharges: 0,
+        tpiCharges: 0,
+        pfCharges: 0,
+        cert32Charges: 0
+      };
+    });
+
+    return {
+      isValid: true,
+      errors: [],
+      warnings: [],
+      updatedItems,
+      totalMatched: updatedItems.length,
+      totalSpreadsheetItems: updatedItems.length,
+      totalDbItems: dbItems.length
+    };
+  }
+
   if (headerRowIndex === -1) {
     return {
       isValid: false,
-      errors: ['Could not find standard table headers ("Line Item ID", "Base Unit Price", etc.) in the uploaded spreadsheet.'],
+      errors: ['Could not find standard table headers ("Line Item ID", "Base Unit Price", etc.) or Matrix format in the uploaded spreadsheet.'],
       warnings,
       updatedItems: []
     };
@@ -186,14 +233,9 @@ function parseAndValidatePricingSpreadsheet(fileBuffer, quotation) {
 
     const unitPrice = parsePriceField(row[colIndex.unitPrice], 'Base Unit Price', 0);
     const discountPercent = colIndex.discount !== -1 ? parsePriceField(row[colIndex.discount], 'Discount %', 0, 100) : (originalItem.discountPercent || 0);
-    const ndtCharges = colIndex.ndt !== -1 ? parsePriceField(row[colIndex.ndt], 'NDT Charges', 0) : (originalItem.ndtCharges || 0);
-    const specialTestingCharges = colIndex.specialTesting !== -1 ? parsePriceField(row[colIndex.specialTesting], 'Special Testing', 0) : (originalItem.specialTestingCharges || 0);
-    const sparesCharges = colIndex.spares !== -1 ? parsePriceField(row[colIndex.spares], 'Spares Charges', 0) : (originalItem.sparesCharges || 0);
-    const pfCharges = colIndex.pf !== -1 ? parsePriceField(row[colIndex.pf], 'P&F Charges', 0) : (originalItem.pfCharges || 0);
-    const tpiCharges = colIndex.tpia !== -1 ? parsePriceField(row[colIndex.tpia], 'TPIA Charges', 0) : (originalItem.tpiCharges || 0);
 
     const qty = Number(originalItem.quantity) || 1;
-    const effectiveUnitRate = Math.round(((unitPrice * (1 - discountPercent / 100)) + ndtCharges + specialTestingCharges + sparesCharges + pfCharges + tpiCharges) * 100) / 100;
+    const effectiveUnitRate = Math.round((unitPrice * (1 - discountPercent / 100)) * 100) / 100;
     const lineTotalExclGST = Math.round(effectiveUnitRate * qty * 100) / 100;
     const gstAmount = Math.round(lineTotalExclGST * 0.18 * 100) / 100;
     const lineTotalInclGST = Math.round((lineTotalExclGST + gstAmount) * 100) / 100;
@@ -202,11 +244,13 @@ function parseAndValidatePricingSpreadsheet(fileBuffer, quotation) {
       ...originalItem,
       unitPrice,
       discountPercent,
-      ndtCharges,
-      specialTestingCharges,
-      sparesCharges,
-      pfCharges,
-      tpiCharges,
+      unitRate: effectiveUnitRate,
+      ndtCharges: 0,
+      specialTestingCharges: 0,
+      sparesCharges: 0,
+      pfCharges: 0,
+      tpiCharges: 0,
+      cert32Charges: 0,
       lineTotalExclGST,
       gstAmount,
       lineTotalInclGST

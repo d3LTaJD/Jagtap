@@ -57,6 +57,16 @@ exports.createUser = async (req, res, next) => {
       text
     }).catch(err => console.error('[Admin] Background email error:', err.message));
 
+    await logActivity({
+      req,
+      action: 'CREATE',
+      module: 'USER',
+      resourceId: user._id,
+      resourceName: user.name,
+      newState: { name: user.name, email: user.email, role: user.role, department: user.department },
+      details: `Admin created new user: ${user.name} (${user.role})`
+    });
+
     res.status(201).json({ 
       status: 'success', 
       message: 'User created successfully',
@@ -68,7 +78,6 @@ exports.createUser = async (req, res, next) => {
 };
 
 // @desc    Get all users (Admin only)
-// @route   GET /api/admin/users
 exports.getUsers = async (req, res, next) => {
   try {
     const users = await User.find().select('-password').sort('-created_at');
@@ -222,11 +231,35 @@ exports.resetUserPassword = async (req, res, next) => {
 
 exports.getUserActivityLogs = async (req, res, next) => {
   try {
-    const logs = await ActivityLog.find({ user_id: req.params.id })
-      .populate('user_id', 'name role')
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const filter = { user_id: req.params.id };
+
+    if (req.query.module) {
+      filter.module = { $regex: new RegExp(`^${req.query.module}$`, 'i') };
+    }
+    if (req.query.q) {
+      const regex = new RegExp(req.query.q.trim(), 'i');
+      filter.$or = [{ details: regex }, { resourceName: regex }, { action: regex }];
+    }
+
+    const total = await ActivityLog.countDocuments(filter);
+    const logs = await ActivityLog.find(filter)
+      .populate('user_id', 'name role email')
       .sort('-timestamp')
-      .limit(50);
-    res.status(200).json({ status: 'success', data: { logs } });
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    res.status(200).json({ 
+      status: 'success', 
+      data: { 
+        logs,
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+        limit
+      } 
+    });
   } catch (err) {
     next(err);
   }
@@ -234,18 +267,61 @@ exports.getUserActivityLogs = async (req, res, next) => {
 
 exports.getAllActivityLogs = async (req, res, next) => {
   try {
-    const { module, user, action } = req.query;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const { module, user, action, q, startDate, endDate } = req.query;
+
     const filter = {};
-    if (module) filter.module = module;
+    if (module) {
+      const cleanMod = module.replace(/_/g, '');
+      filter.module = { $regex: new RegExp(`^${module}$|^${cleanMod}$`, 'i') };
+    }
     if (user) filter.user_id = user;
     if (action) filter.action = action;
 
-    const logs = await ActivityLog.find(filter)
-      .populate('user_id', 'name role')
-      .sort('-timestamp')
-      .limit(200);
-      
-    res.status(200).json({ status: 'success', data: { logs } });
+    if (q && q.trim()) {
+      const regex = new RegExp(q.trim(), 'i');
+      filter.$or = [
+        { details: regex },
+        { resourceName: regex },
+        { action: regex },
+        { ipAddress: regex },
+        { module: regex }
+      ];
+    }
+
+    if (startDate || endDate) {
+      filter.timestamp = {};
+      if (startDate) filter.timestamp.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.timestamp.$lte = end;
+      }
+    }
+
+    const total = await ActivityLog.countDocuments(filter);
+
+    const queryBuilder = ActivityLog.find(filter)
+      .populate('user_id', 'name role email')
+      .sort('-timestamp');
+
+    if (limit > 0) {
+      queryBuilder.skip((page - 1) * limit).limit(limit);
+    }
+
+    const logs = await queryBuilder;
+
+    res.status(200).json({ 
+      status: 'success', 
+      data: { 
+        logs,
+        total,
+        page,
+        pages: limit > 0 ? Math.ceil(total / limit) : 1,
+        limit
+      } 
+    });
   } catch (err) {
     next(err);
   }

@@ -1,5 +1,5 @@
 const { renderHeader } = require('../components/Header');
-const { renderOfficialFooter } = require('../components/Footer');
+const { renderFormatOnlyFooter } = require('../components/Footer');
 const { formatPdfValue } = require('../dataFormatter');
 
 function renderCommercialPart3(quotation) {
@@ -10,7 +10,7 @@ function renderCommercialPart3(quotation) {
   const payment = formatPdfValue(quotation.paymentTerms, '10% Advance along with PO & 20% with approved QAP & GAD Balance against Performa Invoice prior to dispatch.');
   const validity = formatPdfValue(quotation.validityTerms, 'Three Month from the date of Quote');
   const tpi = formatPdfValue(quotation.tpiTerms, 'We will offer valves to your nominated TPIA, charges towards TPIA fees will be Extra at actual to your account as given in Price Part – II.');
-  const delivery = formatPdfValue(quotation.deliverySchedule, '10 weeks as per EN 10204 3.2 certification from the date of approval of technical documents and advance payment.');
+  const delivery = formatPdfValue(quotation.deliverySchedule, '12 weeks as per EN 10204 3.2 certification from the date of approval of technical documents and advance payment.');
   const certiCharges = formatPdfValue(quotation.certificationChargesTerms, 'Extra as given in Price Part – II for 3.2 Certificates.');
   const insurance = formatPdfValue(quotation.transitInsurance, 'In your scope only.');
   const guarantee = formatPdfValue(quotation.guaranteeTerms, '12 months from the date of commissioning or 18 months from the date of last shipment which ever is earlier.');
@@ -25,16 +25,16 @@ function renderCommercialPart3(quotation) {
 
   const jurisdiction = formatPdfValue(quotation.jurisdictionTerms, 'Subject to Ahmedabad Jurisdiction only.');
 
-  const signatoryName = formatPdfValue(quotation.signatoryName, 'Jay Mistry');
-  const signatoryDesignation = formatPdfValue(quotation.signatoryDesignation, '(Sales & Projects)');
-  const signatoryPhone = formatPdfValue(quotation.signatoryPhone, '9023723212');
+  const signatoryName = formatPdfValue(quotation.signatoryName, 'Shubh Patel');
+  const signatoryDesignation = formatPdfValue(quotation.signatoryDesignation, '(Marketing & Projects)');
+  const signatoryPhone = formatPdfValue(quotation.signatoryPhone, '9979713788');
 
   return `
     <div class="pv-page">
       <div class="pv-page-content">
         ${renderHeader()}
 
-        <div class="pv-section-title" style="margin-top: 10px; margin-bottom: 12px;">
+        <div class="pv-section-title" style="margin-top: 5px; margin-bottom: 10px;">
           COMMERCIAL PART – III
         </div>
 
@@ -103,24 +103,24 @@ function renderCommercialPart3(quotation) {
 
         <!-- Additional Notes -->
         <div class="pv-comm-notes-box">
-          ${notesParagraphs.slice(1).map(p => `<div class="pv-comm-notes-item"><strong>${p}</strong></div>`).join('')}
+          ${notesParagraphs.slice(1).map(p => `<div class="pv-comm-notes-item">${p}</div>`).join('')}
         </div>
 
         <!-- PO Cancellation Box -->
-        <div class="pv-cancellation-block">
+        <div class="pv-cancellation-block" style="margin-top: 10px;">
           <strong>PO Cancellation or Modified (qty reduced) charges are as follows:</strong>
-          <div style="padding-left: 12px; margin-top: 2px;">
-            ${cancelLines.map(l => `<div>${l.startsWith('•') ? l : `&bull; ${l}`}</div>`).join('')}
+          <div style="padding-left: 12px; margin-top: 3px;">
+            ${cancelLines.map(l => `<div>${l.startsWith('•') ? l : `&bull; &nbsp; ${l}`}</div>`).join('')}
           </div>
         </div>
 
         <!-- Jurisdiction -->
-        <div class="pv-jurisdiction-line">
+        <div class="pv-jurisdiction-line" style="margin-top: 10px;">
           <strong>${jurisdiction}</strong>
         </div>
 
         <!-- Signatory Block -->
-        <div class="pv-signatory-block">
+        <div class="pv-signatory-block" style="margin-top: 14px;">
           <div>Thanking you,</div>
           <div>Yours faithfully,</div>
           <div class="pv-sign-for">For, Petro Valves Pvt Ltd.</div>
@@ -133,7 +133,7 @@ function renderCommercialPart3(quotation) {
 
       </div>
 
-      ${renderOfficialFooter()}
+      ${renderFormatOnlyFooter()}
     </div>
   `;
 }

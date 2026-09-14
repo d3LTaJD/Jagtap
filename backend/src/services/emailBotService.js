@@ -601,7 +601,7 @@ async function processEmailMessage(parsed) {
   // M4: Inbound Vendor Proforma Invoice (PI) AI Hook
   try {
     const isPiEmail = /\b(?:proforma\s*invoice|proforma|vendor\s*pi|pi\s*for\s*po)\b/i.test(subject + ' ' + bodyText) ||
-                      /\b(?:PI[-/]\d+|PO[-/]\d+)/i.test(subject);
+      /\b(?:PI[-/]\d+|PO[-/]\d+)/i.test(subject);
     const hasPdfAttachment = (parsed.attachments || []).some(att => (att.filename || '').toLowerCase().endsWith('.pdf'));
 
     if (isPiEmail && hasPdfAttachment) {

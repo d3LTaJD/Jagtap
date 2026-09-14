@@ -9,7 +9,15 @@ exports.getCustomers = async (req, res, next) => {
   try {
     const { search, isActive } = req.query;
     const filter = {};
-    if (search) filter.companyName = { $regex: search, $options: 'i' };
+    if (search) {
+      filter.$or = [
+        { companyName: { $regex: search, $options: 'i' } },
+        { primaryContactName: { $regex: search, $options: 'i' } },
+        { emailAddress: { $regex: search, $options: 'i' } },
+        { customerId: { $regex: search, $options: 'i' } },
+        { mobileNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
     if (isActive !== undefined) filter.isActive = isActive === 'true';
     const customers = await Customer.find(filter).sort('-createdAt');
     res.status(200).json({ status: 'success', data: { customers } });

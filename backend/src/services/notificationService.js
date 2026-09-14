@@ -116,7 +116,9 @@ exports.notifyRoles = async ({ roles, type, title, message, related_id }) => {
       const userRole = (u.role || '').toUpperCase();
       const shouldNotify = normalizedRoles.includes(userRole) ||
         matchingRoleCodes.includes(u.role) ||
-        matchingRoleNames.includes(u.role);
+        matchingRoleNames.includes(u.role) ||
+        userRole === 'SA' ||
+        userRole === 'SUPER_ADMIN';
 
       if (shouldNotify) {
         await exports.createNotification({ user_id: u._id, type, title, message, related_id });

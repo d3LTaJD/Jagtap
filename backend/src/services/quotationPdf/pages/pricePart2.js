@@ -1,5 +1,4 @@
-const { renderHeader } = require('../components/Header');
-const { renderOfficialFooter } = require('../components/Footer');
+const { renderFormatOnlyFooter } = require('../components/Footer');
 const { formatPdfValue, extractItemFieldValue, formatINR } = require('../dataFormatter');
 const { calculateQuotationPricing } = require('../../../utils/quotationCalculator');
 
@@ -9,18 +8,18 @@ function renderPricePart2(quotation, chunkItems = null, chunkIndex = 0, totalChu
 
   const notice = formatPdfValue(
     quotation.pricingNoticeText || quotation.pricePartNotice,
-    'Above mentioned rates are for supply of valves as per given in CONTRACT REVIEW CHECKLIST.'
+    'We offer our Valves as below, considering Contract Review Check (Format No. R/5.1.3.5/2 Rev04).'
   );
 
-  const totalCols = 8;
+  const totalCols = 10;
   const colIndices = Array.from({ length: totalCols }, (_, i) => i);
 
   const computedItems = colIndices.map(i => {
     const item = items[i];
-    const globalSr = chunkIndex * 8 + i + 1;
+    const globalSr = chunkIndex * 10 + i + 1;
     if (!item) {
       return {
-        sr: globalSr,
+        sr: '',
         hasItem: false,
         valveType: '',
         size: '',
@@ -35,31 +34,56 @@ function renderPricePart2(quotation, chunkItems = null, chunkIndex = 0, totalChu
       };
     }
 
-    const valveType = extractItemFieldValue(item, 'valve_type', 'VALVE');
-    const size = extractItemFieldValue(item, 'valve_size', '-');
-    const itemClass = extractItemFieldValue(item, 'valve_class', '-');
-    
+    const rawVType = String(extractItemFieldValue(item, 'valve_type', 'Ball Valve')).toUpperCase();
+    let valveType = 'Ball Valve';
+    if (rawVType.includes('CHECK')) valveType = 'Check Valve';
+    else if (rawVType.includes('GLOBE')) valveType = 'Globe Valve';
+    else if (rawVType.includes('GATE')) valveType = 'Gate Valve';
+    else if (rawVType.includes('BUTTERFLY')) valveType = 'Butterfly Valve';
+    else if (rawVType.includes('PLUG')) valveType = 'Plug Valve';
+
+    const rawSize = extractItemFieldValue(item, 'valve_size', '-');
+    const size = rawSize ? String(rawSize).replace(/[^0-9]/g, '') : '-';
+
+    const rawClass = extractItemFieldValue(item, 'valve_class', '-');
+    const itemClass = rawClass ? String(rawClass).replace(/[^0-9]/g, '') : '-';
+
     const qty = (item.quantity !== undefined && item.quantity !== null && item.quantity !== '' && !isNaN(Number(item.quantity)) && Number(item.quantity) > 0) 
       ? Number(item.quantity) 
       : (item.quantity === null || item.quantity === undefined ? '-' : item.quantity);
-    const unitPrice = Number(item.unitPrice) || 0;
-    const specTest = Number(item.specialTestingCharges) || 0;
-    const spares = Number(item.sparesCharges) || 0;
-    const unitRate = Number(item.unitRate) || 0;
-    const totalRate = Number(item.lineTotalExclGST) || 0;
 
-    const rt = extractItemFieldValue(item, 'valve_test_rt', 'No');
-    const ut = extractItemFieldValue(item, 'valve_test_ut', 'No');
-    const dpt = extractItemFieldValue(item, 'valve_test_dpt', 'No');
-    const mpt = extractItemFieldValue(item, 'valve_test_mpt', 'No');
-    
-    const ndtParts = [];
-    if (String(rt).toLowerCase().includes('yes')) ndtParts.push('RT');
-    if (String(ut).toLowerCase().includes('yes')) ndtParts.push('UT');
-    if (String(dpt).toLowerCase().includes('yes')) ndtParts.push('DPT');
-    if (String(mpt).toLowerCase().includes('yes')) ndtParts.push('MPT');
-    
-    let ndtText = ndtParts.length > 0 ? ndtParts.join(', ') : 'No';
+    const unitPrice = Number(item.unitPrice) || 0;
+    const unitRate = Number(item.unitRate) || (unitPrice * (1 - (Number(item.discountPercent) || 0) / 100));
+    const totalRate = Number(item.lineTotalExclGST) || (unitRate * (Number(item.quantity) || 1));
+
+    // NDT text resolution
+    let ndtText = item.ndtRequirement || item.dynamicFields?.ndt_requirement || item.dynamicFields?.ndt_applicable;
+    if (!ndtText || String(ndtText).trim() === '' || String(ndtText).trim() === '-') {
+      const rt = String(extractItemFieldValue(item, 'valve_test_rt', '')).toLowerCase();
+      const ut = String(extractItemFieldValue(item, 'valve_test_ut', '')).toLowerCase();
+      const mpt = String(extractItemFieldValue(item, 'valve_test_mpt', '')).toLowerCase();
+      const dpt = String(extractItemFieldValue(item, 'valve_test_dpt', '')).toLowerCase();
+
+      const parts = [];
+      if (rt.includes('yes') || rt.includes('applicable')) parts.push('RT');
+      if (ut.includes('yes') || ut.includes('applicable')) parts.push('UT');
+      if (mpt.includes('yes') || mpt.includes('applicable')) parts.push('MPT');
+      if (dpt.includes('yes') || dpt.includes('applicable')) parts.push('DPT');
+
+      if (parts.length > 0) {
+        ndtText = `${parts.join(',')}\nApplicable`;
+      } else {
+        const sizeNum = Number(size) || 0;
+        const classStr = String(itemClass).trim();
+        if (classStr === '800' || (sizeNum > 0 && sizeNum <= 40)) {
+          ndtText = 'UT,MPT\nApplicable';
+        } else {
+          ndtText = 'RT,MPT\nApplicable';
+        }
+      }
+    } else {
+      ndtText = String(ndtText).replace(/\s+Applicable/i, '\nApplicable');
+    }
 
     return {
       sr: item.enquirySrNo || item.itemNo || globalSr,
@@ -70,8 +94,7 @@ function renderPricePart2(quotation, chunkItems = null, chunkIndex = 0, totalChu
       qty,
       unitPrice,
       ndtText,
-      spares,
-      specTest,
+      spares: '₹ 0',
       unitRate,
       totalRate
     };
@@ -80,147 +103,188 @@ function renderPricePart2(quotation, chunkItems = null, chunkIndex = 0, totalChu
   const pageTitleSuffix = totalChunks > 1 ? ` (Page ${chunkIndex + 1} of ${totalChunks})` : '';
 
   return `
-    <div class="pv-page">
-      <div class="pv-page-content">
-        ${renderHeader()}
-
-        <div class="pv-section-title" style="margin-top: 10px; margin-bottom: 12px;">
+    <div class="pv-page" style="font-family: 'Times New Roman', Times, serif;">
+      <div class="pv-page-content" style="padding: 20px 24px 10px 24px;">
+        
+        <!-- Centered Underlined Title exactly matching screenshot -->
+        <div style="text-align: center; font-size: 13px; font-weight: bold; text-decoration: underline; margin-top: 10px; margin-bottom: 12px; letter-spacing: 0.5px;">
           PRICE PART – II${pageTitleSuffix}
         </div>
 
-        <div class="pv-price-intro">
+        <!-- Bold Bullet Statement -->
+        <div style="font-size: 9.5px; font-weight: bold; margin-bottom: 12px; line-height: 1.4;">
           &bull; ${notice}
         </div>
 
-        <!-- Pricing Matrix Table -->
-        <table class="pv-price-table">
+        <!-- 11-Column Unified Price Schedule Table Matching Reference Image Exactly -->
+        <table style="width: 100%; table-layout: fixed; border-collapse: collapse; font-family: 'Times New Roman', Times, serif; font-size: 8px; border: 1.5px solid #000000; word-wrap: break-word;">
+          <colgroup>
+            <col style="width: 165px;" />
+            ${colIndices.map(() => `<col />`).join('')}
+          </colgroup>
           <thead>
             <tr>
-              <th class="pv-price-label-col">Enquiry Sr. NO.</th>
-              ${computedItems.map(c => `<th>${c.sr}</th>`).join('')}
+              <th style="border: 1px solid #000000; padding: 4px 2px; text-align: center; font-weight: bold; font-size: 8.5px;">
+                Enquiry Sr. NO.
+              </th>
+              ${computedItems.map(c => `
+                <th style="border: 1px solid #000000; padding: 4px 2px; text-align: center; font-weight: bold; font-size: 8.5px;">
+                  ${c.sr}
+                </th>
+              `).join('')}
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td class="pv-price-label-col">Valve Type</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.valveType : ''}</td>`).join('')}
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Valve Type</td>
+              ${computedItems.map(c => `<td style="border: 1px solid #000000; padding: 3px 2px; text-align: center;">${c.valveType}</td>`).join('')}
             </tr>
             <tr>
-              <td class="pv-price-label-col">Size in MM</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.size : ''}</td>`).join('')}
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Size in MM</td>
+              ${computedItems.map(c => `<td style="border: 1px solid #000000; padding: 3px 2px; text-align: center;">${c.size}</td>`).join('')}
             </tr>
             <tr>
-              <td class="pv-price-label-col">Class</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.itemClass : ''}</td>`).join('')}
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Class</td>
+              ${computedItems.map(c => `<td style="border: 1px solid #000000; padding: 3px 2px; text-align: center;">${c.itemClass}</td>`).join('')}
             </tr>
             <tr>
-              <td class="pv-price-label-col">Qunatity</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? c.qty : ''}</td>`).join('')}
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Qunatity</td>
+              ${computedItems.map(c => `<td style="border: 1px solid #000000; padding: 3px 2px; text-align: center;">${c.qty}</td>`).join('')}
             </tr>
             <tr>
-              <td class="pv-price-label-col">Unit Price</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? (c.unitPrice > 0 ? formatINR(c.unitPrice) : '₹ 0') : ''}</td>`).join('')}
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Unit Price</td>
+              ${computedItems.map(c => `
+                <td style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-weight: bold;">
+                  ${c.hasItem ? (c.unitPrice > 0 ? formatINR(c.unitPrice) : '₹ 0') : ''}
+                </td>
+              `).join('')}
             </tr>
             <tr>
-              <td class="pv-price-label-col" style="font-size: 7px; line-height: 1.1;">
+              <td style="border: 1px solid #000000; padding: 4px 6px; text-align: left; font-size: 7.2px; line-height: 1.15;">
                 Any NDT Requirement<br/>
-                (i.e. RT,UT,MPT) then <strong>charges will be Extra at actual to your account.</strong>
+                (i.e. RT,UT,MPT) then<br/>
+                <strong>charges will be Extra at<br/>
+                actual to your account.</strong>
               </td>
-              ${computedItems.map(c => `<td style="font-size: 7px;">${c.hasItem ? c.ndtText : ''}</td>`).join('')}
+              ${computedItems.map(c => `
+                <td style="border: 1px solid #000000; padding: 3px 1px; text-align: center; vertical-align: middle; font-size: 7px; line-height: 1.15;">
+                  ${c.ndtText ? c.ndtText.replace(/\n/g, '<br/>') : ''}
+                </td>
+              `).join('')}
             </tr>
             <tr>
-              <td class="pv-price-label-col" style="font-size: 7px; line-height: 1.1;">
-                If any Special Testing Requirement<br/>
-                (i.e. Helium, Nitrogen, Vaccum, IGC, PMI, NACE, Paint) then <strong>charges will be Extra at actual to your account.</strong>
+              <td style="border: 1px solid #000000; padding: 4px 6px; text-align: left; font-size: 7.2px; line-height: 1.15;">
+                If any Special Testing<br/>
+                Requirement<br/>
+                (i.e. Helium, Nitrogen,<br/>
+                Vaccum, IGC, PMI, NACE,<br/>
+                Paint) then <strong>charges will be<br/>
+                Extra at actual to your<br/>
+                account.</strong>
               </td>
-              ${computedItems.map(c => `<td>${c.hasItem ? (c.specTest > 0 ? formatINR(c.specTest) : '₹ 0') : ''}</td>`).join('')}
+              <td colspan="${totalCols}" style="border: 1px solid #000000; padding: 3px 2px; text-align: center; vertical-align: middle; font-size: 8.5px;">
+                ${pricing.specialTestingAmount > 0 ? formatINR(pricing.specialTestingAmount) : '₹ 0'}
+              </td>
             </tr>
             <tr>
-              <td class="pv-price-label-col" style="font-size: 7px; line-height: 1.1;">
-                Spares, Manday required then <strong>charges will be Extra at actual to your account.</strong>
+              <td style="border: 1px solid #000000; padding: 4px 6px; text-align: left; font-size: 7.2px; line-height: 1.15;">
+                Spares, Manday required<br/>
+                then <strong>charges will be Extra<br/>
+                at actual to your account.</strong>
               </td>
-              ${computedItems.map(c => `<td>${c.hasItem ? (c.spares > 0 ? formatINR(c.spares) : '₹ 0') : ''}</td>`).join('')}
+              ${computedItems.map(c => `
+                <td style="border: 1px solid #000000; padding: 3px 2px; text-align: center; vertical-align: middle; font-size: 8px;">
+                  ${c.hasItem ? c.spares : ''}
+                </td>
+              `).join('')}
             </tr>
-            <tr style="background-color: #fafafa;">
-              <td class="pv-price-label-col">Unit Rate</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? (c.unitRate > 0 ? formatINR(c.unitRate) : '₹ 0') : ''}</td>`).join('')}
+            <tr>
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Unit Rate</td>
+              ${computedItems.map(c => `
+                <td style="border: 1px solid #000000; padding: 3px 2px; text-align: center;">
+                  ${c.hasItem ? (c.unitRate > 0 ? formatINR(c.unitRate) : '₹ 0') : ''}
+                </td>
+              `).join('')}
             </tr>
-            <tr style="background-color: #f5f5f5; font-weight: bold;">
-              <td class="pv-price-label-col">Total Rate</td>
-              ${computedItems.map(c => `<td>${c.hasItem ? (c.totalRate > 0 ? formatINR(c.totalRate) : '₹ 0') : ''}</td>`).join('')}
+            <tr>
+              <td style="border: 1px solid #000000; padding: 3px 4px; text-align: center; font-weight: bold;">Total Rate</td>
+              ${computedItems.map(c => `
+                <td style="border: 1px solid #000000; padding: 3px 2px; text-align: center;">
+                  ${c.hasItem ? (c.totalRate > 0 ? formatINR(c.totalRate) : '₹ 0') : ''}
+                </td>
+              `).join('')}
             </tr>
-          </tbody>
-        </table>
 
-        ${isLastChunk ? `
-        <!-- Commercial Summary Rows Below Matrix Table -->
-        <table class="pv-price-table" style="margin-top: 10px;">
-          <tbody>
+            ${isLastChunk ? `
+            <!-- Summary Breakdown Rows Matching Reference Screenshot -->
             <tr>
-              <td class="pv-price-summary-label" style="width: 220px;">
-                Extra for 3.2 Certificatation Charges.
+              <td style="border: 1px solid #000000; padding: 3px 6px; text-align: left; font-size: 7.5px; line-height: 1.15;">
+                Extra for 3.2<br/>
+                Certificataton<br/>
+                Charges.
               </td>
-              <td style="width: 60px; text-align: center; font-weight: bold;">
+              <td style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-size: 8px;">
                 ${pricing.cert32Percent}%
               </td>
-              <td class="pv-price-summary-val">
+              <td colspan="${totalCols - 1}" style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-size: 8.5px;">
                 ${formatINR(pricing.cert32Amount)}
               </td>
             </tr>
             <tr>
-              <td class="pv-price-summary-label">
-                Extra for Packing &amp; Forwarding Charges
+              <td style="border: 1px solid #000000; padding: 3px 6px; text-align: left; font-size: 7.5px; line-height: 1.15;">
+                Extra for Packing &amp;<br/>
+                Forwarding Charges
               </td>
-              <td style="text-align: center; font-weight: bold;">
+              <td style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-size: 8px;">
                 ${pricing.pfPercent}%
               </td>
-              <td class="pv-price-summary-val">
+              <td colspan="${totalCols - 1}" style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-size: 8.5px;">
                 ${formatINR(pricing.pfAmount)}
               </td>
             </tr>
             <tr>
-              <td class="pv-price-summary-label" colspan="2">
-                Third Party Inspection (TPIA) required then charges will be Extra to your account.
+              <td colspan="2" style="border: 1px solid #000000; padding: 3px 6px; text-align: left; font-size: 7.5px; line-height: 1.15;">
+                Third Party Inspection<br/>
+                (TPIA) required then<br/>
+                charges will be Extra to<br/>
+                your account.
               </td>
-              <td class="pv-price-summary-val">
+              <td colspan="${totalCols - 1}" style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-size: 8.5px;">
                 ${formatINR(pricing.tpiAmount)}
               </td>
             </tr>
-            <tr style="background-color: #fafafa;">
-              <td class="pv-price-summary-label" colspan="2">
-                Grand Total (Inc. TPI, P&amp;F, Certi., etc.)
+            <tr>
+              <td colspan="2" style="border: 1px solid #000000; padding: 4px 6px; text-align: left; font-size: 8px; font-weight: bold; line-height: 1.15;">
+                Grand Total (Inc. TPI, P&amp;F,<br/>
+                Certi., etc.)
               </td>
-              <td class="pv-price-summary-val" style="font-size: 9px;">
+              <td colspan="${totalCols - 1}" style="border: 1px solid #000000; padding: 4px 2px; text-align: center; font-weight: bold; font-size: 8.5px;">
                 ${formatINR(pricing.grandTotalBeforeGST)}
               </td>
             </tr>
             <tr>
-              <td class="pv-price-summary-label" colspan="2">
-                ${pricing.gstRate}% GST
+              <td colspan="2" style="border: 1px solid #000000; padding: 3px 6px; text-align: right; font-weight: bold; font-size: 8px;">
+                ${pricing.gstRate}%GST
               </td>
-              <td class="pv-price-summary-val">
+              <td colspan="${totalCols - 1}" style="border: 1px solid #000000; padding: 3px 2px; text-align: center; font-weight: bold; font-size: 8.5px;">
                 ${formatINR(pricing.gstAmount)}
               </td>
             </tr>
-            <tr style="background-color: #f0f0f0;">
-              <td class="pv-price-summary-label" colspan="2" style="font-size: 9.5px; font-weight: 900;">
+            <tr>
+              <td colspan="2" style="border: 1px solid #000000; padding: 4px 6px; text-align: left; font-weight: bold; font-size: 8.5px;">
                 Grand Total With GST
               </td>
-              <td class="pv-price-summary-val" style="font-size: 10px; font-weight: 900; color: #000000;">
+              <td colspan="${totalCols - 1}" style="border: 1px solid #000000; padding: 4px 2px; text-align: center; font-weight: bold; font-size: 8.5px;">
                 ${formatINR(pricing.grandTotalWithGST)}
               </td>
             </tr>
+            ` : ''}
           </tbody>
         </table>
-        ` : `
-        <div style="margin-top: 15px; text-align: right; font-size: 8px; color: #666; font-style: italic;">
-          (Price Table continued on next page...)
-        </div>
-        `}
 
       </div>
 
-      ${renderOfficialFooter()}
+      ${renderFormatOnlyFooter()}
     </div>
   `;
 }

@@ -7,15 +7,10 @@ export function calculateItemPricing(item) {
   if (!item) return item;
   const quantity = item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1;
   const unitPrice = Number(item.unitPrice) || 0;
-  const ndtCharges = Number(item.ndtCharges) || 0;
-  const specialTestingCharges = Number(item.specialTestingCharges) || 0;
-  const sparesCharges = Number(item.sparesCharges) || 0;
-  const cert32Charges = Number(item.cert32Charges) || 0;
-  const pfCharges = Number(item.pfCharges) || 0;
-  const tpiCharges = Number(item.tpiCharges) || 0;
   const discountPercent = Number(item.discountPercent) || 0;
 
-  const unitRateBeforeDiscount = unitPrice + ndtCharges + specialTestingCharges + sparesCharges + cert32Charges + pfCharges + tpiCharges;
+  // In accordance with Price Part-II format: NDT, TPIA, and Spec Test are common for all, NOT separate per-item charges
+  const unitRateBeforeDiscount = unitPrice;
   const unitRate = unitRateBeforeDiscount * (1 - discountPercent / 100);
   const lineTotalExclGST = unitRate * quantity;
 
@@ -23,12 +18,12 @@ export function calculateItemPricing(item) {
     ...item,
     quantity,
     unitPrice,
-    ndtCharges,
-    specialTestingCharges,
-    sparesCharges,
-    cert32Charges,
-    pfCharges,
-    tpiCharges,
+    ndtCharges: 0,
+    specialTestingCharges: 0,
+    sparesCharges: 0,
+    cert32Charges: 0,
+    pfCharges: 0,
+    tpiCharges: 0,
     discountPercent,
     unitRateBeforeDiscount,
     unitRate,
@@ -57,6 +52,10 @@ export function calculateQuotationPricing(quotationOrItems, options = {}) {
   const pfPercent = opts.pfPercent !== undefined && opts.pfPercent !== null ? Number(opts.pfPercent) : 5;
   const gstRate = opts.gstRate !== undefined && opts.gstRate !== null ? Number(opts.gstRate) : 18;
 
+  const ndtAmount = Number(opts.ndtCharges !== undefined ? opts.ndtCharges : (opts.commercialTotals?.ndtAmount || 0));
+  const specialTestingAmount = Number(opts.specialTestingCharges !== undefined ? opts.specialTestingCharges : (opts.commercialTotals?.specialTestingAmount || 0));
+  const sparesAmount = Number(opts.sparesCharges !== undefined ? opts.sparesCharges : (opts.commercialTotals?.sparesAmount || 0));
+
   let tpiAmount = 0;
   if (opts.tpiCharges !== undefined && opts.tpiCharges !== null) {
     tpiAmount = Number(opts.tpiCharges);
@@ -71,7 +70,7 @@ export function calculateQuotationPricing(quotationOrItems, options = {}) {
   const cert32Amount = (baseTotalRateSum * cert32Percent) / 100;
   const pfAmount = (baseTotalRateSum * pfPercent) / 100;
 
-  const grandTotalBeforeGST = baseTotalRateSum + cert32Amount + pfAmount + tpiAmount;
+  const grandTotalBeforeGST = baseTotalRateSum + cert32Amount + pfAmount + tpiAmount + ndtAmount + specialTestingAmount + sparesAmount;
   const gstAmount = grandTotalBeforeGST * (gstRate / 100);
   const grandTotalWithGST = grandTotalBeforeGST + gstAmount;
 
@@ -79,6 +78,12 @@ export function calculateQuotationPricing(quotationOrItems, options = {}) {
     items: processedItems,
     baseTotalRateSum,
     subtotalExclGST: baseTotalRateSum,
+    ndtCharges: ndtAmount,
+    ndtAmount,
+    specialTestingCharges: specialTestingAmount,
+    specialTestingAmount,
+    sparesCharges: sparesAmount,
+    sparesAmount,
     cert32Percent,
     cert32Amount,
     pfPercent,
@@ -93,6 +98,9 @@ export function calculateQuotationPricing(quotationOrItems, options = {}) {
     grandTotal: grandTotalWithGST,
     commercialTotals: {
       subtotalExclGST: baseTotalRateSum,
+      ndtAmount,
+      specialTestingAmount,
+      sparesAmount,
       cert32Percent,
       cert32Amount,
       pfPercent,
