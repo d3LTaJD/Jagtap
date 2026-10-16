@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Factory,
+  Download,
+  IndianRupee,
   Search,
   Clock,
   AlertTriangle,
@@ -24,6 +26,7 @@ import {
   Tag
 } from 'lucide-react';
 import api from '../api/client';
+import AdvancePaymentModal from '../components/AdvancePaymentModal';
 import { useAbility } from '../context/AbilityContext';
 
 export default function WorkOrders() {
@@ -40,6 +43,7 @@ export default function WorkOrders() {
   const [selectedWo, setSelectedWo] = useState(null);
   const [gateBlockedModal, setGateBlockedModal] = useState(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [advanceModalState, setAdvanceModalState] = useState({ isOpen: false, proformaInvoice: null, workOrder: null });
 
   // Form creation states
   const [customers, setCustomers] = useState([]);
@@ -367,9 +371,9 @@ export default function WorkOrders() {
             <ShieldCheck className="w-5 h-5" />
           </div>
           <div>
-            <span className="font-black text-sm block">Authoritative Hard Drawing Gate (Zero Manual Override)</span>
+            <span className="font-black text-sm block">4-Stage Production Release Workflow (Hard Gating Policy)</span>
             <p className="text-slate-300 font-medium mt-0.5">
-              Production Work Orders cannot be released until the technical drawing is approved by TDS and frozen into an immutable revision snapshot.
+              1. Customer PO Recorded (OA Issued) ➔ 2. Mandatory 10% Advance Payment Verified ➔ 3. GAD & QAP Approved (TDS Frozen Snapshot) ➔ 4. Released to Factory Floor.
             </p>
           </div>
         </div>
@@ -404,9 +408,9 @@ export default function WorkOrders() {
             className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
           >
             <option value="all">Show All Work Orders ({workOrders.length})</option>
+            <option value="AWAITING_ADVANCE">Awaiting 10% Advance ({stats.awaitingAdvance})</option>
             <option value="PENDING_DRAWING_APPROVAL">Pending Drawing Approval ({stats.pending})</option>
             <option value="RELEASED">Released to Floor ({stats.released})</option>
-            <option value="IN_PRODUCTION">In Production ({stats.production})</option>
           </select>
         </div>
       </div>
@@ -429,12 +433,12 @@ export default function WorkOrders() {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
-                <th className="py-3 px-4">Work Order ID</th>
+                <th className="py-3 px-4">Work Order & PO</th>
                 <th className="py-3 px-4">Customer & Quotation</th>
-                <th className="py-3 px-4">Linked Drawing</th>
-                <th className="py-3 px-4">Approved Snapshot</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Production Gate & Actions</th>
+                <th className="py-3 px-4">Stage 1 & 2: OA & Advance</th>
+                <th className="py-3 px-4">Stage 3: Linked Drawing</th>
+                <th className="py-3 px-4">Production Gate</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -461,8 +465,11 @@ export default function WorkOrders() {
                     <tr key={wo._id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4">
                         <span className="font-mono font-black text-slate-900 text-xs">{wo.workOrderId}</span>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {wo.items?.length || 0} valve item(s)
+                        {wo.customerPoNumber && (
+                          <p className="text-[11px] font-bold text-slate-700 mt-0.5">PO #{wo.customerPoNumber}</p>
+                        )}
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          {wo.items?.length || 0} valve item(s) {wo.customerDeliveryDate ? `• CDD: ${new Date(wo.customerDeliveryDate).toLocaleDateString()}` : ''}
                         </p>
                       </td>
 
@@ -486,7 +493,7 @@ export default function WorkOrders() {
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-amber-50 text-amber-800 border border-amber-200">
-                                  ⌛ Drawing: {targetRevLabel} — UNDER REVIEW
+                                  ⏳ Drawing: {targetRevLabel} — UNDER REVIEW
                                 </span>
                               )}
                             </div>
@@ -590,6 +597,62 @@ export default function WorkOrders() {
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+
+            {/* Order Acceptance & 10% Advance Card */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Customer PO & Order Acceptance</span>
+                <span className="font-bold text-slate-900 text-sm mt-0.5 block">
+                  PO: {selectedWo.customerPoNumber || selectedWo.orderAcceptance?.customerPoNumber || 'N/A'} {selectedWo.orderAcceptance?.oaNumber ? `(${selectedWo.orderAcceptance.oaNumber})` : ''}
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  CDD: {selectedWo.customerDeliveryDate ? new Date(selectedWo.customerDeliveryDate).toLocaleDateString() : '-'} | TPIA: {selectedWo.orderAcceptance?.tpiaScope || 'Self'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectedWo.orderAcceptance && (
+                  <a
+                    href={`/api/order-acceptances/${selectedWo.orderAcceptance._id || selectedWo.orderAcceptance}/pdf?token=${encodeURIComponent(localStorage.getItem('token') || '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs border border-indigo-200 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" /> OA PDF
+                  </a>
+                )}
+                {selectedWo.customerProformaInvoice && (
+                  <a
+                    href={`/api/order-acceptances/proforma-invoice/${selectedWo.customerProformaInvoice._id || selectedWo.customerProformaInvoice}/pdf?token=${encodeURIComponent(localStorage.getItem('token') || '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl text-xs border border-emerald-200 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" /> 10% PI PDF
+                  </a>
+                )}
+                {selectedWo.isAdvanceReceived ? (
+                  <span className="px-3 py-1 rounded-full font-black bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs">
+                    10% Advance Cleared
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (selectedWo.customerProformaInvoice) {
+                        setAdvanceModalState({
+                          isOpen: true,
+                          proformaInvoice: selectedWo.customerProformaInvoice,
+                          workOrder: selectedWo
+                        });
+                      }
+                    }}
+                    className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <IndianRupee className="w-3.5 h-3.5" /> Record 10% Advance
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Drawing Snapshot Card */}
@@ -862,6 +925,24 @@ export default function WorkOrders() {
           </div>
         </div>
       )}
+
+      {advanceModalState.isOpen && (
+        <AdvancePaymentModal
+          proformaInvoice={advanceModalState.proformaInvoice}
+          workOrder={advanceModalState.workOrder}
+          isOpen={advanceModalState.isOpen}
+          onClose={() => setAdvanceModalState({ isOpen: false, proformaInvoice: null, workOrder: null })}
+          onSuccess={async () => {
+            showToast('10% Advance verified and recorded successfully!');
+            await fetchWorkOrders();
+          }}
+        />
+      )}
     </div>
   );
 }
+
+
+
+
+

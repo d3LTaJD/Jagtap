@@ -1,12 +1,15 @@
-const WorkOrder = require('../models/WorkOrder');
+﻿const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
 const Drawing = require('../models/Drawing');
 const Customer = require('../models/Customer');
 const User = require('../models/User');
 const Enquiry = require('../models/Enquiry');
+const OrderAcceptance = require('../models/OrderAcceptance');
+const CustomerProformaInvoice = require('../models/CustomerProformaInvoice');
 const tdsService = require('../services/tdsService');
 const { getNextSequenceValue } = require('../utils/counter');
 const { logActivity } = require('../utils/logger');
+const { notifyRoles } = require('../services/notificationService');
 
 /**
  * List all Work Orders
@@ -33,6 +36,8 @@ exports.getWorkOrders = async (req, res, next) => {
       .populate('quotation', 'quotationId grandTotal status')
       .populate('drawing', 'drawingId drawingNumber drawingTitle status activeApprovedRevision')
       .populate('releasedBy', 'name email role')
+      .populate('orderAcceptance', 'oaNumber oaDate grandTotal tpiaScope customerDeliveryDate')
+      .populate('customerProformaInvoice', 'piNumber grandTotal paymentStatus paymentReference')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -56,7 +61,9 @@ exports.getWorkOrder = async (req, res, next) => {
       .populate('customer')
       .populate('quotation')
       .populate('drawing')
-      .populate('releasedBy', 'name email role');
+      .populate('releasedBy', 'name email role')
+      .populate('orderAcceptance', 'oaNumber oaDate grandTotal tpiaScope customerDeliveryDate')
+      .populate('customerProformaInvoice', 'piNumber grandTotal paymentStatus paymentReference');
 
     if (!workOrder) {
       return res.status(404).json({ status: 'fail', message: 'Work Order not found' });
@@ -104,8 +111,13 @@ exports.createWorkOrder = async (req, res, next) => {
 
     const now = new Date();
     const prefix = `WO-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const seq = await getNextSequenceValue(prefix);
-    const workOrderId = `${prefix}-${String(seq).padStart(4, '0')}`;
+    let workOrderId = '';
+    while (true) {
+      const seq = await getNextSequenceValue(prefix);
+      workOrderId = `${prefix}-${String(seq).padStart(4, '0')}`;
+      const exists = await WorkOrder.findOne({ workOrderId });
+      if (!exists) break;
+    }
 
     const workOrderItems = items.length > 0 ? items : (quotation.items || []).map((it, idx) => ({
       itemNo: idx + 1,
@@ -155,7 +167,9 @@ exports.createWorkOrder = async (req, res, next) => {
       .populate('customer', 'companyName primaryContactName emailAddress customerId')
       .populate('quotation', 'quotationId grandTotal status')
       .populate('drawing', 'drawingId drawingNumber drawingTitle status activeApprovedRevision revisions')
-      .populate('releasedBy', 'name email role');
+      .populate('releasedBy', 'name email role')
+      .populate('orderAcceptance', 'oaNumber oaDate grandTotal tpiaScope customerDeliveryDate')
+      .populate('customerProformaInvoice', 'piNumber grandTotal paymentStatus paymentReference');
 
     if (typeof req.get === 'function') {
       await logActivity({
@@ -166,6 +180,18 @@ exports.createWorkOrder = async (req, res, next) => {
         resourceName: workOrder.workOrderId,
         details: `Work Order drafted: ${workOrder.workOrderId} (Linked Drawing: ${drawing.drawingId} ${targetRevLabel})`
       });
+    }
+
+    try {
+      await notifyRoles({
+        roles: ['PRODUCTION', 'DESIGN', 'SA', 'MGR', 'DIRECTOR', 'DIR', 'SALES'],
+        type: 'WORK_ORDER_CREATED',
+        title: `📋 Work Order Created: ${workOrder.workOrderId}`,
+        message: `Work Order ${workOrder.workOrderId} drafted for ${populatedWo?.customer?.companyName || 'Customer'}.`,
+        related_id: workOrder._id
+      });
+    } catch (notifErr) {
+      console.warn('Failed to send work order notification:', notifErr.message);
     }
 
     res.status(201).json({
@@ -219,3 +245,4 @@ exports.releaseWorkOrder = async (req, res, next) => {
     next(err);
   }
 };
+

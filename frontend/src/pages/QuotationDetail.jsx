@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   FileText, Download, User as UserIcon, CheckCircle, CheckCircle2,
   Clock, AlertCircle, ArrowLeft, Loader2, IndianRupee,
   Send, GitBranch, History, Printer, Lock, X, AlertTriangle, Save, File,
   Edit, Sliders, Shield, FileSpreadsheet, Settings, HelpCircle, Plus, Trash2, RefreshCw,
-  ClipboardCheck, LayoutGrid, Table2, Upload, Sparkles, Info
+  ClipboardCheck, LayoutGrid, Table2, Upload, Sparkles, Info, FileCheck
 } from 'lucide-react';
 import api from '../api/client';
 import { getRoleCode, useAbility } from '../context/AbilityContext';
@@ -19,6 +19,7 @@ import BulkActionsToolbar from '../components/BulkActionsToolbar';
 import CopySpecsModal from '../components/CopySpecsModal';
 import ExcelImportModal from '../components/ExcelImportModal';
 import RevisionHistoryModal from '../components/RevisionHistoryModal';
+import OrderAcceptanceModal from '../components/OrderAcceptanceModal';
 import { formatTextToMm } from '../utils/valveFormatter';
 import { calculateQuotationPricing, calculateItemPricing } from '../utils/quotationCalculator';
 import { applyBulkPricing, applySelectiveSpecCloning } from '../utils/quotationBulkOperations';
@@ -145,6 +146,8 @@ const QuotationDetail = () => {
   const [pricingSuggestions, setPricingSuggestions] = useState({});
   const [copySpecsModalState, setCopySpecsModalState] = useState({ isOpen: false, sourceIdx: 0 });
   const [excelImportModalOpen, setExcelImportModalOpen] = useState(false);
+  const [showOrderAcceptanceModal, setShowOrderAcceptanceModal] = useState(false);
+  const [orderAcceptanceData, setOrderAcceptanceData] = useState(null);
 
   const savedSnapshotRef = useRef(null);
 
@@ -165,6 +168,11 @@ const QuotationDetail = () => {
             productCategory: item.productCategory || q.enquiry?.productCategory || 'Valves'
           }));
           setItems(populatedItems);
+          try {
+            const oaRes = await api.get('/order-acceptances?search=');
+            const foundOa = oaRes.data.data?.orderAcceptances?.find(oa => oa.quotation?._id === id || oa.quotation === id || oa.quotation?.quotationId === q.quotationId);
+            if (foundOa) setOrderAcceptanceData(foundOa);
+          } catch (e) { console.warn('Could not fetch OA:', e); }
           
           const initialTech = {
             offerNo: q.quotationId || '',
@@ -1103,6 +1111,57 @@ const QuotationDetail = () => {
     }
   };
 
+  const [downloadingOa, setDownloadingOa] = useState(false);
+  const [downloadingPi, setDownloadingPi] = useState(false);
+
+  const handleDownloadOaPdf = async () => {
+    if (!orderAcceptanceData?._id) return;
+    setDownloadingOa(true);
+    try {
+      showToast('Generating official Order Acceptance PDF...', 'success');
+      const res = await api.get(`/order-acceptances/${orderAcceptanceData._id}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${orderAcceptanceData.oaNumber || 'Order_Acceptance'}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      showToast('Failed to download OA PDF: ' + (err.response?.data?.message || err.message), 'error');
+    } finally {
+      setDownloadingOa(false);
+    }
+  };
+
+  const handleDownloadPiPdf = async () => {
+    const piId = orderAcceptanceData?.proformaInvoice?._id || orderAcceptanceData?.proformaInvoice;
+    if (!piId) {
+      showToast('Proforma Invoice not found for this order.', 'error');
+      return;
+    }
+    setDownloadingPi(true);
+    try {
+      showToast('Generating 10% Advance Proforma Invoice PDF...', 'success');
+      const res = await api.get(`/order-acceptances/proforma-invoice/${piId}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${orderAcceptanceData?.proformaInvoice?.piNumber || 'Proforma_Invoice'}_10_Percent_Advance.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      showToast('Failed to download PI PDF: ' + (err.response?.data?.message || err.message), 'error');
+    } finally {
+      setDownloadingPi(false);
+    }
+  };
+
   const handleDownloadPdf = async () => {
     if (hasUnsavedChanges) {
       showToast('Please click "Save Quotation" first before downloading the PDF to prevent mismatch.', 'error');
@@ -1116,7 +1175,7 @@ const QuotationDetail = () => {
       window.open(url, '_blank');
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${quotation?.quotationId || 'Quotation'}.pdf`);
+      link.setAttribute('download', `${(quotation?.quotationId || 'Quotation').replace(/\//g, '_')}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1319,6 +1378,17 @@ const QuotationDetail = () => {
             <History className="w-4 h-4 text-brand-600" /> Revision History ({quotation.revisions?.length || 0})
           </button>
 
+          {/* STEP 7 ACTION: Order Acceptance / PO Recording */}
+          {!orderAcceptanceData && (isApproved || ['APPROVED', 'Approved', 'ACCEPTED', 'Accepted', 'SENT', 'Sent'].includes(quotation.status)) && (
+            <button 
+              onClick={() => setShowOrderAcceptanceModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer animate-pulse"
+              title="Record Customer PO and generate Order Acceptance (OA), 10% Advance PI, and Work Order"
+            >
+              <FileCheck className="w-4 h-4" /> Accept Order & Generate OA
+            </button>
+          )}
+
           {/* STEP 6 ACTION: 1-Click Client Email Dispatch */}
           <button 
             onClick={() => setShowEmailModal(true)}
@@ -1401,6 +1471,64 @@ const QuotationDetail = () => {
           })}
         </div>
       </div>
+
+            {/* Official Order Acceptance & 10% Advance PI Banner */}
+      {orderAcceptanceData && (
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 shadow-sm border border-indigo-900/50 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+              <FileCheck className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-base font-black">{orderAcceptanceData.oaNumber}</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Order Booked
+                </span>
+                {orderAcceptanceData.proformaInvoice?.paymentStatus === 'PAID' ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    10% Advance Verified
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    10% Advance Pending
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-300 font-medium mt-1">
+                Customer PO: <strong className="text-white">{orderAcceptanceData.customerPoNumber}</strong> | 
+                CDD: <strong className="text-white">{orderAcceptanceData.customerDeliveryDate ? new Date(orderAcceptanceData.customerDeliveryDate).toLocaleDateString() : '-'}</strong> | 
+                TPIA: <strong className="text-white">{orderAcceptanceData.tpiaScope}</strong>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleDownloadOaPdf}
+              disabled={downloadingOa}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              {downloadingOa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Order Acceptance PDF
+            </button>
+            {orderAcceptanceData.proformaInvoice && (
+              <button
+                onClick={handleDownloadPiPdf}
+                disabled={downloadingPi}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {downloadingPi ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 10% Advance PI PDF
+              </button>
+            )}
+            <Link
+              to="/app/work-orders"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border border-slate-700 cursor-pointer"
+            >
+              View Work Order
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Return Reason Banner (if returned by Checker) */}
       {quotation.returnReason && (
@@ -2020,7 +2148,7 @@ const QuotationDetail = () => {
                   <input
                     type="text"
                     disabled
-                    value={techFields.offerNo || quotation.quotationId || 'PV/S/QTN/P-XXX/26-27'}
+                    value={techFields.offerNo || quotation.quotationId || 'PV/J/QTN/P-001/26-27'}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-800 outline-none cursor-not-allowed"
                   />
                 </div>
@@ -2165,13 +2293,13 @@ const QuotationDetail = () => {
               {/* Technical Part - I Scope Header */}
               <div className="pt-4 border-t border-slate-200">
                 <div className="text-center py-2 bg-slate-100 rounded-xl border border-slate-200 mb-5">
-                  <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase">TECHNICAL PART – I</h3>
+                  <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase">TECHNICAL PART - I</h3>
                 </div>
 
                 <div className="space-y-4">
                   {/* Bullet 1: Compliance */}
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-800 font-bold text-base mt-1.5">•</span>
+                    <span className="text-slate-800 font-bold text-base mt-1.5">&bull;</span>
                     <div className="flex-1">
                       <input
                         type="text"
@@ -2186,7 +2314,7 @@ const QuotationDetail = () => {
                   {/* Bullet 2: Deviations */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
-                      <span className="text-slate-800 font-bold text-base">•</span>
+                      <span className="text-slate-800 font-bold text-base">&bull;</span>
                       <span className="text-sm font-bold text-slate-800">Deviation, If any</span>
                     </div>
 
@@ -2808,8 +2936,20 @@ const QuotationDetail = () => {
           </div>
         </div>
       )}
+      <OrderAcceptanceModal
+        quotation={quotation}
+        isOpen={showOrderAcceptanceModal}
+        onClose={() => setShowOrderAcceptanceModal(false)}
+        onSuccess={(data) => {
+          setOrderAcceptanceData(data.orderAcceptance);
+          setQuotation(prev => ({ ...prev, status: 'ACCEPTED' }));
+          showToast('Order Acceptance & 10% Advance PI created successfully!');
+        }}
+      />
     </div>
   );
 };
 
 export default QuotationDetail;
+
+

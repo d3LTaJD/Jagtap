@@ -16,7 +16,7 @@ function renderTechnicalPart1(quotation) {
   const customer = quotation.customer || {};
   const enquiry = quotation.enquiry || {};
 
-  const offerNo = formatPdfValue(quotation.quotationId, 'PV/S/QTN/P-013/26-27');
+  const offerNo = formatPdfValue(quotation.quotationId, 'PV/J/QTN/P-001/26-27');
   const offerDate = formatDate(quotation.createdAt || new Date());
   
   const rawCustomerName = quotation.customerName || quotation.senderCompany || enquiry.senderCompany || customer.companyName || quotation.clientName || 'Petro Valves';

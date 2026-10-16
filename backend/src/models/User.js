@@ -4,7 +4,8 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   userId: { type: String, unique: true, sparse: true },   // USR-NNNN — auto-generated
   name: { type: String, required: true },
-  displayName: { type: String },                        // Short name shown in mobile header
+  displayName: { type: String },
+  initials: { type: String, trim: true },                        // Single/multi-character code e.g. 'J' for Offer No                        // Short name shown in mobile header
   mobile_number: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   password: { type: String },

@@ -4,6 +4,7 @@ const { notifyRoles, sendEmail } = require('../services/notificationService');
 const ActivityLog = require('../models/ActivityLog');
 const { getNextSequenceValue } = require('../utils/counter');
 const { hasPermission } = require('../config/permissions');
+const { generateQapPdf } = require('../services/qapPdfService');
 
 exports.generateQapFromQuotation = async (req, res, next) => {
   try {
@@ -259,129 +260,825 @@ exports.generateQapFromQuotation = async (req, res, next) => {
       if (hasIbrCe) addDoc('IBR Form III-C / CE Certificate of Conformance');
       if (hasValidation) addDoc('API 6D Design Validation Report');
 
-      if (isCheckValve && defaults.designStd === 'API 6D 25TH ED') {
-        addDoc('API 6D Annex C - Certificate of Conformance');
-        addDoc('API 6D Annex D - Qualification of Inspections and Test Personnel');
-        addDoc('API 6D Annex G - Requirements for Non-destructive Examination (NDE)');
-        addDoc('API 6D Annex H - Supplementary Documentation Requirements');
-      }
-
       addDoc('Hydrostatic & Pneumatic Test Report');
       addDoc('Visual & Painting Inspection DFT Report');
       addDoc('Final Dimension & Packing List Checksheet');
 
       // ─────────────────────────────────────────────────────────────────
-      // Add activities to inspection activities list
+      // DYNAMIC 7-STAGE PETRO VALVES QAP ACTIVITIES GENERATION
+      // Matching 3.1_QAP Format No. R/5.2/1 Rev01
       // ─────────────────────────────────────────────────────────────────
-      const addActivity = (stage, name, refDoc, criteria, insType) => {
+      const p = getTestPressures(classVal);
+      const d = getTestDurations(sizeVal);
+      const isBW = (item.description || '').toUpperCase().includes('BW') || 
+                   (qFields.valve_ends || '').toUpperCase().includes('BW');
+
+      const mocBody = item.materialGrade || qFields.valve_moc_body || defaults.mocBody;
+      const mocBall = item.trimMaterial || qFields.valve_moc_ball || defaults.mocBall;
+      const mocStem = qFields.valve_moc_stem || defaults.mocStem;
+      const mocSeat = qFields.valve_moc_seat || defaults.mocSeat;
+      const mocFastener = qFields.valve_moc_fastener || 'ASTM A193 Gr.B7 / ASTM A194 Gr.2H';
+      const mocPup = qFields.valve_moc_pup || 'ASTM A106 Gr.B';
+
+      let actIndex = 1;
+      const pushAct = (data) => {
         activities.push({
+          srNo: String(actIndex++),
           activityNo: activities.length + 1,
-          stageOfManufacture: stage,
-          activityName: name,
-          referenceDocument: refDoc,
-          acceptanceCriteria: criteria,
-          inspectionType: insType,
           status: 'Planned',
-          responsibleParty: 'Manufacturer / TPI'
+          responsibleParty: 'Manufacturer / TPI',
+          ...data
         });
       };
 
-      // 1. PIM & Procedures
-      addActivity('Pre-manufacturing', 'Review of QAP, WPS, PQR, and Welder Qualifications', `${defaults.designStd} / ASME Sec IX`, 'Approved documentation and welder performance records', 'R');
-      
-      // 2. Material verification
-      const partLabel = (isCheckValve || isGlobeValve) ? 'Disc/Wedge' : 'Ball';
-      const materialGradeInfo = `Body: ${defaults.mocBody}, ${partLabel}: ${defaults.mocBall}, Stem: ${defaults.mocStem}, Seat: ${defaults.mocSeat}`;
-      addActivity('Material Receipt', `Verification of material identity, certificates, and marking (${materialGradeInfo})`, 'EN 10204 / ASTM Spec', 'Verification of marking and chemical/physical test compliance', 'W');
-      addActivity('Heat Treatment', 'Verification of Solution Annealing Heat Treatment', 'Material Standard', 'MICRO/Macro structure and hardness conformance', 'R');
-
-      // 3. NDT & Supplementary Tests
-      if (hasRT) {
-        addActivity('NDT', `Radiographic Examination (RT) of body casting parts`, 'ASME Sec V Art 2', 'ASME B16.34 / API 6D acceptance criteria (free from cracks/voids)', 'W');
-      }
-      if (hasUT) {
-        addActivity('NDT', `Ultrasonic Testing (UT) of forged valve parts`, 'ASME Sec V Art 5', 'ASME B16.34 / API 6D acceptance criteria (free from internal flaws)', 'W');
-      }
-      if (hasDPT) {
-        addActivity('NDT', 'Liquid Dye Penetrant Testing (DPT) on machined surfaces', 'ASME Sec V Art 6', 'ASME B16.34 / API 6D', 'W');
-      }
-      if (hasMPT) {
-        addActivity('NDT', 'Magnetic Particle Testing (MPT) on welded joints / forgings', 'ASME Sec V Art 7', 'ASME B16.34 / API 6D', 'W');
-      }
-      if (hasPMI) {
-        addActivity('Inspection', 'Positive Material Identification (PMI) of critical alloy components', 'API 578', 'Chemical composition verification', 'W');
-      }
-
-      // 4. Machining & Assembly
-      addActivity('In-process Machining', 'Dimensional check & Visual Inspection of body, bonnet, and connector parts', `Manufacturing Drawing / ${defaults.designStd}`, 'Dimensions, wall thickness, and face-to-face as per B16.10', 'W');
-      
-      if (isCheckValve) {
-        addActivity('Assembly', 'Assembly check, disc movement, and alignment check', 'QCP Manual', 'Correct assembly, disc alignment, and smooth self-operating movement', 'W');
-      } else {
-        addActivity('Assembly', 'Assembly check, seating torque, and alignment check', 'QCP Manual', 'Correct assembly, component alignment, and smooth operation', 'W');
-      }
-
-      // 5. Electrical test
-      if (!isCheckValve && !isGlobeValve) {
-        addActivity('Testing', 'Antistatic Electrical Resistance Test', 'API 6D', 'Resistance < 10 Ohms at 12V DC between stem, ball, and body', 'W');
-      }
-
-      // 6. Hydrostatic/Pneumatic Tests
-      const p = getTestPressures(classVal);
-      const d = getTestDurations(sizeVal);
-      
-      addActivity('Final Testing', `Hydrostatic Shell & Seat Testing`, defaults.testingStd, `Shell: ${p.shell} PSI for ${d.shell}, Seat: ${p.seat} PSI for ${d.seat}`, 'H');
-      
-      if (isGlobeValve) {
-        addActivity('Final Testing', `Hydrostatic Backseat Testing`, defaults.testingStd, `Backseat: ${p.seat} PSI for ${d.seat}`, 'H');
-      }
-
-      if (!isCheckValve) {
-        addActivity('Final Testing', `Low Pressure Pneumatic Air Seat Testing`, defaults.testingStd, `Air Seat: ${p.air} PSI for ${d.seat}`, 'H');
-      }
-
-      if (!isCheckValve && defaults.isTMBV) {
-        addActivity('Final Testing', `Double Block & Bleed (DBB) Hydrostatic Test`, 'API 6D', `Seat: ${p.seat} PSI for ${d.seat}`, 'W');
-      }
-      if (hasFugitive) {
-        addActivity('Special Testing', 'Fugitive Emission Helium Leakage Testing', 'ISO 15848-1', 'Leakage rate conforming to specified class (A, B, or C)', 'W');
-      }
-      if (hasCryo) {
-        addActivity('Special Testing', 'Cryogenic Testing at Low Temperature', 'BS 6364', 'Seat leakage rate within BS 6364 limit', 'W');
-      }
-      if (hasDemo) {
-        addActivity('Special Testing', 'Functional Performance Testing under Pipe Load', 'Customer Specification', 'Functional operability without damage', 'W');
-      }
-
-      // 7. Surface prep, Painting & Final dispatch
-      addActivity('Painting', `Surface Preparation and Paint DFT Inspection`, 'Painting Specification', `DFT: Min ${defaults.paintingDft} shade as specified`, 'R');
-      addActivity('Packing & Dispatch', 'Final Visual Verification, Nameplate checks, and Packing Inspection', 'Packing Procedure', 'Identification tagging, secure seaworthy/roadworthy packaging', 'R');
-    });
-
-    // Fallback if no piping or ball valve items were parsed
-    if (!isPipingValve && activities.length === 0) {
-      activities.push({
-        activityNo: 1,
-        stageOfManufacture: 'Final Testing',
-        activityName: 'Hydrostatic Pressure Testing',
-        referenceDocument: 'Standard Code',
-        acceptanceCriteria: 'Conforming to code requirements',
-        inspectionType: 'H',
-        status: 'Planned'
+      // ────────────────── SECTION 1: RAW MATERIAL (Critical) ──────────────────
+      const bodyPartName = isBallValve ? '1) Body, Side P/c, Bonnet, Trunnion' : 
+                           (isCheckValve ? '1) Body, Cover Casting' : '1) Body, Bonnet Casting');
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: bodyPartName,
+        typeOfCheck: '1.Heat Treatment',
+        quantumOfCheck: '100%',
+        referenceDocument: mocBody,
+        acceptanceNorms: mocBody,
+        formatOfRecord: 'Foundry Report as per EN10204 Type (ISO 10474) 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
       });
-      docChecklists.push({ documentType: 'Hydrostatic Test Report', status: 'Awaited' });
-    }
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '2.Chem.Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocBody,
+        acceptanceNorms: mocBody,
+        formatOfRecord: 'Foundry Report as per EN10204 Type 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '3.Phy.Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocBody,
+        acceptanceNorms: mocBody,
+        formatOfRecord: 'Foundry Report as per EN10204 Type 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '4.Hardness Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocBody,
+        acceptanceNorms: mocBody,
+        formatOfRecord: 'Foundry Report as per EN10204 Type 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '5.Visual & Dim.',
+        quantumOfCheck: 'Visual 100% / Dimensions 1%',
+        referenceDocument: 'MSS-SP-55 & PV/PRO /VT/03',
+        acceptanceNorms: `${defaults.designStd}/ Casting Drg.`,
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: minTemp === '-29° C' ? '6.Impact Test at -29°C' : '6.Impact Test at 0°C',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: 'ASTM A 370',
+        acceptanceNorms: 'Energy Value 27J Avg./ 22J Min (One Spec)/ Applicable Material Std./ Data sheet',
+        formatOfRecord: 'Lab T.C/ Foundry T.C./ 3.1 Certi.',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '7.MPT Test (Casting of Body & S.P)*',
+        quantumOfCheck: '100%',
+        referenceDocument: 'ASME B16.34, App-II/ PV/PRO/MPT/03',
+        acceptanceNorms: 'ASME B16.34, App-II/ PV/PRO/MPT/03',
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I/O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+
+      // Component 2: Trim (Ball / Disc)
+      const trimPartName = isBallValve ? '2) Ball' : (isCheckValve ? '2) Swing Disc / Clapper' : '2) Disc / Wedge');
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: trimPartName,
+        typeOfCheck: '1.Heat Treatment',
+        quantumOfCheck: '100%',
+        referenceDocument: mocBall,
+        acceptanceNorms: mocBall,
+        formatOfRecord: 'Foundry Report as per EN10204 Type (ISO 10474) 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '2.Chem.Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocBall,
+        acceptanceNorms: mocBall,
+        formatOfRecord: 'Foundry Report as per EN10204 Type 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '3.Phy.Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocBall,
+        acceptanceNorms: mocBall,
+        formatOfRecord: 'Foundry Report as per EN10204 Type 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '4.Hardness Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocBall,
+        acceptanceNorms: mocBall,
+        formatOfRecord: 'Foundry Report as per EN10204 Type 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '5.Visual & Dim.',
+        quantumOfCheck: 'Visual 100% / Dimensions 1%',
+        referenceDocument: 'MSS-SP-55 & PV/PRO /VT/03',
+        acceptanceNorms: `${defaults.designStd}/ Casting Drg.`,
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: minTemp === '-29° C' ? '6.Impact Test at -29°C' : '6.Impact Test at 0°C',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: 'ASTM A 370',
+        acceptanceNorms: 'Energy Value 27J Avg./ 22J Min (One Spec)/ Applicable Material Std./ Data sheet',
+        formatOfRecord: 'Lab T.C/ Foundry T.C./ 3.1 Certi.',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+
+      // Component 3: Stem (R.bar)
+      if (!isCheckValve) {
+        pushAct({
+          sectionNo: '1',
+          sectionTitle: 'RAW MATERIAL (Critical)',
+          component: '3) Stem (R.bar)',
+          typeOfCheck: '1.Heat Treatment & Chem.Test',
+          quantumOfCheck: '100% Per R. Bar/ Heat',
+          referenceDocument: `${mocStem} (NO CASTING)`,
+          acceptanceNorms: `${mocStem} (NO CASTING)`,
+          formatOfRecord: 'Supplier/ Lab T.C / 3.1 Certi.',
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '1',
+          sectionTitle: 'RAW MATERIAL (Critical)',
+          component: '',
+          typeOfCheck: '2.Phy.Test',
+          quantumOfCheck: 'Per R. Bar/ Heat',
+          referenceDocument: mocStem,
+          acceptanceNorms: mocStem,
+          formatOfRecord: 'Supplier/ Lab T.C / 3.1 Certi.',
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '1',
+          sectionTitle: 'RAW MATERIAL (Critical)',
+          component: '',
+          typeOfCheck: '3.Hardness Test',
+          quantumOfCheck: 'Per R. Bar/ Heat',
+          referenceDocument: mocStem,
+          acceptanceNorms: mocStem,
+          formatOfRecord: 'Supplier/ Lab T.C / 3.1 Certi.',
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '1',
+          sectionTitle: 'RAW MATERIAL (Critical)',
+          component: '',
+          typeOfCheck: '4.Visual & Dim.',
+          quantumOfCheck: 'Visual 100% / Dimensions 1%',
+          referenceDocument: 'PV/PRO /VT/03/ Internal Drg.',
+          acceptanceNorms: 'PV/PRO /VT/03/ Internal Drg.',
+          formatOfRecord: 'Incoming GRN/ IIR',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '1',
+          sectionTitle: 'RAW MATERIAL (Critical)',
+          component: '',
+          typeOfCheck: '5.Impact Test at 0°C',
+          quantumOfCheck: 'Per R. Bar/ Heat',
+          referenceDocument: 'ASTM A 370',
+          acceptanceNorms: 'Energy Value 27J Avg./ 22J Min (One Spec)/ Applicable Material Std./ Data sheet',
+          formatOfRecord: 'Lab T.C/ Foundry T.C./ 3.1 Certi.',
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+      }
+
+      // Component 4: Seat Holder / Seat Ring
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: isBallValve ? '4) Seat Holder' : '4) Seat Ring',
+        typeOfCheck: '2.Chem.Test & Phy.Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocSeat,
+        acceptanceNorms: mocSeat,
+        formatOfRecord: 'Foundry Report as per EN10204 Type (ISO 10474) 3.1',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '3.Hardness Test',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: mocSeat,
+        acceptanceNorms: mocSeat,
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I/O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '5.Visual & Dim.',
+        quantumOfCheck: 'Visual 100% / Dimensions 1%',
+        referenceDocument: `PV/PRO /VT/03/ ${defaults.designStd}/ Drg.`,
+        acceptanceNorms: `PV/PRO /VT/03/ ${defaults.designStd}/ Drg.`,
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '1',
+        sectionTitle: 'RAW MATERIAL (Critical)',
+        component: '',
+        typeOfCheck: '6.Impact Test at 0°C',
+        quantumOfCheck: 'Per Heat',
+        referenceDocument: 'ASTM A 370',
+        acceptanceNorms: 'Energy Value 27J Avg./ 22J Min (One Spec)/ Applicable Material Std./ Data sheet',
+        formatOfRecord: 'Lab T.C/Foundry T.C./3.1 Certi.',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+
+      // ────────────────── SECTION 2: BOUGHTOUT ITEMS ──────────────────
+      pushAct({
+        sectionNo: '2',
+        sectionTitle: 'BOUGHTOUT ITEMS',
+        component: '1) Pressure boundry fastners. API 20 E BSL-1 (Critical)',
+        typeOfCheck: '1.Chem.Test & Phy.Test',
+        quantumOfCheck: 'Per Lot/Heat',
+        referenceDocument: mocFastener,
+        acceptanceNorms: mocFastener,
+        formatOfRecord: "Supplier's T.C/ Lab T.C./ 3.1 Certi.",
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '2',
+        sectionTitle: 'BOUGHTOUT ITEMS',
+        component: '',
+        typeOfCheck: '3.Hardness Test & Impact Test at -29°C',
+        quantumOfCheck: 'Per Lot/Heat',
+        referenceDocument: 'ASTM A 370',
+        acceptanceNorms: 'Energy Value 27J Avg./ 22J Min',
+        formatOfRecord: "Supplier's T.C/ Lab T.C./ 3.1 Certi.",
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '2',
+        sectionTitle: 'BOUGHTOUT ITEMS',
+        component: '',
+        typeOfCheck: '5.Dimensions',
+        quantumOfCheck: '1% Per Lot',
+        referenceDocument: 'Internal Drg. / ASME B18.2.1 / B18.2.2',
+        acceptanceNorms: 'Internal Drg. / ASME B18.2.1 / B18.2.2',
+        formatOfRecord: 'Incoming GRN/ Incoming inspection report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+
+      if (isBW) {
+        pushAct({
+          sectionNo: '2',
+          sectionTitle: 'BOUGHTOUT ITEMS',
+          component: '2) Pup Piece (Critical)',
+          typeOfCheck: '1.Chem.Test & Phy.Test',
+          quantumOfCheck: 'Per Lot/Heat',
+          referenceDocument: `${mocPup} / As per Approved G.A Drg.`,
+          acceptanceNorms: `${mocPup} / As per Approved G.A Drg.`,
+          formatOfRecord: "Supplier's T.C/ Lab TC.",
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '2',
+          sectionTitle: 'BOUGHTOUT ITEMS',
+          component: '',
+          typeOfCheck: '3.Hardness Test & Impact Test at -29°C',
+          quantumOfCheck: 'Per Lot/Heat',
+          referenceDocument: 'ASTM A370',
+          acceptanceNorms: 'Energy Value 27J Avg./ 22J Min(One Spec)',
+          formatOfRecord: "Supplier's T.C/ Lab TC.",
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '2',
+          sectionTitle: 'BOUGHTOUT ITEMS',
+          component: '',
+          typeOfCheck: '5.Visual & Dim.',
+          quantumOfCheck: '10%',
+          referenceDocument: 'Surface Defect/ Applicable Sch Th.',
+          acceptanceNorms: 'No Surface Defect Accepted/ Applicable Sch Th.',
+          formatOfRecord: 'Incoming GRN/ Incoming inspection report',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+      }
+
+      // ────────────────── SECTION 3: INPROCESS INP. ──────────────────
+      pushAct({
+        sectionNo: '3',
+        sectionTitle: 'INPROCESS INP.',
+        component: '1) Body, Side P/c, Ball, Stem (Critical Items)',
+        typeOfCheck: '1.Transfer Of Heat No. (Body & S/P) (If Remove during M/C)',
+        quantumOfCheck: '100%',
+        referenceDocument: 'Petro Q.M./ P.M.',
+        acceptanceNorms: 'Petro Q.M./ P.M.',
+        formatOfRecord: 'In Process Ins.Report/ Process Route Card/ Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      if (isBW) {
+        pushAct({
+          sectionNo: '3',
+          sectionTitle: 'INPROCESS INP.',
+          component: '',
+          typeOfCheck: '2.Pup Welding',
+          quantumOfCheck: '100%',
+          referenceDocument: 'As Per Petro WPS, PQR',
+          acceptanceNorms: 'As Per Petro WPS, PQR',
+          formatOfRecord: 'Weld Inspection Report',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '3',
+          sectionTitle: 'INPROCESS INP.',
+          component: '',
+          typeOfCheck: '3.RT of Butt Weld Joint',
+          quantumOfCheck: '100%',
+          referenceDocument: 'ASME BPVC Section V, Article 2',
+          acceptanceNorms: 'ASME SECT. VIII, Div.1, UW 51',
+          formatOfRecord: 'RT Report',
+          inHouseOutSource: 'O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '3',
+          sectionTitle: 'INPROCESS INP.',
+          component: '',
+          typeOfCheck: '4.MPT of Bevel End (Before & After Weld)',
+          quantumOfCheck: '100%',
+          referenceDocument: 'ASME BPVC Section V, Article 7',
+          acceptanceNorms: 'ASME BPVC, Section VIII, Division 1, Appendix 6',
+          formatOfRecord: 'MPT Test Report',
+          inHouseOutSource: 'I/O',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+      }
+
+      // ────────────────── SECTION 4: ASSEMBLY ──────────────────
+      const valveLabel = isBallValve ? 'Ball valve' : (isCheckValve ? 'Check valve' : (isGlobeValve ? 'Globe valve' : 'Gate valve'));
+      pushAct({
+        sectionNo: '4',
+        sectionTitle: 'ASSEMBLY',
+        component: valveLabel,
+        typeOfCheck: '1.Visual & Dim.',
+        quantumOfCheck: '100%',
+        referenceDocument: 'Approved GA Drg./ WI',
+        acceptanceNorms: 'Approved GA Drg./ WI',
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: '--'
+      });
+      pushAct({
+        sectionNo: '4',
+        sectionTitle: 'ASSEMBLY',
+        component: '',
+        typeOfCheck: '2.Fitment & Allignment',
+        quantumOfCheck: '100%',
+        referenceDocument: 'Approved GA Drg./ WI W.I : 5.6.1/03',
+        acceptanceNorms: 'Approved GA Drg./ WI W.I : 5.6.1/03',
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: '--'
+      });
+
+      // ────────────────── SECTION 5: FINAL INSPECTIONS ──────────────────
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: valveLabel,
+        typeOfCheck: '1.Visual',
+        quantumOfCheck: '100%',
+        referenceDocument: 'Approved G.A. Drg.',
+        acceptanceNorms: 'Approved G.A. Drg.',
+        formatOfRecord: 'Final Inspection Report Sheets',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'W'
+      });
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: '',
+        typeOfCheck: '2.Dimensions',
+        quantumOfCheck: '100%',
+        referenceDocument: 'Approved G.A. Drg.',
+        acceptanceNorms: 'Approved G.A. Drg.',
+        formatOfRecord: 'Final Inspection Report Sheets',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'W'
+      });
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: '',
+        typeOfCheck: '3.Hyd Body Test',
+        quantumOfCheck: '100%',
+        referenceDocument: `${defaults.testingStd} / Appvd. Drg.`,
+        acceptanceNorms: `Shell: ${p.shell} PSI for ${d.shell} (Zero Leakage)`,
+        formatOfRecord: 'Final Inspection Report Sheets',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'W'
+      });
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: '',
+        typeOfCheck: '4.Hyd Seat Test',
+        quantumOfCheck: '100%',
+        referenceDocument: `${defaults.testingStd} / Appvd. Drg.`,
+        acceptanceNorms: `Seat: ${p.seat} PSI for ${d.seat} (Zero Leakage)`,
+        formatOfRecord: 'Final Inspection Report Sheets',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'W'
+      });
+      if (!isCheckValve) {
+        pushAct({
+          sectionNo: '5',
+          sectionTitle: 'FINAL INSPECTIONS',
+          component: '',
+          typeOfCheck: '5.Air Seat Test',
+          quantumOfCheck: '100%',
+          referenceDocument: `${defaults.testingStd} / Appvd. Drg.`,
+          acceptanceNorms: `Air Seat: ${p.air} PSI for ${d.seat} (Zero Leakage)`,
+          formatOfRecord: 'Final Inspection Report Sheets',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'W'
+        });
+      }
+      if (isBallValve) {
+        pushAct({
+          sectionNo: '5',
+          sectionTitle: 'FINAL INSPECTIONS',
+          component: '',
+          typeOfCheck: '6.DBB Hydro for DBB Valves',
+          quantumOfCheck: '100%',
+          referenceDocument: `${defaults.designStd}`,
+          acceptanceNorms: `${defaults.designStd} Seat: ${p.seat} PSI`,
+          formatOfRecord: 'Final Inspection Report Sheets',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'W'
+        });
+        pushAct({
+          sectionNo: '5',
+          sectionTitle: 'FINAL INSPECTIONS',
+          component: '',
+          typeOfCheck: '7.Operational Torque Test',
+          quantumOfCheck: 'One Valve per size per Rating in each Group',
+          referenceDocument: `${defaults.designStd}`,
+          acceptanceNorms: 'Conforming to design torque chart',
+          formatOfRecord: 'Inspection Report',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+        pushAct({
+          sectionNo: '5',
+          sectionTitle: 'FINAL INSPECTIONS',
+          component: '',
+          typeOfCheck: '8.Antistatic Test',
+          quantumOfCheck: '100%',
+          referenceDocument: `${defaults.designStd}`,
+          acceptanceNorms: 'Resistance < 10 Ohms at 12V DC',
+          formatOfRecord: 'Inspection Report',
+          inHouseOutSource: 'I',
+          inspectionPvpl: 'P',
+          inspectionTpi: 'R'
+        });
+      }
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: '',
+        typeOfCheck: '9.Functional Test (Open & Close)',
+        quantumOfCheck: '10% Minimum 10 Cycles',
+        referenceDocument: `${defaults.designStd}`,
+        acceptanceNorms: 'Smooth operation across full stroke without binding',
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: '',
+        typeOfCheck: '10.Fire Safe Test',
+        quantumOfCheck: 'Type Test',
+        referenceDocument: 'API 6FA',
+        acceptanceNorms: 'API 6FA',
+        formatOfRecord: 'Fire Safe Test Certi.',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'R',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '5',
+        sectionTitle: 'FINAL INSPECTIONS',
+        component: '',
+        typeOfCheck: '11.Calibration of Inst.',
+        quantumOfCheck: '100%',
+        referenceDocument: `${defaults.designStd}/ PETRO Q.M.`,
+        acceptanceNorms: `${defaults.designStd}/ PETRO Q.M.`,
+        formatOfRecord: 'Calibration Certi.',
+        inHouseOutSource: 'O',
+        inspectionPvpl: 'R',
+        inspectionTpi: 'R'
+      });
+
+      // ────────────────── SECTION 6: PAINTING ──────────────────
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: valveLabel,
+        typeOfCheck: '1.Visual',
+        quantumOfCheck: '100%',
+        referenceDocument: 'As Per G.A. Drg.',
+        acceptanceNorms: 'As Per G.A. Drg.',
+        formatOfRecord: 'Surface Preparation Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: '',
+        typeOfCheck: '2.Draining',
+        quantumOfCheck: '100%',
+        referenceDocument: 'As Per G.A. Drg.',
+        acceptanceNorms: 'Complete water drainage & drying',
+        formatOfRecord: 'Inspection Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: '--'
+      });
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: '',
+        typeOfCheck: '3.Surface Preparation SA 2 1/2',
+        quantumOfCheck: '100%',
+        referenceDocument: 'G.A.Drg./ As per Petro Procedure/ WI 5.6.1-04',
+        acceptanceNorms: 'SA 2 1/2 blast cleaning profile (40-60 micron)',
+        formatOfRecord: 'Surface Preparation Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: '',
+        typeOfCheck: '4.Paint Coat',
+        quantumOfCheck: '100%/ Random',
+        referenceDocument: 'G.A.Drg./ As per Petro Procedure/ WI 5.6.1-04',
+        acceptanceNorms: `Min ${defaults.paintingDft} shade as specified`,
+        formatOfRecord: 'Paint Report',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: 'R'
+      });
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: '',
+        typeOfCheck: '5.Marking/ Tagging/ Name Plate',
+        quantumOfCheck: '100%/ Random',
+        referenceDocument: 'G.A.Drg./ As per Petro Procedure/ WI',
+        acceptanceNorms: 'MSS-SP-25 / API 6D standard permanent tagging',
+        formatOfRecord: 'Packing Slip',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: '--'
+      });
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: '',
+        typeOfCheck: '6.Auxillary Fitting',
+        quantumOfCheck: '100%/ Random',
+        referenceDocument: 'G.A.Drg./ As per Petro Procedure/ WI',
+        acceptanceNorms: 'Properly mounted, plugged, and secured',
+        formatOfRecord: 'Packing Slip',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: '--'
+      });
+      pushAct({
+        sectionNo: '6',
+        sectionTitle: 'PAINTING',
+        component: '',
+        typeOfCheck: '7.End Protector',
+        quantumOfCheck: '100%/ Random',
+        referenceDocument: 'G.A.Drg./ As per Petro Procedure/ WI',
+        acceptanceNorms: 'Plastic flange caps/bevel edge protectors installed',
+        formatOfRecord: 'Packing Slip',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P',
+        inspectionTpi: '--'
+      });
+
+      // ────────────────── SECTION 7: FINAL DOCUMENTATION ──────────────────
+      pushAct({
+        sectionNo: '7',
+        sectionTitle: 'FINAL DOCUMENTATION',
+        component: 'Final Documentation',
+        typeOfCheck: 'Review',
+        quantumOfCheck: '100%',
+        referenceDocument: `As Per ${defaults.designStd}/ Appvd. Drg./ W.O.`,
+        acceptanceNorms: `As Per ${defaults.designStd}/ Appvd. Drg./ W.O.`,
+        formatOfRecord: 'Final Dossier-IRN, 3.1 Certi. as per EN10204, Inps & Test Report, Drawing, Etc.',
+        inHouseOutSource: 'I',
+        inspectionPvpl: 'P/H',
+        inspectionTpi: 'R'
+      });
+    });
 
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
     const prefix = `QAP-${year}-${month}-`;
     const seq = await getNextSequenceValue(prefix);
+
+    const primaryItem = quotation.items?.[0] || {};
+    const qFields = primaryItem.dynamicFields || quotation.dynamicFields || {};
+    const { classVal, sizeVal, isBallValve, isCheckValve, isGlobeValve } = parseItemSpecs(primaryItem, quotation);
+    const defaults = isCheckValve ? getCheckValveDefaults(sizeVal, classVal, qFields) :
+                     (isGlobeValve ? getGlobeValveDefaults(sizeVal, classVal, qFields) : getBallValveDefaults(sizeVal, classVal, qFields));
+
+    const Customer = require('../models/Customer');
+    const customerDoc = await Customer.findById(quotation.customer);
+    const clientName = customerDoc?.companyName || quotation.customer?.companyName || 'M/s. PLANT TECH INDUSTRIAL SERVICES LIMITED';
+    const endUser = qFields.end_user || quotation.endUser || 'M/s. THINK GAS DISTRIBUTION PVT. LTD.';
+    const projectName = quotation.projectName || quotation.title || 'THINK GAS (AG&P) PROJECT';
+    const clientPoNo = quotation.customerPoNumber || quotation.poNumber || 'PTIS/HT/2026-27/JULY/47';
+    const clientPoDate = quotation.poDate || new Date('2026-07-29');
+
+    const valveTypeStr = isBallValve ? 'BALL VALVES' : (isCheckValve ? 'CHECK VALVES' : (isGlobeValve ? 'GLOBE VALVES' : 'GATE VALVES'));
+    const isBW = (primaryItem.description || '').toUpperCase().includes('BW') || (qFields.valve_ends || '').toUpperCase().includes('BW');
+    const endConnStr = isBW ? 'BW' : ((primaryItem.description || '').toUpperCase().includes('RTJ') ? 'RTJ' : 'RF');
+    const mocBody = primaryItem.materialGrade || qFields.valve_moc_body || defaults.mocBody;
+    const mocBall = primaryItem.trimMaterial || qFields.valve_moc_ball || defaults.mocBall;
+    const mocStem = qFields.valve_moc_stem || defaults.mocStem;
+    const mocSeat = qFields.valve_moc_seat || defaults.mocSeat;
+
+    const custInitials = clientName.replace(/[^a-zA-Z]/g, '').slice(0, 5).toUpperCase() || 'CUST';
+    const orderCode = quotation.quotationId ? quotation.quotationId.replace(/[^a-zA-Z0-9]/g, '') : 'P2627041';
+    const valveCode = isBallValve ? 'BV' : (isCheckValve ? 'CV' : 'GV');
+    const matCode = mocBody.includes('WCC') ? 'WCC' : (mocBody.includes('WCB') ? 'WCB' : 'CS');
+    const dynamicQapNumber = `PV/QAP/${custInitials}/${orderCode}/${valveCode}/${matCode}`;
     
     const qapData = {
       qapId: `${prefix}${String(seq).padStart(4, '0')}`,
+      qapNumber: dynamicQapNumber,
+      revisionNo: '00',
+      qapDate: new Date(),
       quotation: quotation._id,
       customer: quotation.customer,
       preparedBy: req.user._id,
+      clientName,
+      endUser,
+      projectName,
+      clientPoNo,
+      clientPoDate,
+      valveDetail: {
+        valveType: valveTypeStr,
+        designStandard: defaults.designStd,
+        testingStandard: defaults.testingStd,
+        itemCode: primaryItem.itemCode || orderCode + '01',
+        size: `${sizeVal}MM`,
+        pressureClass: classVal,
+        endConnection: endConnStr,
+        bodyMoc: mocBody,
+        trimMoc: mocBall,
+        stemMoc: mocStem,
+        seatMoc: mocSeat,
+        fastenerMoc: 'ASTM A193 Gr.B7 / ASTM A194 Gr.2H',
+        pupPieceMoc: 'ASTM A106 Gr.B',
+        paintingDft: defaults.paintingDft
+      },
+      formatNo: 'Format No.R/5.2/1  Rev01 Effective From 15-Sept-2022',
       activities,
       documents: docChecklists
     };
@@ -392,7 +1089,7 @@ exports.generateQapFromQuotation = async (req, res, next) => {
       roles: ['QC_ENGINEER'], 
       type: 'QAP_APPROVAL', 
       title: 'New QAP Generated', 
-      message: `QAP ${qap.qapId} generated and awaits your initial review.`, 
+      message: `QAP ${qap.qapNumber || qap.qapId} generated and awaits your initial review.`, 
       related_id: qap._id 
     });
 
@@ -464,6 +1161,14 @@ exports.updateQapStatus = async (req, res, next) => {
       updateData.assignedTo = assignedTo || null;
     }
 
+    // 4. Dynamic QAP header and matrix edit check
+    const allowedHeaderFields = ['qapNumber', 'revisionNo', 'qapDate', 'endUser', 'clientName', 'projectName', 'clientPoNo', 'clientPoDate', 'valveDetail', 'activities', 'documents', 'preparedByName', 'approvedByName'];
+    allowedHeaderFields.forEach(f => {
+      if (req.body[f] !== undefined) {
+        updateData[f] = req.body[f];
+      }
+    });
+
     const qap = await Qap.findByIdAndUpdate(req.params.id, updateData, { new: true })
       .populate('quotation')
       .populate('customer')
@@ -501,6 +1206,38 @@ exports.updateQapStatus = async (req, res, next) => {
 
     res.status(200).json({ status: 'success', data: { qap } });
   } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Download official Petro Valves Quality Assurance Plan PDF
+ */
+exports.downloadQapPdf = async (req, res, next) => {
+  try {
+    const qap = await Qap.findById(req.params.id)
+      .populate({
+        path: 'quotation',
+        populate: { path: 'customer' }
+      })
+      .populate('customer')
+      .populate('workOrder')
+      .populate('preparedBy', 'fullName name')
+      .populate('reviewedBy', 'fullName name')
+      .populate('approvedBy', 'fullName name');
+
+    if (!qap) {
+      return res.status(404).json({ status: 'error', message: 'QAP not found' });
+    }
+
+    const pdfBuffer = await generateQapPdf(qap);
+
+    const safeName = (qap.qapNumber || qap.qapId || 'QAP').replace(/[\/\\?%*:|"<>]/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[QAP PDF Download Error]', err);
     next(err);
   }
 };

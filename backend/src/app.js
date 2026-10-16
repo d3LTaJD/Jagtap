@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 
@@ -68,6 +68,7 @@ app.use('/api/work-orders', require('./routes/workOrderRoutes'));
 app.use('/api/bom', require('./routes/bomRoutes'));
 app.use('/api/purchase', require('./routes/purchaseRoutes'));
 app.use('/api/proforma-invoices', require('./routes/proformaInvoiceRoutes'));
+app.use('/api/order-acceptances', require('./routes/orderAcceptanceRoutes'));
 
 // Global Search
 const { protect } = require('./middleware/auth');

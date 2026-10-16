@@ -1,4 +1,4 @@
-const Drawing = require('../models/Drawing');
+﻿const Drawing = require('../models/Drawing');
 const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
 const Enquiry = require('../models/Enquiry');
@@ -168,7 +168,7 @@ exports.createDrawingRequestFromQuotation = async (quotationDoc) => {
     await notifyRoles({
       roles: ['DE', 'QCS', 'TA', 'SA'],
       type: 'DRAWING_REQUEST_CREATED',
-      title: `📐 Drawing Request Created: ${drawing.drawingId}`,
+      title: `📐 Drawing Request Created: ${drawing.drawingId}`,
       message: `Quotation ${quotation.quotationId} for ${quotation.customer?.companyName || 'Client'} approved by Director. Drawing request auto-generated for ${items.length} valve item(s).`,
       related_id: drawing._id
     });
@@ -323,7 +323,7 @@ exports.routeCustomerDrawingFromEmail = async ({
     await notifyRoles({
       roles: ['DE', 'QCS', 'TA', 'SA'],
       type: 'DRAWING_SUBMITTED_FOR_REVIEW',
-      title: `📥 Inbound Drawing ${targetDrawing.drawingId} (${revLabel}) Ready for Review`,
+      title: `📐¥ Inbound Drawing ${targetDrawing.drawingId} (${revLabel}) Ready for Review`,
       message: `Customer drawing uploaded with AI pre-filled checklist. Ready for TDS technical review.`,
       related_id: targetDrawing._id
     });
@@ -490,7 +490,17 @@ exports.enforceWorkOrderReleaseGate = async ({ workOrderId, user, releaseNotes =
 
   const drawing = workOrder.drawing;
 
-  // HARD SYSTEM GATE: Zero Override Rule
+  // HARD GATE 1: 10% Advance Gate
+  if (workOrder.isAdvanceReceived === false) {
+    const msg = 'Production Release Blocked: Mandatory 10% advance payment has not been verified for Work Order ' + workOrder.workOrderId + '. Please record the 10% advance receipt before releasing to the factory floor.';
+    const err = new Error(msg);
+    err.statusCode = 403;
+    err.gateBlocked = true;
+    err.advancePending = true;
+    throw err;
+  }
+
+  // HARD GATE 2: Drawing Approval Gate
   if (!drawing || drawing.status !== 'APPROVED' || !drawing.activeApprovedRevision) {
     const currentStatus = drawing ? drawing.status : 'NO_DRAWING_LINKED';
     const targetRevLabel = workOrder.approvedDrawingLabel || drawing?.revisions?.[drawing.revisions.length - 1]?.revisionLabel || 'Rev 00';

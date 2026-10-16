@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+﻿const mongoose = require('mongoose');
 
 const quotationItemSchema = new mongoose.Schema({
   itemNo: Number,
@@ -72,7 +72,9 @@ const revisionEntrySchema = new mongoose.Schema({
 });
 
 const quotationSchema = new mongoose.Schema({
-  quotationId: { type: String, unique: true }, // QT-YYYY-MM-NNNN
+  quotationId: { type: String, unique: true }, // PV/J/QTN/P-001/26-27
+  isProjectQuote: { type: Boolean, default: true },
+  quoteType: { type: String, enum: ['PROJECT', 'REGULAR'], default: 'PROJECT' },
   costSummary: { type: mongoose.Schema.Types.Mixed },
   
   attachments: [{ type: String }],
@@ -101,13 +103,17 @@ const quotationSchema = new mongoose.Schema({
       'REJECTED', 
       'SENT', 
       'REVISION_REQUESTED', 
-      'ACCEPTED', 
+      'ACCEPTED',
+      'PO_RECEIVED',
+      'ORDER_CONFIRMED', 
       'EXPIRED', 
       'Draft', 
       'Pending Technical Review', 
       'Pending Commercial Review', 
       'Sent', 
-      'Accepted', 
+      'ACCEPTED',
+      'PO_RECEIVED',
+      'ORDER_CONFIRMED', 
       'Negotiating', 
       'Revised', 
       'Expired'

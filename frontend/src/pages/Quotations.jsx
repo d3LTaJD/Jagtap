@@ -3,6 +3,7 @@ import { FileCheck, Filter, Plus, ChevronRight, CheckCircle2, Loader2, X, Trash2
 import api from '../api/client';
 import { useNavigate, Link } from 'react-router-dom';
 import AutocompleteSelect from '../components/AutocompleteSelect';
+import OrderAcceptanceModal from '../components/OrderAcceptanceModal';
 import { Can, useAbility } from '../context/AbilityContext';
 
 const QuoteStatusBadge = ({ status }) => {
@@ -41,10 +42,14 @@ const Quotations = () => {
   const [showNewModal, setShowNewModal] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [enquiriesForSelect, setEnquiriesForSelect] = useState([]);
+  const [selectedQuotationForOa, setSelectedQuotationForOa] = useState(null);
+  const [showOaModal, setShowOaModal] = useState(false);
   
   const [formData, setFormData] = useState({
     enquiry: '',
     customer: '',
+    isProjectQuote: true,
+    quoteType: 'PROJECT',
     scopeOfSupply: '',
     status: 'Draft',
     items: [{ description: '', quantity: 1, unitPrice: 0, lineTotalExclGST: 0 }]
@@ -181,7 +186,7 @@ const Quotations = () => {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${qtId}.pdf`);
+      link.setAttribute('download', `${(qtId || 'Quotation').replace(/\//g, '_')}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -339,6 +344,24 @@ const Quotations = () => {
                         <Can I="approve" a="Quotation">
                           {(qt.status === 'TECH_REVIEW' || qt.status === 'PENDING_APPROVAL') && <button onClick={(e) => handleUpdateStatus(e, qt._id, 'APPROVED')} className="text-emerald-600 font-bold hover:underline">Approve</button>}
                         </Can>
+                        {['APPROVED', 'Approved'].includes(qt.status) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedQuotationForOa(qt);
+                              setShowOaModal(true);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-all cursor-pointer"
+                            title="Step 3: Accept Order & Generate OA, 10% Advance PI, and Work Order"
+                          >
+                            <FileCheck className="w-3.5 h-3.5" /> Accept Order & Generate OA
+                          </button>
+                        )}
+                        {['ACCEPTED', 'Accepted'].includes(qt.status) && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-xs font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" /> OA Booked
+                          </span>
+                        )}
                         <button onClick={(e) => handleDownloadPdf(e, qt._id, qt.quotationId || 'QT')} className="text-slate-400 hover:text-blue-600 p-1 rounded transition-colors inline-block" title="Download PDF">
                           <Download className="w-5 h-5 transition-all" />
                         </button>
@@ -383,11 +406,64 @@ const Quotations = () => {
                         label: `${eq.enquiryId} - ${eq.senderCompany || eq.customer?.companyName || 'Individual Customer'} (${eq.productCategory || eq.coreFields?.productCategory || 'N/A'})`
                       }))}
                     value={formData.enquiry}
-                    onChange={v => setFormData({ ...formData, enquiry: v })}
+                    onChange={v => {
+                      const matched = enquiriesForSelect.find(eq => eq._id === v);
+                      const isProj = Boolean(matched?.projectName || (matched?.subject && matched.subject.toLowerCase().includes('project')));
+                      setFormData({
+                        ...formData,
+                        enquiry: v,
+                        isProjectQuote: isProj ? true : formData.isProjectQuote,
+                        quoteType: (isProj ? true : formData.isProjectQuote) ? 'PROJECT' : 'REGULAR'
+                      });
+                    }}
                     placeholder="-- Select an active Enquiry --"
                     required={true}
                     allowClear={false}
                   />
+                </div>
+
+                {/* Offer No. Classification Toggle (P vs non-P) */}
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Offer Numbering Scheme
+                    </label>
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
+                      {formData.isProjectQuote ? 'Format: PV/J/QTN/P-001/26-27' : 'Format: PV/J/QTN/001/26-27'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, isProjectQuote: true, quoteType: 'PROJECT' })}
+                      className={`p-2.5 rounded-lg border text-left text-xs transition-all ${
+                        formData.isProjectQuote
+                          ? 'border-brand-500 bg-white ring-2 ring-brand-500/20 font-bold text-brand-900 shadow-sm'
+                          : 'border-slate-200 bg-white/50 text-slate-600 hover:bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <span className="w-2 h-2 rounded-full bg-brand-500 inline-block"></span>
+                        Project Quote (P)
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">Includes 'P' in Offer No. (e.g. PV/J/QTN/P-001/26-27)</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, isProjectQuote: false, quoteType: 'REGULAR' })}
+                      className={`p-2.5 rounded-lg border text-left text-xs transition-all ${
+                        !formData.isProjectQuote
+                          ? 'border-brand-500 bg-white ring-2 ring-brand-500/20 font-bold text-brand-900 shadow-sm'
+                          : 'border-slate-200 bg-white/50 text-slate-600 hover:bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <span className="w-2 h-2 rounded-full bg-slate-400 inline-block"></span>
+                        Standard / Regular Quote
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">Without 'P' (e.g. PV/J/QTN/001/26-27)</p>
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -401,6 +477,21 @@ const Quotations = () => {
             </div>
           </div>
         </div>
+      )}
+      {showOaModal && selectedQuotationForOa && (
+        <OrderAcceptanceModal
+          quotation={selectedQuotationForOa}
+          isOpen={showOaModal}
+          onClose={() => {
+            setShowOaModal(false);
+            setSelectedQuotationForOa(null);
+          }}
+          onSuccess={() => {
+            setShowOaModal(false);
+            setSelectedQuotationForOa(null);
+            fetchQuotations();
+          }}
+        />
       )}
     </div>
   );

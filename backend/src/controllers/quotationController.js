@@ -14,11 +14,50 @@ exports.createQuotation = async (req, res, next) => {
     req.body.preparedBy = req.user._id;
     req.body.createdBy = req.body.createdBy || req.user._id;
     
-    const year = new Date().getFullYear();
-    const month = String(new Date().getMonth() + 1).padStart(2, '0');
-    const prefix = `QT-${year}-${month}-`;
-    const seq = await getNextSequenceValue(prefix);
-    req.body.quotationId = `${prefix}${String(seq).padStart(4, '0')}`;
+    // Calculate Indian Financial Year (FY: Apr-Mar, e.g. Oct 2026 -> 26-27)
+    const now = new Date();
+    const curMonth = now.getMonth() + 1; // 1-12
+    const curYear = now.getFullYear();
+    const startYr = curMonth >= 4 ? curYear : curYear - 1;
+    const fyStr = `${String(startYr).slice(-2)}-${String(startYr + 1).slice(-2)}`;
+
+    // Extract logged-in user's initial (e.g. 'J' for Jeet, 'S' for Shubh)
+    let userInitial = 'J';
+    if (req.user?.initials && req.user.initials.trim()) {
+      userInitial = req.user.initials.trim().toUpperCase();
+    } else if (req.user?.name || req.user?.displayName || req.user?.fullName) {
+      const rawName = (req.user.name || req.user.displayName || req.user.fullName || '').trim();
+      if (rawName) userInitial = rawName.charAt(0).toUpperCase();
+    }
+
+    // Determine if Project Quote ('P') or Regular/Standard Quote (without 'P')
+    let isProjectQuote = true; // default per client specification
+    if (req.body.isProjectQuote !== undefined) {
+      isProjectQuote = req.body.isProjectQuote === true || req.body.isProjectQuote === 'true' || req.body.isProjectQuote === 1;
+    } else if (req.body.quoteType !== undefined) {
+      isProjectQuote = req.body.quoteType === 'PROJECT';
+    } else if (req.body.enquiry) {
+      try {
+        const sourceEnq = await Enquiry.findById(req.body.enquiry).select('projectName subject').lean();
+        if (sourceEnq) {
+          const hasProject = Boolean(sourceEnq.projectName && sourceEnq.projectName.trim());
+          if (hasProject) isProjectQuote = true;
+        }
+      } catch (enqErr) {
+        console.warn('Could not check enquiry for project status:', enqErr.message);
+      }
+    }
+
+    // Counter sequence: QTN-P-26-27 or QTN-REG-26-27
+    const seqCounterKey = `QTN-${isProjectQuote ? 'P-' : 'REG-'}${fyStr}`;
+    const seq = await getNextSequenceValue(seqCounterKey);
+    const seqFormatted = isProjectQuote ? `P-${String(seq).padStart(3, '0')}` : String(seq).padStart(3, '0');
+
+    if (!req.body.quotationId) {
+      req.body.quotationId = `PV/${userInitial}/QTN/${seqFormatted}/${fyStr}`;
+    }
+    req.body.isProjectQuote = isProjectQuote;
+    req.body.quoteType = isProjectQuote ? 'PROJECT' : 'REGULAR';
 
     // Set standard defaults matching Offer Formates.xlsx
     const defaultManufacturerName = 'M/s. PETRO VALVES PVT LTD';
@@ -483,7 +522,7 @@ exports.downloadPDF = async (req, res, next) => {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Length': pdfBuffer.length,
-      'Content-Disposition': `attachment; filename="${quotation.quotationId || 'Quotation'}_${revStr}.pdf"`
+      'Content-Disposition': `attachment; filename="${(quotation.quotationId || 'Quotation').replace(/\//g, '_')}_${revStr}.pdf"`
     });
     res.end(pdfBuffer);
   } catch (err) {
@@ -513,7 +552,7 @@ exports.generatePdf = async (req, res, next) => {
     const now = new Date();
     const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    const fileName = `${quotation.quotationId}_${revLabel}_${dateStr}_${timeStr}.pdf`;
+    const fileName = `${(quotation.quotationId || 'Quotation').replace(/\//g, '_')}_${revLabel}_${dateStr}_${timeStr}.pdf`;
     const mimeType = 'application/pdf';
     
     const fileKey = await uploadFile(pdfBuffer, fileName, mimeType);
