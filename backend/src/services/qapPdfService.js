@@ -127,7 +127,7 @@ async function generateQapPdf(qap) {
       <table class="footer-table">
         <tr>
           <td style="width: 32%; text-align: left; font-size: 7pt; font-weight: bold;">
-            Format No.R/5.2/1 &nbsp;Rev01 Effective From 15-Sept-2022
+            ${qap.formatNo || 'Format No.R/5.2/1 &nbsp;Rev01 Effective From 15-Sept-2022'}
           </td>
           <td style="width: 20%; text-align: center; font-size: 7.5pt; font-weight: bold;">
             Prepared BY: ${qap.preparedByName || 'QC Engg.'}

@@ -12,7 +12,8 @@ router.route('/')
   .post(requirePermission('QAP', 'generateDraft'), generateQapFromQuotation);
 
 router.route('/:id')
-  .get(requirePermission('QAP', 'view'), getQap);
+  .get(requirePermission('QAP', 'view'), getQap)
+  .patch(requirePermission('QAP', 'editActivities'), updateQapStatus);
 
 router.route('/:id/pdf')
   .get(requirePermission('QAP', 'view'), downloadQapPdf);

@@ -1166,10 +1166,15 @@ exports.updateQapStatus = async (req, res, next) => {
     }
 
     // 4. Dynamic QAP header and matrix edit check
-    const allowedHeaderFields = ['qapNumber', 'revisionNo', 'qapDate', 'endUser', 'clientName', 'projectName', 'clientPoNo', 'clientPoDate', 'valveDetail', 'activities', 'documents', 'preparedByName', 'approvedByName'];
+    const allowedHeaderFields = ['qapNumber', 'revisionNo', 'qapDate', 'endUser', 'clientName', 'projectName', 'clientPoNo', 'clientPoDate', 'valveDetail', 'activities', 'documents', 'preparedByName', 'approvedByName', 'formatNo'];
     allowedHeaderFields.forEach(f => {
       if (req.body[f] !== undefined) {
-        updateData[f] = req.body[f];
+        if (f === 'valveDetail' && originalQap.valveDetail) {
+          const existingVd = originalQap.valveDetail.toObject ? originalQap.valveDetail.toObject() : originalQap.valveDetail;
+          updateData.valveDetail = { ...existingVd, ...req.body.valveDetail };
+        } else {
+          updateData[f] = req.body[f];
+        }
       }
     });
 
