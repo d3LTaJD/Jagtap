@@ -167,7 +167,11 @@ exports.generateQapFromQuotation = async (req, res, next) => {
     // Process each quotation item to build activities and checklist
     let isPipingValve = false;
 
-    quotation.items.forEach((item, index) => {
+    const item = quotation.items?.find(it => {
+      const d = (it.description || '').toLowerCase();
+      return d.includes('valve') || it.productCategory === 'Valves';
+    }) || quotation.items?.[0] || {};
+    {
       const qFields = item.dynamicFields || quotation.dynamicFields || {};
       const { classVal, sizeVal, isBallValve, isCheckValve, isGlobeValve } = parseItemSpecs(item, quotation);
       
@@ -1014,14 +1018,14 @@ exports.generateQapFromQuotation = async (req, res, next) => {
         inspectionPvpl: 'P/H',
         inspectionTpi: 'R'
       });
-    });
+    }
 
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
     const prefix = `QAP-${year}-${month}-`;
     const seq = await getNextSequenceValue(prefix);
 
-    const primaryItem = quotation.items?.[0] || {};
+    const primaryItem = item;
     const qFields = primaryItem.dynamicFields || quotation.dynamicFields || {};
     const { classVal, sizeVal, isBallValve, isCheckValve, isGlobeValve } = parseItemSpecs(primaryItem, quotation);
     const defaults = isCheckValve ? getCheckValveDefaults(sizeVal, classVal, qFields) :
