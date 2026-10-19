@@ -19,6 +19,7 @@ router.route('/')
 router.route('/:id')
   .get(requirePermission('Drawing', 'view'), drawingController.getDrawing);
 
+router.get('/:id/baseline-spec', requirePermission('Drawing', 'view'), drawingController.downloadBaselineSpecPdf);
 router.post('/:id/revisions', requirePermission('Drawing', 'edit'), upload.single('file'), drawingController.uploadRevision);
 router.patch('/:id/checklist', requirePermission('Drawing', 'edit'), drawingController.updateChecklist);
 router.post('/:id/approve', requirePermission('Drawing', 'approve'), drawingController.approveDrawing);

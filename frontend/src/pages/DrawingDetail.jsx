@@ -85,6 +85,17 @@ export default function DrawingDetail() {
     fetchDrawing();
   }, [id]);
 
+  
+  const getDownloadUrl = (url) => {
+    if (!url) return '#';
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+    if (url.startsWith('/api') && token) {
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}token=${encodeURIComponent(token)}`;
+    }
+    return url;
+  };
+
   const currentRevision = drawing?.revisions?.[selectedRevisionIdx];
 
   const handleRevisionSelect = (idx) => {
@@ -354,7 +365,7 @@ export default function DrawingDetail() {
 
         {currentRevision?.fileUrl && (
           <a
-            href={currentRevision.fileUrl}
+            href={getDownloadUrl(currentRevision.fileUrl)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:text-brand-800 px-3 py-1 bg-brand-50 rounded-xl transition-colors shrink-0"
@@ -573,7 +584,7 @@ export default function DrawingDetail() {
                       <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-xs text-slate-500">
                         <span>Submitted by: {rev.submittedBy?.name || 'Customer / Inbound Bot'}</span>
                         <a 
-                          href={rev.fileUrl} 
+                          href={getDownloadUrl(rev.fileUrl)} 
                           target="_blank" 
                           rel="noreferrer"
                           className="font-bold text-brand-600 hover:text-brand-800"
