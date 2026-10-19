@@ -1,4 +1,4 @@
-﻿const WorkOrder = require('../models/WorkOrder');
+const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
 const Drawing = require('../models/Drawing');
 const Customer = require('../models/Customer');
@@ -41,6 +41,31 @@ exports.getWorkOrders = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
+
+    // Auto-link drawings for any Work Orders missing explicit reference
+    for (const wo of workOrders) {
+      if (!wo.drawing && wo.quotation) {
+        const qId = wo.quotation._id || wo.quotation;
+        const matchedDrawing = await Drawing.findOne({ quotation: qId });
+        if (matchedDrawing) {
+          wo.drawing = matchedDrawing;
+          wo.isDrawingApproved = matchedDrawing.status === 'APPROVED' && Boolean(matchedDrawing.activeApprovedRevision);
+          wo.approvedDrawingRevision = matchedDrawing.activeApprovedRevision?.revisionNumber;
+          wo.approvedDrawingLabel = matchedDrawing.activeApprovedRevision?.revisionLabel || 'Rev 00';
+          await WorkOrder.updateOne(
+            { _id: wo._id },
+            {
+              $set: {
+                drawing: matchedDrawing._id,
+                isDrawingApproved: wo.isDrawingApproved,
+                approvedDrawingRevision: wo.approvedDrawingRevision,
+                approvedDrawingLabel: wo.approvedDrawingLabel
+              }
+            }
+          );
+        }
+      }
+    }
 
     res.status(200).json({
       status: 'success',

@@ -5,6 +5,7 @@ const CustomerProformaInvoice = require('../models/CustomerProformaInvoice');
 const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
 const Customer = require('../models/Customer');
+const Drawing = require('../models/Drawing');
 const { getNextSequenceValue } = require('../utils/counter');
 const { logActivity } = require('../utils/logger');
 const { notifyRoles } = require('../services/notificationService');
@@ -117,18 +118,25 @@ exports.createOrderAcceptanceFromPo = async (req, res, next) => {
     const advanceGst = Math.round(advanceAmount * (gstRate / 100));
     const advanceGrandTotal = advanceAmount + advanceGst;
 
+    // Check if an engineering drawing already exists for this quotation
+    const existingDrawing = await Drawing.findOne({ quotation: quotation._id });
+    const isDrawingApproved = existingDrawing?.status === 'APPROVED' && Boolean(existingDrawing?.activeApprovedRevision);
+
     // 1. Create Work Order in Stage 1
     const workOrder = await WorkOrder.create({
       workOrderId,
       quotation: quotation._id,
       customer: quotation.customer?._id || quotation.customer,
+      drawing: existingDrawing ? existingDrawing._id : undefined,
+      isDrawingApproved: Boolean(isDrawingApproved),
+      approvedDrawingRevision: isDrawingApproved ? existingDrawing.activeApprovedRevision?.revisionNumber : undefined,
+      approvedDrawingLabel: isDrawingApproved ? (existingDrawing.activeApprovedRevision?.revisionLabel || 'Rev 00') : undefined,
       customerPoNumber,
       customerPoDate: new Date(customerPoDate),
       customerDeliveryDate: new Date(customerDeliveryDate),
       stage: 'STAGE_1_PO_RECEIVED',
       status: 'AWAITING_ADVANCE_PAYMENT',
       isAdvanceReceived: false,
-      isDrawingApproved: false,
       isQapApproved: false,
       items: oaItems.map(it => ({
         itemNo: it.itemNo,

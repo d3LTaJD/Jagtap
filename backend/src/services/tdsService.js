@@ -1,4 +1,4 @@
-﻿const Drawing = require('../models/Drawing');
+const Drawing = require('../models/Drawing');
 const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
 const Enquiry = require('../models/Enquiry');
@@ -496,6 +496,32 @@ exports.approveDrawingRevision = async ({ drawingId, revisionNumber, user, comme
   await drawing.save();
 
   console.log(`[TDS Service] ✅ Drawing ${drawing.drawingId} (${targetRev.revisionLabel}) APPROVED by ${user.name || user.email}.`);
+
+  // Update matching Work Orders to unlock the production release gate
+  try {
+    const qId = drawing.quotation?._id || drawing.quotation;
+    const matchingWos = await WorkOrder.find({
+      $or: [
+        { drawing: drawing._id },
+        ...(qId ? [{ quotation: qId }] : [])
+      ]
+    });
+
+    for (const wo of matchingWos) {
+      wo.drawing = drawing._id;
+      wo.isDrawingApproved = true;
+      wo.approvedDrawingRevision = targetRev.revisionNumber;
+      wo.approvedDrawingLabel = targetRev.revisionLabel;
+      if (wo.isAdvanceReceived && ['AWAITING_GAD_QAP_APPROVAL', 'STAGE_2_ADVANCE_RECEIVED'].includes(wo.status)) {
+        wo.status = 'READY_FOR_RELEASE';
+        wo.stage = 'STAGE_3_GAD_QAP_APPROVED';
+      }
+      await wo.save();
+      console.log(`[TDS Service] Linked Drawing ${drawing.drawingId} to Work Order ${wo.workOrderId} (Status: ${wo.status}).`);
+    }
+  } catch (woLinkErr) {
+    console.warn('[TDS Service] Warning: Failed to update linked Work Orders on drawing approval:', woLinkErr.message);
+  }
 
   // Notify Sales and Production team
   await notifyRoles({
