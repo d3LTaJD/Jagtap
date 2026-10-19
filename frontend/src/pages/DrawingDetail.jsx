@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Loader2,
   FileCode2,
   ArrowLeft,
   Upload,
@@ -141,20 +142,21 @@ export default function DrawingDetail() {
   };
 
   const handleApproveDrawing = async () => {
-    if (!currentRevision) return;
+    const revNo = currentRevision ? currentRevision.revisionNumber : 0;
+    const revLabel = currentRevision?.revisionLabel || 'Rev 00';
     setActionLoading(true);
     try {
       await api.post(`/drawings/${id}/approve`, {
-        revisionNumber: currentRevision.revisionNumber,
+        revisionNumber: revNo,
         comments: approvalComments
       });
-      showToast(`Drawing approved (${currentRevision.revisionLabel})! Production Work Order gate is unlocked.`);
+      showToast(`Drawing approved (${revLabel})! Production Work Order gate is unlocked.`);
       setIsApproveModalOpen(false);
       setApprovalComments('');
       await fetchDrawing();
     } catch (err) {
       console.error('Failed to approve drawing:', err);
-      alert(err.response?.data?.message || 'Failed to approve drawing');
+      showToast(err.response?.data?.message || 'Failed to approve drawing', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -645,7 +647,7 @@ export default function DrawingDetail() {
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 animate-in zoom-in-95">
             <h3 className="text-lg font-black text-slate-900">Approve Technical Drawing</h3>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Approving revision <strong>{currentRevision?.revisionLabel}</strong> will freeze this version as the official technical baseline and <strong>unlock the production Work Order release gate</strong>.
+              Approving revision <strong>{currentRevision?.revisionLabel || 'Rev 00 (Baseline)'}</strong> will freeze this version as the official technical baseline and <strong>unlock the production Work Order release gate</strong>.
             </p>
 
             <div>
@@ -671,8 +673,9 @@ export default function DrawingDetail() {
                 type="button"
                 onClick={handleApproveDrawing}
                 disabled={actionLoading}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
               >
+                {actionLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Confirm Approval & Unlock Gate
               </button>
             </div>

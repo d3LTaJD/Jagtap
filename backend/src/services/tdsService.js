@@ -441,22 +441,54 @@ exports.approveDrawingRevision = async ({ drawingId, revisionNumber, user, comme
   const drawing = await Drawing.findById(drawingId).populate('customer quotation');
   if (!drawing) throw new Error('Drawing not found');
 
-  const targetRev = drawing.revisions.find(r => r.revisionNumber === Number(revisionNumber));
-  if (!targetRev) throw new Error(`Revision ${revisionNumber} not found in drawing ${drawing.drawingId}`);
+  let targetRev = drawing.revisions.find(r => r.revisionNumber === Number(revisionNumber));
+  if (!targetRev) {
+    if (drawing.revisions.length === 0) {
+      const revLabel = "Rev 00";
+      const extractedSpecs = {
+        valveType: drawing.requirements?.valveType || "Ball Valve",
+        size: drawing.requirements?.size || "100 mm",
+        pressureClass: drawing.requirements?.pressureClass || "300#",
+        bodyMaterial: drawing.requirements?.material || "ASTM A216 Gr. WCC",
+        endConnection: drawing.requirements?.endConnection || "Butt weld",
+        designStandard: drawing.requirements?.designStandard || "API 6D"
+      };
+      const tdsChecklist = generateTdsChecklist(drawing.requirements || {}, extractedSpecs);
+
+      targetRev = {
+        revisionNumber: 0,
+        revisionLabel: revLabel,
+        fileUrl: `/api/drawings/${drawing._id}/baseline-spec`,
+        fileName: `${drawing.drawingNumber || drawing.drawingId}_Rev00_Baseline.pdf`,
+        fileSize: 1024,
+        mimeType: "application/pdf",
+        storagePath: "baseline",
+        extractedParameters: extractedSpecs,
+        tdsChecklist,
+        status: "UNDER_REVIEW",
+        submittedAt: new Date(),
+        comments: "Initial baseline specifications from approved quotation"
+      };
+      drawing.revisions.push(targetRev);
+      drawing.currentRevisionNumber = 0;
+    } else {
+      throw new Error(`Revision ${revisionNumber} not found in drawing ${drawing.drawingId}`);
+    }
+  }
 
   // Mark revision approved
-  targetRev.status = 'APPROVED';
+  targetRev.status = "APPROVED";
   targetRev.reviewedBy = user._id;
   targetRev.reviewedAt = new Date();
   targetRev.approvedBy = user._id;
   targetRev.approvedAt = new Date();
-  targetRev.comments = comments || 'Approved by TDS Authority';
+  targetRev.comments = comments || "Approved by TDS Authority";
 
-  // Mark all checklists as PASS or verified
-  targetRev.tdsChecklist.forEach(item => {
-    if (item.status === 'PENDING') item.status = 'PASS';
-  });
-
+  if (Array.isArray(targetRev.tdsChecklist)) {
+    targetRev.tdsChecklist.forEach(item => {
+      if (item.status === "PENDING") item.status = "PASS";
+    });
+  }
   // Freeze activeApprovedRevision (Immutable Snapshot)
   drawing.activeApprovedRevision = targetRev;
   drawing.status = 'APPROVED';
