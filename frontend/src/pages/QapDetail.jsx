@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ClipboardCheck, Download, User as UserIcon, CheckCircle, CheckCircle2,
   Clock, AlertCircle, ArrowLeft, Loader2, PenTool, ShieldCheck,
-  Printer, Send, X, AlertTriangle, Stamp
+  Printer, Send, X, AlertTriangle, Stamp, Eye
 } from 'lucide-react';
 import api from '../api/client';
 import { getRoleCode, useAbility } from '../context/AbilityContext';
@@ -496,8 +496,10 @@ const QapDetail = () => {
                   <CheckCircle className="w-5 h-5 text-emerald-600 mt-0.5" />
                   <div>
                     <p className="text-sm font-bold text-emerald-900 uppercase tracking-tight">Prepared By</p>
-                    <p className="text-xs text-emerald-700 font-medium mt-1">Jagadeesh (Design Eng.)</p>
-                    <p className="text-[10px] text-emerald-600/60 mt-0.5">Jan 12, 2026</p>
+                    <p className="text-xs text-emerald-700 font-medium mt-1">{qap.preparedBy?.fullName || qap.preparedByName || 'QC Engg.'}</p>
+                    <p className="text-[10px] text-emerald-600/60 mt-0.5">
+                      {qap.createdAt ? new Date(qap.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Pending'}
+                    </p>
                   </div>
                </div>
 
