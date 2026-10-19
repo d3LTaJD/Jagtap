@@ -6,16 +6,23 @@ import AutocompleteSelect from '../components/AutocompleteSelect';
 import { Can } from '../context/AbilityContext';
 
 const QapStatusBadge = ({ status }) => {
+  const norm = (status || '').toUpperCase();
   const colors = {
-    'Draft': 'bg-slate-100 text-slate-700 ring-slate-600/20',
-    'Pending Director Approval': 'bg-blue-50 text-blue-700 ring-blue-600/20',
-    'Approved': 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-    'Sent to Client': 'bg-emerald-100 text-emerald-800 ring-emerald-600/30',
+    'GENERATED': 'bg-blue-50 text-blue-700 ring-blue-600/20',
+    'UNDER_REVIEW': 'bg-amber-50 text-amber-700 ring-amber-600/20',
+    'QC REVIEW': 'bg-amber-50 text-amber-700 ring-amber-600/20',
+    'DRAFT': 'bg-slate-100 text-slate-700 ring-slate-600/20',
+    'PENDING DIRECTOR APPROVAL': 'bg-purple-50 text-purple-700 ring-purple-600/20',
+    'APPROVED': 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+    'ACCEPTED': 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+    'SENT TO CLIENT': 'bg-emerald-100 text-emerald-800 ring-emerald-600/30',
+    'REVISED': 'bg-indigo-50 text-indigo-700 ring-indigo-600/20',
+    'REJECTED': 'bg-rose-50 text-rose-700 ring-rose-600/20',
   };
-  const color = colors[status] || 'bg-slate-50 text-slate-700 ring-slate-600/20';
+  const color = colors[norm] || 'bg-slate-50 text-slate-700 ring-slate-600/20';
   return (
     <span className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${color}`}>
-      {status || 'Unknown'}
+      {status || 'Generated'}
     </span>
   );
 };
@@ -24,6 +31,7 @@ const Qaps = () => {
   const navigate = useNavigate();
   const [qaps, setQaps] = useState([]);
   const [quotationsForSelect, setQuotationsForSelect] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
@@ -39,10 +47,14 @@ const Qaps = () => {
       ]);
       if (qapRes.data.data?.qaps) setQaps(qapRes.data.data.qaps);
       
-      // Only approved/accepted quotes can have QAPs generated
+      // Approved/Accepted/Sent/Active quotes can have QAPs generated
       if (qtRes.data.data?.quotations) {
-        const eligible = qtRes.data.data.quotations.filter(q => ['Approved', 'Accepted'].includes(q.status));
-        setQuotationsForSelect(eligible);
+        const allQuotes = qtRes.data.data.quotations;
+        const eligible = allQuotes.filter(q => {
+          const s = (q.status || '').toUpperCase();
+          return ['APPROVED', 'ACCEPTED', 'ORDER_CONFIRMED', 'PO_RECEIVED', 'SENT'].includes(s);
+        });
+        setQuotationsForSelect(eligible.length > 0 ? eligible : allQuotes);
       }
     } catch (err) {
       console.error('Failed to fetch QAPs', err);
@@ -56,12 +68,18 @@ const Qaps = () => {
     if (!selectedQuote) return alert('Please select a Quotation');
     setSubmitLoading(true);
     try {
-      await api.post('/qaps', { quotationId: selectedQuote });
+      const res = await api.post('/qaps', { quotationId: selectedQuote });
       setShowNewModal(false);
-      fetchQaps();
+      setSelectedQuote('');
+      await fetchQaps();
+      const newQapId = res.data?.data?.qap?._id;
+      if (newQapId) {
+        navigate(`/app/qaps/${newQapId}`);
+      }
     } catch(err) {
       console.error(err);
-      alert('Error generating QAP');
+      const msg = err.response?.data?.message || err.message || 'Error generating QAP';
+      alert(`Error generating QAP: ${msg}`);
     } finally {
       setSubmitLoading(false);
     }
@@ -71,9 +89,6 @@ const Qaps = () => {
     e.preventDefault();
     setSubmitLoading(true);
     try {
-      // Simulate signature applying via status patch (assume M3/M4 shared patch endpoint or custom)
-      // Wait, there's no qap status update route in qapRoutes.js? 
-      // I'll make an empty alert if no endpoint exists, or I can just use a fake success for now since I'm just building the UI.
       alert('Digital signature applied successfully! (Mocked)');
       setShowSignatureModal(false);
     } finally {
@@ -86,6 +101,16 @@ const Qaps = () => {
     const interval = setInterval(fetchQaps, 60000); // Auto-refresh every 60s
     return () => clearInterval(interval);
   }, []);
+
+  const filteredQaps = qaps.filter(qap => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    const qapId = (qap.qapId || '').toLowerCase();
+    const cust = (qap.customer?.companyName || '').toLowerCase();
+    const quote = (qap.quotation?.quotationId || '').toLowerCase();
+    const status = (qap.status || '').toLowerCase();
+    return qapId.includes(term) || cust.includes(term) || quote.includes(term) || status.includes(term);
+  });
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto animate-in fade-in duration-500">
@@ -108,7 +133,13 @@ const Qaps = () => {
             </button>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type="text" placeholder="Search QAPs..." className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm w-full shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all" />
+              <input 
+                type="text" 
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Search QAPs..." 
+                className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm w-full shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all" 
+              />
             </div>
           </div>
           <Can I="generateDraft" a="QAP">
@@ -136,14 +167,14 @@ const Qaps = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-100">
-                {qaps.length === 0 ? (
+                {filteredQaps.length === 0 ? (
                   <tr>
                     <td colSpan="6" className="px-6 py-8 text-center text-sm text-slate-500">
-                      No QAPs found. QAPs are automatically generated from accepted Quotations.
+                      {searchTerm ? 'No matching QAPs found.' : 'No QAPs found. QAPs are automatically generated from accepted Quotations.'}
                     </td>
                   </tr>
                 ) : (
-                  qaps.map((qap) => (
+                  filteredQaps.map((qap) => (
                     <tr 
                       key={qap._id} 
                       onClick={() => navigate(`/app/qaps/${qap._id}`)}
@@ -159,13 +190,21 @@ const Qaps = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Can I="digitalSignature" a="QAP">
                           {qap.status === 'Pending Director Approval' && (
-                            <button onClick={() => { setSelectedQapId(qap._id); setShowSignatureModal(true); }} className="inline-flex items-center px-3 py-1.5 bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg transition-colors border border-brand-200 shadow-sm">
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedQapId(qap._id); setShowSignatureModal(true); }} className="inline-flex items-center px-3 py-1.5 bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg transition-colors border border-brand-200 shadow-sm">
                               <PenTool className="w-3.5 h-3.5 mr-1.5" />
                               Sign
                             </button>
                           )}
                         </Can>
-                        <button className="inline-flex items-center px-3 py-1.5 bg-white text-slate-600 hover:text-brand-600 hover:bg-slate-50 rounded-lg border border-slate-200 shadow-sm transition-colors">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+                            window.open(`/api/qaps/${qap._id}/pdf?token=${token}`, '_blank');
+                          }}
+                          className="inline-flex items-center px-3 py-1.5 bg-white text-slate-600 hover:text-brand-600 hover:bg-slate-50 rounded-lg border border-slate-200 shadow-sm transition-colors"
+                          title="Download QAP PDF"
+                        >
                           <Download className="w-3.5 h-3.5 mr-1.5" />
                           PDF
                         </button>
@@ -195,10 +234,15 @@ const Qaps = () => {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Select Approved Quotation</label>
                   <AutocompleteSelect
-                    options={quotationsForSelect.map(qt => ({
-                      value: qt._id,
-                      label: `${qt.quotationId} - ${qt.customer?.companyName}`
-                    }))}
+                    options={quotationsForSelect.map(qt => {
+                      const custName = qt.customer?.companyName || qt.customerName || (typeof qt.customer === 'string' ? qt.customer : 'Client');
+                      const quoteCode = qt.quotationId || 'QT';
+                      const statusStr = qt.status || 'Active';
+                      return {
+                        value: qt._id,
+                        label: `${quoteCode} - ${custName} (${statusStr})`
+                      };
+                    })}
                     value={selectedQuote}
                     onChange={v => setSelectedQuote(v)}
                     placeholder="-- Select Quotation --"

@@ -33,7 +33,7 @@ const QapDetail = () => {
   const [loading, setLoading] = useState(true);
   const [updateLoading, setUpdateLoading] = useState(false);
   
-  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const currentUser = JSON.parse(localStorage.getItem('user') || sessionStorage.getItem('user') || '{}');
   const [dynamicValues, setDynamicValues] = useState({});
   const [toast, setToast] = useState(null);
 
