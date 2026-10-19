@@ -254,6 +254,25 @@ const QapDetail = () => {
   const handleSaveAll = async () => {
     setSaving(true);
     try {
+      // Clean dynamicValues of any internal Mongoose keys starting with $ or _
+      const cleanedDynamic = {};
+      if (dynamicValues && typeof dynamicValues === 'object') {
+        Object.keys(dynamicValues).forEach(k => {
+          if (!k.startsWith('$') && !k.startsWith('_')) {
+            cleanedDynamic[k] = dynamicValues[k];
+          }
+        });
+      }
+
+      // Clean activities of any temporary frontend id string like "temp-..."
+      const cleanedActivities = (formData.activities || []).map(act => {
+        const item = { ...act };
+        if (typeof item._id === 'string' && (item._id.startsWith('temp-') || item._id.startsWith('act-'))) {
+          delete item._id;
+        }
+        return item;
+      });
+
       const payload = {
         clientName: formData.clientName,
         endUser: formData.endUser,
@@ -264,11 +283,11 @@ const QapDetail = () => {
         revisionNo: formData.revisionNo,
         qapDate: formData.qapDate || null,
         valveDetail: formData.valveDetail,
-        activities: formData.activities,
+        activities: cleanedActivities,
         formatNo: formData.formatNo,
         preparedByName: formData.preparedByName,
         approvedByName: formData.approvedByName,
-        dynamicFields: dynamicValues
+        dynamicFields: cleanedDynamic
       };
 
       const res = await api.patch(`/qaps/${id}`, payload);

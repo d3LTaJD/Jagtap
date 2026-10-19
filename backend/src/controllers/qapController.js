@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Qap = require('../models/Qap');
 const Quotation = require('../models/Quotation');
 const { notifyRoles, sendEmail } = require('../services/notificationService');
@@ -1154,7 +1155,26 @@ exports.updateQapStatus = async (req, res, next) => {
       if (!hasPermission(req.user, 'QAP', 'editActivities')) {
         return res.status(403).json({ status: 'error', message: 'Not authorized to edit QAP activities or fields' });
       }
-      updateData.dynamicFields = { ...originalQap.dynamicFields, ...dynamicFields };
+      
+      let existing = {};
+      if (originalQap.dynamicFields) {
+        if (typeof originalQap.dynamicFields.toObject === 'function') {
+          existing = originalQap.dynamicFields.toObject();
+        } else if (originalQap.dynamicFields instanceof Map) {
+          existing = Object.fromEntries(originalQap.dynamicFields);
+        } else if (typeof originalQap.dynamicFields === 'object') {
+          existing = { ...originalQap.dynamicFields };
+        }
+      }
+
+      const merged = { ...existing, ...(dynamicFields || {}) };
+      const cleaned = {};
+      for (const [k, v] of Object.entries(merged)) {
+        if (!k.startsWith('$') && !k.startsWith('_')) {
+          cleaned[k] = v;
+        }
+      }
+      updateData.dynamicFields = cleaned;
     }
 
     // 3. Assignment check
@@ -1172,6 +1192,14 @@ exports.updateQapStatus = async (req, res, next) => {
         if (f === 'valveDetail' && originalQap.valveDetail) {
           const existingVd = originalQap.valveDetail.toObject ? originalQap.valveDetail.toObject() : originalQap.valveDetail;
           updateData.valveDetail = { ...existingVd, ...req.body.valveDetail };
+        } else if (f === 'activities' && Array.isArray(req.body.activities)) {
+          updateData.activities = req.body.activities.map(act => {
+            const cleanAct = { ...act };
+            if (cleanAct._id && !mongoose.Types.ObjectId.isValid(cleanAct._id)) {
+              delete cleanAct._id;
+            }
+            return cleanAct;
+          });
         } else {
           updateData[f] = req.body[f];
         }
