@@ -1278,3 +1278,101 @@ exports.downloadQapPdf = async (req, res, next) => {
     next(err);
   }
 };
+
+/**
+ * Send official Petro Valves QAP PDF to client via email
+ */
+exports.sendQapToClient = async (req, res, next) => {
+  try {
+    const qap = await Qap.findById(req.params.id)
+      .populate({
+        path: 'quotation',
+        populate: { path: 'customer' }
+      })
+      .populate('customer')
+      .populate('workOrder')
+      .populate('preparedBy', 'fullName name email')
+      .populate('reviewedBy', 'fullName name email')
+      .populate('approvedBy', 'fullName name email');
+
+    if (!qap) {
+      return res.status(404).json({ status: 'error', message: 'QAP not found' });
+    }
+
+    const { to, cc, subject, messageBody } = req.body;
+    const recipientEmail = to || qap.customer?.email || qap.quotation?.customer?.email;
+
+    if (!recipientEmail) {
+      return res.status(400).json({ status: 'error', message: 'Recipient email address (to) is required.' });
+    }
+
+    // Generate the official 4-page PDF buffer
+    const pdfBuffer = await generateQapPdf(qap);
+    const safeName = (qap.qapNumber || qap.qapId || 'QAP').replace(/[\/\\?%*:|"<>]/g, '_');
+    const emailSubject = subject || `Quality Assurance Plan (QAP) - ${qap.qapNumber || qap.qapId} - Petro Valves Pvt. Ltd.`;
+    const emailBody = messageBody || `Dear Customer,\n\nPlease find attached the official Quality Assurance Plan (QAP Format No. R/5.2/1 Rev01) for ${qap.valveDetail?.valveType || 'Valves'} under Project: ${qap.projectName || 'Process Valves'} and P.O. No.: ${qap.clientPoNo || 'Internal'}.\n\nPlease review and let us know if any further inspections or client-witness stages are required.\n\nBest regards,\nPetro Valves Pvt. Ltd.`;
+
+    const { sendEmail } = require('../services/emailService');
+
+    const emailOptions = {
+      to: recipientEmail,
+      cc: cc || undefined,
+      subject: emailSubject,
+      text: emailBody,
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 650px;">
+          <div style="border-bottom: 2px solid #0b3b60; padding-bottom: 12px; margin-bottom: 16px;">
+            <h2 style="color: #0b3b60; margin: 0; font-size: 18px;">Petro Valves Pvt. Ltd.</h2>
+            <p style="margin: 4px 0 0 0; font-size: 13px; color: #64748b; font-weight: bold;">Quality Assurance &amp; Inspection Department</p>
+          </div>
+          <div style="font-size: 14px; white-space: pre-line; margin-bottom: 20px;">
+            ${emailBody}
+          </div>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px;">
+            <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: bold; color: #334155;">QAP Reference Details:</p>
+            <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #475569;">
+              <li><strong>QAP No.:</strong> ${qap.qapNumber || qap.qapId} (Rev: ${qap.revisionNo || '00'})</li>
+              <li><strong>Client / End User:</strong> ${qap.clientName || ''} / ${qap.endUser || ''}</li>
+              <li><strong>P.O. Number:</strong> ${qap.clientPoNo || 'N/A'}</li>
+              <li><strong>Valve Spec:</strong> ${qap.valveDetail?.valveType || ''} ${qap.valveDetail?.size || ''} ${qap.valveDetail?.pressureClass || ''}</li>
+            </ul>
+          </div>
+          <div style="border-top: 1px solid #cbd5e1; padding-top: 12px; font-size: 11px; color: #94a3b8;">
+            Attachment: <strong>${safeName}.pdf</strong> (Official 4-Page Quality Assurance Plan)<br/>
+            This email was automatically dispatched by Petro Valves Workflow Automation.
+          </div>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: `${safeName}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf'
+        }
+      ]
+    };
+
+    await sendEmail(emailOptions);
+
+    // Update QAP document
+    qap.sentToClientDate = new Date();
+    await qap.save();
+
+    await ActivityLog.create({
+      user_id: req.user._id,
+      action: 'EMAIL_SENT',
+      module: 'QAP',
+      details: `Official QAP PDF (${qap.qapNumber || qap.qapId}) emailed to client at ${recipientEmail}`,
+      related_id: qap._id
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Official QAP PDF successfully emailed to ${recipientEmail}!`,
+      data: { qap }
+    });
+  } catch (err) {
+    console.error('[Send QAP Email Error]', err);
+    next(err);
+  }
+};

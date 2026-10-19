@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect, requirePermission } = require('../middleware/auth');
-const { generateQapFromQuotation, getQaps, getQap, updateQapStatus, downloadQapPdf } = require('../controllers/qapController');
+const { generateQapFromQuotation, getQaps, getQap, updateQapStatus, downloadQapPdf, sendQapToClient } = require('../controllers/qapController');
 
 const router = express.Router();
 
@@ -17,6 +17,12 @@ router.route('/:id')
 
 router.route('/:id/pdf')
   .get(requirePermission('QAP', 'view'), downloadQapPdf);
+
+router.route('/:id/send-email')
+  .post(requirePermission('QAP', 'sendToClient'), sendQapToClient);
+
+router.route('/:id/send-to-client')
+  .post(requirePermission('QAP', 'sendToClient'), sendQapToClient);
 
 // Edit/status uses controller-level enforcement for granular actions
 router.route('/:id/status')
