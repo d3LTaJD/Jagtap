@@ -1,4 +1,6 @@
-﻿const OrderAcceptance = require('../models/OrderAcceptance');
+const mongoose = require('mongoose');
+const User = require('../models/User');
+const OrderAcceptance = require('../models/OrderAcceptance');
 const CustomerProformaInvoice = require('../models/CustomerProformaInvoice');
 const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
@@ -303,10 +305,29 @@ exports.getOrderAcceptance = async (req, res, next) => {
  */
 exports.downloadOrderAcceptancePdf = async (req, res, next) => {
   try {
-    const orderAcceptance = await OrderAcceptance.findById(req.params.id)
-      .populate('customer')
-      .populate('workOrder')
-      .populate('preparedBy', 'fullName');
+    const rawId = req.params.id;
+    let orderAcceptance = null;
+
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      orderAcceptance = await OrderAcceptance.findById(rawId)
+        .populate('customer')
+        .populate('workOrder')
+        .populate('preparedBy', 'fullName');
+
+      if (!orderAcceptance) {
+        orderAcceptance = await OrderAcceptance.findOne({ workOrder: rawId })
+          .populate('customer')
+          .populate('workOrder')
+          .populate('preparedBy', 'fullName');
+      }
+    }
+
+    if (!orderAcceptance) {
+      orderAcceptance = await OrderAcceptance.findOne({ oaNumber: rawId })
+        .populate('customer')
+        .populate('workOrder')
+        .populate('preparedBy', 'fullName');
+    }
 
     if (!orderAcceptance) {
       return res.status(404).json({ status: 'fail', message: 'Order Acceptance not found.' });
@@ -315,7 +336,7 @@ exports.downloadOrderAcceptancePdf = async (req, res, next) => {
     const pdfBuffer = await generateOrderAcceptancePdf(orderAcceptance);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${orderAcceptance.oaNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="${orderAcceptance.oaNumber || 'Order_Acceptance'}.pdf"`);
     res.setHeader('Content-Length', pdfBuffer.length);
     res.end(pdfBuffer);
   } catch (err) {
@@ -328,10 +349,36 @@ exports.downloadOrderAcceptancePdf = async (req, res, next) => {
  */
 exports.downloadCustomerPiPdf = async (req, res, next) => {
   try {
-    const pi = await CustomerProformaInvoice.findById(req.params.id)
-      .populate('customer')
-      .populate('orderAcceptance')
-      .populate('workOrder');
+    const rawId = req.params.id;
+    let pi = null;
+
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      pi = await CustomerProformaInvoice.findById(rawId)
+        .populate('customer')
+        .populate('orderAcceptance')
+        .populate('workOrder');
+
+      if (!pi) {
+        pi = await CustomerProformaInvoice.findOne({ workOrder: rawId })
+          .populate('customer')
+          .populate('orderAcceptance')
+          .populate('workOrder');
+      }
+
+      if (!pi) {
+        pi = await CustomerProformaInvoice.findOne({ orderAcceptance: rawId })
+          .populate('customer')
+          .populate('orderAcceptance')
+          .populate('workOrder');
+      }
+    }
+
+    if (!pi) {
+      pi = await CustomerProformaInvoice.findOne({ piNumber: rawId })
+        .populate('customer')
+        .populate('orderAcceptance')
+        .populate('workOrder');
+    }
 
     if (!pi) {
       return res.status(404).json({ status: 'fail', message: 'Proforma Invoice not found.' });
@@ -340,7 +387,7 @@ exports.downloadCustomerPiPdf = async (req, res, next) => {
     const pdfBuffer = await generateCustomerProformaInvoicePdf(pi);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${pi.piNumber}_10_Percent_Advance.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="${pi.piNumber || 'Proforma_Invoice'}_10_Percent_Advance.pdf"`);
     res.setHeader('Content-Length', pdfBuffer.length);
     res.end(pdfBuffer);
   } catch (err) {

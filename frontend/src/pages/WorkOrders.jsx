@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Factory,
   Download,
@@ -58,9 +58,72 @@ export default function WorkOrders() {
   const [productionNotes, setProductionNotes] = useState('');
   const [previewItems, setPreviewItems] = useState([]);
 
+  const [downloadingOa, setDownloadingOa] = useState(false);
+  const [downloadingPi, setDownloadingPi] = useState(false);
+
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleDownloadOaPdf = async (wo) => {
+    const oaId = wo?.orderAcceptance?._id || wo?.orderAcceptance || wo?._id;
+    if (!oaId) {
+      showToast('Order Acceptance not found for this work order.', 'error');
+      return;
+    }
+    setDownloadingOa(true);
+    try {
+      showToast('Generating & downloading Order Acceptance PDF...', 'info');
+      const res = await api.get(`/order-acceptances/${oaId}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${wo?.orderAcceptance?.oaNumber || 'Order_Acceptance'}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showToast('Order Acceptance PDF downloaded successfully!');
+    } catch (err) {
+      console.error('OA PDF download error:', err);
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+      window.open(`/api/order-acceptances/${oaId}/pdf?token=${encodeURIComponent(token)}`, '_blank');
+      showToast(err.response?.data?.message || 'Failed to download OA PDF.', 'error');
+    } finally {
+      setDownloadingOa(false);
+    }
+  };
+
+  const handleDownloadPiPdf = async (wo) => {
+    const piId = wo?.customerProformaInvoice?._id || wo?.customerProformaInvoice || wo?._id;
+    if (!piId) {
+      showToast('10% Advance Proforma Invoice not found for this work order.', 'error');
+      return;
+    }
+    setDownloadingPi(true);
+    try {
+      showToast('Generating & downloading 10% Advance PI PDF...', 'info');
+      const res = await api.get(`/order-acceptances/proforma-invoice/${piId}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${wo?.customerProformaInvoice?.piNumber || 'Proforma_Invoice'}_10_Percent_Advance.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showToast('10% Advance Proforma Invoice PDF downloaded successfully!');
+    } catch (err) {
+      console.error('PI PDF download error:', err);
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+      window.open(`/api/order-acceptances/proforma-invoice/${piId}/pdf?token=${encodeURIComponent(token)}`, '_blank');
+      showToast(err.response?.data?.message || 'Failed to download PI PDF.', 'error');
+    } finally {
+      setDownloadingPi(false);
+    }
   };
 
   const fetchWorkOrders = async () => {
@@ -483,11 +546,67 @@ export default function WorkOrders() {
                       </td>
 
                       <td className="py-3.5 px-4">
+                        <div className="space-y-1">
+                          {wo.orderAcceptance ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono font-bold text-slate-800 text-xs">
+                                {wo.orderAcceptance.oaNumber || 'OA Issued'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadOaPdf(wo)}
+                                disabled={downloadingOa}
+                                title="Download Order Acceptance PDF"
+                                className="text-indigo-600 hover:text-indigo-800 p-0.5 rounded cursor-pointer transition-colors"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 font-medium italic text-[11px]">OA Pending</span>
+                          )}
+                          <div>
+                            {wo.isAdvanceReceived ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                ✓ 10% Advance Paid
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (wo.customerProformaInvoice) {
+                                    setAdvanceModalState({
+                                      isOpen: true,
+                                      proformaInvoice: wo.customerProformaInvoice,
+                                      workOrder: wo
+                                    });
+                                  } else {
+                                    showToast('No Proforma Invoice attached to record payment.', 'error');
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer transition-colors"
+                                title="Click to record 10% advance payment"
+                              >
+                                ⏳ Advance Pending
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4">
                         {wo.drawing ? (
                           <div>
                             <span className="font-mono font-bold text-slate-800">{wo.drawing.drawingId}</span>
                             <div className="mt-1">
-                              {isDrawingApproved ? (
+                              {isReleased || wo.frozenRevisionSnapshot ? (
+                                <div>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                    {wo.approvedDrawingLabel || wo.frozenRevisionSnapshot?.revisionLabel || 'Rev 00'} — LOCKED
+                                  </span>
+                                </div>
+                              ) : isDrawingApproved ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
                                   ✓ Drawing: {targetRevLabel} — APPROVED
                                 </span>
@@ -500,24 +619,6 @@ export default function WorkOrders() {
                           </div>
                         ) : (
                           <span className="text-rose-600 font-bold">No Drawing Linked</span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        {isReleased || wo.frozenRevisionSnapshot ? (
-                          <div>
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                              {wo.approvedDrawingLabel || wo.frozenRevisionSnapshot?.revisionLabel || 'Rev 00'}
-                            </span>
-                            <span className="block text-[10px] text-slate-500 mt-0.5 font-medium">Locked Snapshot</span>
-                          </div>
-                        ) : isDrawingApproved ? (
-                          <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                            Ready: {wo.drawing?.activeApprovedRevision?.revisionLabel || 'Rev 00'}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 font-medium italic">Pending Approval</span>
                         )}
                       </td>
 
@@ -613,24 +714,34 @@ export default function WorkOrders() {
 
               <div className="flex items-center gap-2 flex-wrap">
                 {selectedWo.orderAcceptance && (
-                  <a
-                    href={`/api/order-acceptances/${selectedWo.orderAcceptance._id || selectedWo.orderAcceptance}/pdf?token=${encodeURIComponent(localStorage.getItem('token') || '')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs border border-indigo-200 inline-flex items-center gap-1 cursor-pointer"
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadOaPdf(selectedWo)}
+                    disabled={downloadingOa}
+                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs border border-indigo-200 inline-flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
                   >
-                    <Download className="w-3.5 h-3.5" /> OA PDF
-                  </a>
+                    {downloadingOa ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    OA PDF
+                  </button>
                 )}
                 {selectedWo.customerProformaInvoice && (
-                  <a
-                    href={`/api/order-acceptances/proforma-invoice/${selectedWo.customerProformaInvoice._id || selectedWo.customerProformaInvoice}/pdf?token=${encodeURIComponent(localStorage.getItem('token') || '')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl text-xs border border-emerald-200 inline-flex items-center gap-1 cursor-pointer"
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPiPdf(selectedWo)}
+                    disabled={downloadingPi}
+                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl text-xs border border-emerald-200 inline-flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
                   >
-                    <Download className="w-3.5 h-3.5" /> 10% PI PDF
-                  </a>
+                    {downloadingPi ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    10% PI PDF
+                  </button>
                 )}
                 {selectedWo.isAdvanceReceived ? (
                   <span className="px-3 py-1 rounded-full font-black bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs">
