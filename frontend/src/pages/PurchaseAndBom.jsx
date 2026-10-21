@@ -25,7 +25,10 @@ import {
   ChevronRight,
   Tag,
   Scale,
-  DollarSign
+  DollarSign,
+  FileDown,
+  Download,
+  Printer
 } from 'lucide-react';
 import api from '../api/client';
 import { useAbility } from '../context/AbilityContext';
@@ -51,6 +54,8 @@ export default function PurchaseAndBom() {
   const [selectedPi, setSelectedPi] = useState(null);
   const [isGenerateBomModalOpen, setIsGenerateBomModalOpen] = useState(false);
   const [selectedWoForBom, setSelectedWoForBom] = useState('');
+  const [selectedItemIndex, setSelectedItemIndex] = useState('');
+  const [downloadingBomId, setDownloadingBomId] = useState(null);
   const [isCreatePoModalOpen, setIsCreatePoModalOpen] = useState(false);
   const [selectedPrsForPo, setSelectedPrsForPo] = useState([]);
   const [selectedVendorForPo, setSelectedVendorForPo] = useState('');
@@ -98,6 +103,31 @@ export default function PurchaseAndBom() {
     fetchAllData();
   }, [activeTab]);
 
+  // Handle Official Petro Valves BOM PDF Download
+  const handleDownloadBomPdf = async (bom) => {
+    if (!bom?._id) return;
+    try {
+      setDownloadingBomId(bom._id);
+      const res = await api.get(`/bom/${bom._id}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeName = (bom.bomNumber || bom.bomId || 'BOM').replace(/[/\\?%*:|"<>]/g, '_');
+      link.download = `${safeName}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      showToast('Official Petro Valves BOM PDF downloaded!');
+    } catch (err) {
+      console.error('Error downloading BOM PDF:', err);
+      alert(err.response?.data?.message || 'Failed to download BOM PDF');
+    } finally {
+      setDownloadingBomId(null);
+    }
+  };
+
   // Handle AI BOM Generation for Work Order
   const handleGenerateBom = async (e) => {
     e.preventDefault();
@@ -105,10 +135,16 @@ export default function PurchaseAndBom() {
 
     setActionLoading(true);
     try {
-      const res = await api.post(`/bom/generate/${selectedWoForBom}`);
-      showToast(`BOM ${res.data.data?.bom?.bomId} generated successfully!`);
+      const payload = {};
+      if (selectedItemIndex !== '') {
+        payload.itemIndex = parseInt(selectedItemIndex, 10);
+      }
+      const res = await api.post(`/bom/generate/${selectedWoForBom}`, payload);
+      const createdBom = res.data.data?.bom;
+      showToast(`BOM ${createdBom?.bomNumber || createdBom?.bomId} generated successfully with ${createdBom?.components?.length || 0} components!`);
       setIsGenerateBomModalOpen(false);
       setSelectedWoForBom('');
+      setSelectedItemIndex('');
       await fetchAllData();
     } catch (err) {
       console.error('Failed to generate BOM:', err);
@@ -577,7 +613,8 @@ export default function PurchaseAndBom() {
                   filteredBoms.map(b => (
                     <tr key={b._id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4 font-mono font-black text-slate-900 text-xs">
-                        {b.bomId}
+                        <div className="font-bold text-slate-900">{b.bomNumber || b.bomId}</div>
+                        {b.bomNumber && <div className="text-[10px] text-slate-400 font-sans font-normal">{b.bomId}</div>}
                       </td>
                       <td className="py-3.5 px-4">
                         <span className="font-mono font-bold text-indigo-600">{b.workOrder?.workOrderId || 'N/A'}</span>
@@ -585,10 +622,10 @@ export default function PurchaseAndBom() {
                       </td>
                       <td className="py-3.5 px-4">
                         <span className="font-bold text-slate-900">
-                          {b.valveSpecs?.size} {b.valveSpecs?.pressureClass} {b.valveSpecs?.valveType}
+                          {b.designSpecs?.sizeClassEndDetail || `${b.valveSpecs?.size} ${b.valveSpecs?.pressureClass} ${b.valveSpecs?.valveType}`}
                         </span>
                         <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                          Body: {b.valveSpecs?.bodyMoc} | Standard: {b.valveSpecs?.designStandard}
+                          {b.designSpecs?.typeDesignOpt || `Body: ${b.valveSpecs?.bodyMoc} | Standard: ${b.valveSpecs?.designStandard}`}
                         </p>
                       </td>
                       <td className="py-3.5 px-4">
@@ -612,6 +649,15 @@ export default function PurchaseAndBom() {
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-right space-x-2">
+                        <button
+                          onClick={() => handleDownloadBomPdf(b)}
+                          disabled={downloadingBomId === b._id}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs transition-colors cursor-pointer border border-rose-200"
+                          title="Download Official Petro Valves BOM PDF"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          {downloadingBomId === b._id ? 'Generating...' : 'PDF'}
+                        </button>
                         <button
                           onClick={() => setSelectedBom(b)}
                           className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs transition-colors cursor-pointer border border-slate-200"
@@ -983,68 +1029,187 @@ export default function PurchaseAndBom() {
 
       {/* BOM BREAKDOWN MODAL */}
       {selectedBom && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full p-6 space-y-4 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full p-6 space-y-5 animate-in zoom-in-95 max-h-[92vh] overflow-y-auto">
+            {/* Modal Header Actions */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-brand-50 rounded-2xl text-brand-600">
-                  <Layers className="w-6 h-6" />
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  Engineering Bill of Materials
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  WO: {selectedBom.workOrder?.workOrderId || 'N/A'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadBomPdf(selectedBom)}
+                  disabled={downloadingBomId === selectedBom._id}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4" />
+                  {downloadingBomId === selectedBom._id ? 'Generating PDF...' : 'Download Official BOM PDF'}
+                </button>
+                <button
+                  onClick={() => setSelectedBom(null)}
+                  className="p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Authentic Petro Valves BOM Header Box */}
+            <div className="border-2 border-slate-900 rounded-2xl p-4 bg-white">
+              <div className="text-center pb-3 border-b-2 border-slate-900">
+                <h2 className="text-xl font-black text-slate-900 tracking-wide uppercase">Petro Valves Pvt. Ltd.</h2>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 items-center border-b border-slate-900 py-2 px-1">
+                <div className="text-sm font-black text-slate-900 tracking-wider">
+                  BILL OF MATERIAL
                 </div>
-                <div>
-                  <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                    BOM Breakdown: {selectedBom.bomId}
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium">
-                    {selectedBom.valveSpecs?.size} {selectedBom.valveSpecs?.pressureClass} {selectedBom.valveSpecs?.valveType} ({selectedBom.valveSpecs?.bodyMoc})
-                  </p>
+                <div className="text-right text-xs font-mono font-bold text-slate-800 space-y-0.5">
+                  <div>NO.: <span className="font-black text-slate-900">{selectedBom.bomNumber || selectedBom.bomId}</span></div>
+                  <div>DATE: <span>{selectedBom.bomDate ? new Date(selectedBom.bomDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}</span></div>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedBom(null)}
-                className="p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
-                    <th className="py-2.5 px-3">#</th>
-                    <th className="py-2.5 px-3">Part Name</th>
-                    <th className="py-2.5 px-3">Category</th>
-                    <th className="py-2.5 px-3">Material Grade</th>
-                    <th className="py-2.5 px-3 text-center">Required Qty</th>
-                    <th className="py-2.5 px-3 text-center">In Stock</th>
-                    <th className="py-2.5 px-3 text-center">Shortage (PR)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {selectedBom.components?.map((c, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-500">{c.itemNo}</td>
-                      <td className="py-2.5 px-3 font-bold text-slate-800">{c.partName}</td>
-                      <td className="py-2.5 px-3 text-slate-600">{c.category}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-700">{c.materialGrade}</td>
-                      <td className="py-2.5 px-3 text-center font-bold text-slate-900">{c.totalRequiredQty} {c.unit}</td>
-                      <td className="py-2.5 px-3 text-center font-bold text-emerald-700">{c.inStockQty || 0}</td>
-                      <td className="py-2.5 px-3 text-center font-bold">
-                        {c.shortageQty > 0 ? (
-                          <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold">
-                            {c.shortageQty} {c.unit}
-                          </span>
-                        ) : (
-                          <span className="text-emerald-600">✓ In Stock</span>
-                        )}
-                      </td>
+              {/* Design Specification Box */}
+              <div className="mt-3 border border-slate-800 text-xs">
+                <div className="bg-slate-100 font-black px-3 py-1.5 border-b border-slate-800 text-slate-900 uppercase tracking-wider text-[11px]">
+                  Design Specification
+                </div>
+                <div className="divide-y divide-slate-300">
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Size, Class & End Detail</div>
+                    <div className="col-span-8 font-black text-slate-900 font-mono">
+                      {selectedBom.designSpecs?.sizeClassEndDetail || `${selectedBom.valveSpecs?.size} ${selectedBom.valveSpecs?.pressureClass} ${selectedBom.valveSpecs?.endConnection || ''}`}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Type / Design & Opt.</div>
+                    <div className="col-span-8 font-black text-slate-900">
+                      {selectedBom.designSpecs?.typeDesignOpt || `${selectedBom.valveSpecs?.valveType} Valve`}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Bore Detail</div>
+                    <div className="col-span-8 font-bold text-slate-800">
+                      {selectedBom.designSpecs?.boreDetail || 'FULL BORE'}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Quantity</div>
+                    <div className="col-span-8 font-bold text-slate-800">
+                      {selectedBom.designSpecs?.quantity || `${selectedBom.valveSpecs?.quantity || 1} NOS`}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Mfg. Standard</div>
+                    <div className="col-span-8 font-bold text-slate-800">
+                      {selectedBom.designSpecs?.mfgStandard || selectedBom.valveSpecs?.designStandard || 'API 6D-25th ED'}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Testing Standard</div>
+                    <div className="col-span-8 font-bold text-slate-800">
+                      {selectedBom.designSpecs?.testingStandard || selectedBom.valveSpecs?.testingStandard || 'API 6D-25th ED'}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 px-3 py-1.5">
+                    <div className="col-span-4 font-bold text-slate-700 uppercase text-[11px]">Weight</div>
+                    <div className="col-span-8 font-bold text-slate-800">
+                      {selectedBom.designSpecs?.weight || 'APPROX. 2508 KG.'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5-Column Engineering Components Table */}
+              <div className="mt-4 overflow-x-auto border border-slate-800">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-[11px] font-black uppercase text-slate-900 border-b border-slate-800">
+                      <th className="py-2 px-2.5 border-r border-slate-300 w-10 text-center">#</th>
+                      <th className="py-2 px-3 border-r border-slate-300">Part Name</th>
+                      <th className="py-2 px-3 border-r border-slate-300 font-mono">DRG No.</th>
+                      <th className="py-2 px-2.5 border-r border-slate-300 text-center w-16">REV. No.</th>
+                      <th className="py-2 px-2.5 border-r border-slate-300 text-center w-20">No. of QTY.</th>
+                      <th className="py-2 px-3 border-r border-slate-300">Remark / Alternative ID</th>
+                      <th className="py-2 px-3 text-center w-36">Stock / Shortage</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {selectedBom.components?.map((c, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="py-1.5 px-2.5 text-center font-mono text-[11px] text-slate-500 border-r border-slate-200">
+                          {c.itemNo}
+                        </td>
+                        <td className="py-1.5 px-3 border-r border-slate-200 font-semibold text-slate-900">
+                          <div className="flex items-center gap-1.5">
+                            <span>{c.rawPartName || c.partName}</span>
+                            {c.isCritical && (
+                              <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1 py-0.2 rounded border border-rose-200" title="Critical Part">
+                                * Crit
+                              </span>
+                            )}
+                            {c.isPressureContaining && (
+                              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-200" title="Pressure Containing">
+                                • Press. Cont.
+                              </span>
+                            )}
+                            {c.isPressureControlling && (
+                              <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1 py-0.2 rounded border border-purple-200" title="Pressure Controlling">
+                                ◊ Press. Ctrl.
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-700">
+                          {c.drgNo || '-'}
+                        </td>
+                        <td className="py-1.5 px-2.5 text-center font-mono text-[11px] text-slate-700 border-r border-slate-200">
+                          {c.revNo || '01'}
+                        </td>
+                        <td className="py-1.5 px-2.5 text-center font-bold text-slate-900 border-r border-slate-200">
+                          {c.qtyPerValve || c.totalRequiredQty}
+                        </td>
+                        <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600">
+                          {c.remark || '-'}
+                        </td>
+                        <td className="py-1.5 px-3 text-center">
+                          {c.shortageQty > 0 ? (
+                            <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold text-[11px]">
+                              Short: {c.shortageQty} {c.unit}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-700 font-semibold text-[11px]">✓ In Stock ({c.inStockQty || 0})</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Petro Valves Footer Notes */}
+              <div className="mt-3 p-3 bg-slate-50 border border-slate-300 rounded-lg text-[11px] text-slate-700 space-y-1">
+                <div className="font-bold text-slate-900 uppercase">General Notes:</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div>* DENOTES CRITICAL PART</div>
+                  <div>• DENOTES PRESSURE CONTAINING PART</div>
+                  <div>◊ DENOTES PRESSURE CONTROLLING PART</div>
+                </div>
+                <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-200 mt-1">
+                  1. ALL DIMENSIONS ARE IN MM UNLESS OTHERWISE SPECIFIED. 2. MATERIAL SPECIFICATION SHALL BE STRICTLY AS PER APPROVED GAD & QAP.
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+            {/* Modal Bottom Action Bar */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setSelectedBom(null)}
@@ -1052,16 +1217,27 @@ export default function PurchaseAndBom() {
               >
                 Close
               </button>
-              {selectedBom.status !== 'PR_GENERATED' && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleConfirmBom(selectedBom._id)}
-                  disabled={actionLoading}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer"
+                  onClick={() => handleDownloadBomPdf(selectedBom)}
+                  disabled={downloadingBomId === selectedBom._id}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer"
                 >
-                  Confirm BOM & Reserve Stock
+                  <FileDown className="w-4 h-4" />
+                  {downloadingBomId === selectedBom._id ? 'Generating...' : 'Download Official PDF'}
                 </button>
-              )}
+                {selectedBom.status !== 'PR_GENERATED' && (
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmBom(selectedBom._id)}
+                    disabled={actionLoading}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer"
+                  >
+                    Confirm BOM & Reserve Stock
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1270,7 +1446,10 @@ export default function PurchaseAndBom() {
                 <select
                   required
                   value={selectedWoForBom}
-                  onChange={(e) => setSelectedWoForBom(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedWoForBom(e.target.value);
+                    setSelectedItemIndex('');
+                  }}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
                 >
                   <option value="">-- Choose Work Order --</option>
@@ -1282,17 +1461,46 @@ export default function PurchaseAndBom() {
                 </select>
               </div>
 
+              {/* Optional Valve Line Item Selection if Work Order has multiple items */}
+              {(() => {
+                const curWo = workOrders.find(w => w._id === selectedWoForBom);
+                if (curWo && curWo.items && curWo.items.length > 1) {
+                  return (
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Select Valve Line Item</label>
+                      <select
+                        value={selectedItemIndex}
+                        onChange={(e) => setSelectedItemIndex(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                      >
+                        <option value="">Item #1 (Default: {curWo.items[0]?.description || 'Primary Valve'})</option>
+                        {curWo.items.map((it, idx) => (
+                          <option key={idx} value={idx}>
+                            Item #{it.itemNo || idx + 1}: {it.description || `${it.size} ${it.pressureClass} ${it.valveType}`} ({it.quantity || 1} {it.unit || 'NOS'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               <div className="p-3 bg-brand-50 rounded-xl border border-brand-100 text-xs text-brand-900">
-                <p className="font-bold">✨ Deterministic AI Engine</p>
+                <p className="font-bold">✨ Petro Valves Engineering BOM Engine</p>
                 <p className="text-[11px] text-brand-700 mt-0.5">
-                  Applies standard valve component mapping (Body, Bonnet, Wedge, Stem, Seat, Fasteners, Gaskets) & computes warehouse stock shortages automatically.
+                  Generates authentic 56-part drawing bill of materials (Body, Side P/C, Ball, Bonnet, Trunnion, Seat Rings, Fasteners, Gaskets, O-Rings, Hardware) matching Petro Valves engineering standards & computes warehouse stock shortages automatically.
                 </p>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsGenerateBomModalOpen(false)}
+                  onClick={() => {
+                    setIsGenerateBomModalOpen(false);
+                    setSelectedWoForBom('');
+                    setSelectedItemIndex('');
+                  }}
                   className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold"
                 >
                   Cancel
@@ -1302,7 +1510,7 @@ export default function PurchaseAndBom() {
                   disabled={actionLoading}
                   className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-black shadow-md"
                 >
-                  Generate AI BOM
+                  {actionLoading ? 'Generating BOM...' : 'Generate Official BOM'}
                 </button>
               </div>
             </form>

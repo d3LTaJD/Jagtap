@@ -5,6 +5,7 @@ const { protect, requirePermission } = require('../middleware/auth');
 
 // List & view BOMs
 router.get('/', protect, requirePermission('BOM', 'view'), bomController.getBoms);
+router.get('/:id/pdf', protect, bomController.downloadBomPdf);
 router.get('/:id', protect, requirePermission('BOM', 'view'), bomController.getBom);
 
 // Auto-generate AI BOM from Work Order

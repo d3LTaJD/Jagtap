@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const BillOfMaterials = require('../models/BillOfMaterials');
 const WorkOrder = require('../models/WorkOrder');
 const Quotation = require('../models/Quotation');
@@ -7,6 +8,7 @@ const PurchaseRequisition = require('../models/PurchaseRequisition');
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
 const aiBomService = require('../services/aiBomService');
+const { generateBomPdf } = require('../services/bomPdfService');
 const { logActivity } = require('../utils/logger');
 
 /**
@@ -27,14 +29,16 @@ exports.getBoms = async (req, res, next) => {
       const regex = new RegExp(search, 'i');
       query.$or = [
         { bomId: regex },
+        { bomNumber: regex },
         { 'valveSpecs.valveType': regex },
-        { 'valveSpecs.size': regex }
+        { 'valveSpecs.size': regex },
+        { 'designSpecs.sizeClassEndDetail': regex }
       ];
     }
 
     const total = await BillOfMaterials.countDocuments(query);
     const boms = await BillOfMaterials.find(query)
-      .populate('workOrder', 'workOrderId status targetDeliveryDate')
+      .populate('workOrder', 'workOrderId status targetDeliveryDate items')
       .populate('customer', 'companyName customerId')
       .populate('quotation', 'quotationId grandTotal')
       .populate('drawing', 'drawingId drawingNumber status')
@@ -85,8 +89,11 @@ exports.getBom = async (req, res, next) => {
 exports.generateBomForWorkOrder = async (req, res, next) => {
   try {
     const { workOrderId } = req.params;
+    const { itemIndex = 0 } = { ...req.query, ...req.body };
+
     const bom = await aiBomService.generateAiBomForWorkOrder({
       workOrderId,
+      itemIndex: Number(itemIndex) || 0,
       user: req.user
     });
 
@@ -97,7 +104,7 @@ exports.generateBomForWorkOrder = async (req, res, next) => {
         module: 'BOM',
         resourceId: bom._id,
         resourceName: bom.bomId,
-        details: `AI BOM generated: ${bom.bomId} for Work Order ${workOrderId}`
+        details: `AI BOM generated: ${bom.bomId} (${bom.bomNumber || 'Petro Valves BOM'}) for Work Order ${workOrderId}`
       });
     }
 
@@ -106,6 +113,49 @@ exports.generateBomForWorkOrder = async (req, res, next) => {
       message: `Bill of Materials ${bom.bomId} generated successfully.`,
       data: { bom }
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Download official Petro Valves Bill of Material PDF
+ */
+exports.downloadBomPdf = async (req, res, next) => {
+  try {
+    const rawId = req.params.id;
+    let bom = null;
+
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      bom = await BillOfMaterials.findById(rawId)
+        .populate('workOrder')
+        .populate('customer')
+        .populate('quotation')
+        .populate('drawing');
+    }
+    if (!bom) {
+      bom = await BillOfMaterials.findOne({
+        $or: [
+          { bomId: rawId },
+          { bomNumber: rawId }
+        ]
+      })
+      .populate('workOrder')
+      .populate('customer')
+      .populate('quotation')
+      .populate('drawing');
+    }
+
+    if (!bom) {
+      return res.status(404).json({ status: 'fail', message: 'Bill of Materials not found' });
+    }
+
+    const pdfBuffer = await generateBomPdf(bom);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${bom.bomId || 'Bill_of_Material'}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.end(pdfBuffer);
   } catch (err) {
     next(err);
   }
