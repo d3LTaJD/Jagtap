@@ -591,7 +591,7 @@ export default function PurchaseAndBom() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full min-w-[850px] text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
                   <th className="py-3 px-4">BOM Number</th>
@@ -704,7 +704,7 @@ export default function PurchaseAndBom() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full min-w-[750px] text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
                       <th className="py-3 px-4">PO Number</th>
@@ -786,7 +786,7 @@ export default function PurchaseAndBom() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full min-w-[700px] text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
                       <th className="py-3 px-4">PR Number</th>
@@ -864,7 +864,7 @@ export default function PurchaseAndBom() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full min-w-[800px] text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
                   <th className="py-3 px-4">Invoice Reference</th>
@@ -968,7 +968,7 @@ export default function PurchaseAndBom() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full min-w-[800px] text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-[11px] font-black uppercase text-slate-500 border-b border-slate-200">
                   <th className="py-3 px-4">PO & HIT Number</th>
